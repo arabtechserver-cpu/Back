@@ -233,11 +233,15 @@ router.post('/login', async (req, res) => {
 
     // 3. Send via Gmail/HTML if email exists
     if (customer.email) {
-      await emailService.sendCustomerAuthOtpEmail(customer.email, {
-        code,
-        username: customer.username,
-        actionLabel: 'تأكيد تسجيل الدخول لحسابك'
-      });
+      try {
+        await emailService.sendCustomerAuthOtpEmail(customer.email, {
+          code,
+          username: customer.username,
+          actionLabel: 'تأكيد تسجيل الدخول لحسابك'
+        });
+      } catch (emailErr) {
+        console.error(`[Customer Auth OTP] Email send FAILED to ${customer.email}:`, emailErr.message);
+      }
     }
 
     return res.status(200).json({
@@ -982,11 +986,16 @@ router.post('/request-otp', customerAuth, async (req, res) => {
       }
     } else {
       if (!customer.email) return res.status(400).json({ message: 'لا يوجد بريد إلكتروني مرتبط بحسابك.' });
-      await emailService.sendCustomerAuthOtpEmail(customer.email, {
-        code,
-        username: customer.username,
-        actionLabel: 'تغيير كلمة المرور الخاصة بك'
-      });
+      try {
+        await emailService.sendCustomerAuthOtpEmail(customer.email, {
+          code,
+          username: customer.username,
+          actionLabel: 'تغيير كلمة المرور الخاصة بك'
+        });
+      } catch (emailErr) {
+        console.error(`[Change Password OTP] Email send FAILED to ${customer.email}:`, emailErr.message);
+        return res.status(500).json({ message: 'فشل إرسال الكود إلى بريدك الإلكتروني. تأكد من إعدادات البريد أو اتصل بالإدارة.' });
+      }
     }
 
     return res.json({ message: 'تم الإرسال بنجاح' });
