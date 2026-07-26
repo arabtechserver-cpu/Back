@@ -651,6 +651,8 @@ async function createTables() {
       ALTER TABLE services ADD COLUMN IF NOT EXISTS api_source VARCHAR(100);
       ALTER TABLE services ADD COLUMN IF NOT EXISTS api_price NUMERIC(12,2) DEFAULT 0;
       ALTER TABLE services ADD COLUMN IF NOT EXISTS show_in_menu BOOLEAN DEFAULT false;
+      ALTER TABLE services ADD COLUMN IF NOT EXISTS is_bundle BOOLEAN DEFAULT false;
+      ALTER TABLE services ADD COLUMN IF NOT EXISTS bundle_services TEXT DEFAULT '[]';
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS quantity INT DEFAULT 1;
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS receipt_image TEXT DEFAULT '';
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS transfer_amount NUMERIC(12,2) DEFAULT 0;

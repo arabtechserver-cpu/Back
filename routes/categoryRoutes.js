@@ -238,26 +238,14 @@ router.post('/merge', authMiddleware, deleteOtpAuth, async (req, res) => {
         try {
           const db = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
           
-          // Update services
-          if (db.services) {
-            db.services = db.services.map(s => {
-              if (sourceIds.includes(Number(s.category_id))) {
-                return { ...s, category_id: Number(targetId) };
-              }
-              return s;
-            });
-          }
-          
-          // Update subcategories
+          // Group categories
           if (db.categories) {
             db.categories = db.categories.map(c => {
-              if (sourceIds.includes(Number(c.parent_id))) {
+              if (sourceIds.includes(Number(c.id))) {
                 return { ...c, parent_id: Number(targetId) };
               }
               return c;
             });
-            // Delete source categories
-            db.categories = db.categories.filter(c => !sourceIds.includes(Number(c.id)));
           }
 
           fs.writeFileSync(dbPath, JSON.stringify(db, null, 2), 'utf8');
@@ -266,18 +254,10 @@ router.post('/merge', authMiddleware, deleteOtpAuth, async (req, res) => {
         }
       }
     } else {
-      // 1. Update services to new category
       const placeholders = sourceIds.map(() => '?').join(',');
-      await runQuery(`UPDATE services SET category_id = ? WHERE category_id IN (${placeholders})`, [targetId, ...sourceIds]);
-      
-      // 2. Update subcategories to new parent
-      await runQuery(`UPDATE categories SET parent_id = ? WHERE parent_id IN (${placeholders})`, [targetId, ...sourceIds]);
-
-      // 3. Delete source categories
-      await runQuery(`DELETE FROM categories WHERE id IN (${placeholders})`, [...sourceIds]);
+      await runQuery(`UPDATE categories SET parent_id = ? WHERE id IN (${placeholders})`, [targetId, ...sourceIds]);
     }
-
-    res.json({ message: 'تم دمج الأقسام بنجاح.' });
+    res.json({ message: 'تم تجميع الأقسام بنجاح.' });
   } catch (error) {
     console.error('Merge categories error:', error);
     res.status(500).json({ message: 'حدث خطأ أثناء دمج الأقسام.' });

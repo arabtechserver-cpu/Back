@@ -1,0 +1,1 @@
+const dhru = require('./services/dhruClient'); dhru.callDhruApi('https://gsmserver24.com/api/index.php', 'Hassen1963', '4ZZ-46R-TSF-PRJ-HPI-M88-IO9-TMW', 'accountinfo').then(console.log).catch(console.error);

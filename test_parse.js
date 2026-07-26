@@ -1,0 +1,1 @@
+const fs = require('fs'); const data = JSON.parse(fs.readFileSync('imeiservicelist2.json')); const dhru = require('./services/dhruClient.js'); const result = dhru.parseDhruServices(data, 'imei'); console.log(result.length, result.slice(0, 2));

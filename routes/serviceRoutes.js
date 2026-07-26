@@ -385,13 +385,52 @@ router.get('/:id', async (req, res) => {
       }));
     }
 
+    let bundleServicesData = [];
+    if (service.is_bundle) {
+      let bIds = safeParseJson(service.bundle_services);
+      if (Array.isArray(bIds) && bIds.length > 0) {
+        const placeholders = bIds.map(() => '?').join(',');
+        const bRows = await allQuery(`
+          SELECT s.*, c.currency as category_currency, c.fields as category_fields, c.fields_title as category_fields_title
+          FROM services s
+          LEFT JOIN categories c ON s.category_id = c.id
+          WHERE s.id IN (${placeholders})
+        `, bIds) || [];
+        
+        bundleServicesData = bRows.map(bs => {
+          let bPrice = parseFloat(bs.price) || 0;
+          let bPricePerThousand = parseFloat(bs.price_per_thousand) || 0;
+          let bPackages = safeParseJson(bs.packages);
+          
+          if (globalMarkup !== 0) {
+            bPrice = parseFloat((bPrice * (1 + globalMarkup / 100)).toFixed(2));
+            bPricePerThousand = parseFloat((bPricePerThousand * (1 + globalMarkup / 100)).toFixed(2));
+            bPackages = bPackages.map(pkg => ({
+              ...pkg,
+              price: parseFloat(((pkg.price ?? 0) * (1 + globalMarkup / 100)).toFixed(2)),
+              usd_price: (pkg.usd_price != null) ? parseFloat((pkg.usd_price * (1 + globalMarkup / 100)).toFixed(2)) : pkg.usd_price
+            }));
+          }
+          return {
+            ...bs,
+            price: bPrice,
+            price_per_thousand: bPricePerThousand,
+            packages: bPackages,
+            fields: safeParseJson(bs.fields),
+            category_fields: safeParseJson(bs.category_fields)
+          };
+        });
+      }
+    }
+
     let formattedServiceArray = [{
       ...service,
       price,
       price_per_thousand: pricePerThousand,
       packages: servicePackages,
       fields: safeParseJson(service.fields),
-      category_fields: safeParseJson(service.category_fields)
+      category_fields: safeParseJson(service.category_fields),
+      bundle_services_data: bundleServicesData
     }];
 
     // Apply customer-specific discounts if logged in
@@ -431,7 +470,7 @@ function removeDuplicateFields(fields) {
 
 // Add new service (Admin Protected)
 router.post('/', authMiddleware, async (req, res) => {
-  const { category_id, name, description, price, image, packages, fields, price_type, price_per_thousand, fields_title, download_link, download_link_title, is_popular, show_in_menu } = req.body;
+  const { category_id, name, description, price, image, packages, fields, price_type, price_per_thousand, fields_title, download_link, download_link_title, is_popular, show_in_menu, is_bundle, bundle_services } = req.body;
 
   if (!category_id || !name || !name.trim()) {
     return res.status(400).json({ message: 'حقول معرف القسم واسم الخدمة مطلوبة.' });
@@ -442,6 +481,7 @@ router.post('/', authMiddleware, async (req, res) => {
     const savedImagePath = saveImage(image);
     const finalImage = savedImagePath || 'default';
     const packagesStr = typeof packages === 'string' ? packages : JSON.stringify(packages || []);
+    const bundleServicesStr = typeof bundle_services === 'string' ? bundle_services : JSON.stringify(bundle_services || []);
     
     const parsedFields = safeParseJson(fields);
     const cleanedFields = removeDuplicateFields(parsedFields);
@@ -449,10 +489,11 @@ router.post('/', authMiddleware, async (req, res) => {
     
     const popularFlag = is_popular === true || is_popular === 'true';
     const menuFlag = show_in_menu === true || show_in_menu === 'true';
+    const bundleFlag = is_bundle === true || is_bundle === 'true';
 
     const result = await runQuery(
-      'INSERT INTO services (category_id, name, description, price, image, packages, fields, price_type, price_per_thousand, fields_title, download_link, download_link_title, is_popular, show_in_menu) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [category_id, finalName, description || '', price || 0.0, finalImage, packagesStr, fieldsStr, price_type || 'fixed', price_per_thousand || 0.0, fields_title || '', download_link || '', download_link_title || '', popularFlag, menuFlag]
+      'INSERT INTO services (category_id, name, description, price, image, packages, fields, price_type, price_per_thousand, fields_title, download_link, download_link_title, is_popular, show_in_menu, is_bundle, bundle_services) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [category_id, finalName, description || '', price || 0.0, finalImage, packagesStr, fieldsStr, price_type || 'fixed', price_per_thousand || 0.0, fields_title || '', download_link || '', download_link_title || '', popularFlag, menuFlag, bundleFlag, bundleServicesStr]
     );
 
     res.status(201).json({
@@ -471,7 +512,9 @@ router.post('/', authMiddleware, async (req, res) => {
       download_link: download_link || '',
       download_link_title: download_link_title || '',
       is_popular: popularFlag,
-      show_in_menu: menuFlag
+      show_in_menu: menuFlag,
+      is_bundle: bundleFlag,
+      bundle_services: safeParseJson(bundleServicesStr)
     });
   } catch (error) {
     console.error('Add service error:', error);
@@ -569,7 +612,7 @@ router.patch('/bulk/fields-by-category', authMiddleware, async (req, res) => {
 // Update service (Admin Protected)
 router.put('/:id', authMiddleware, async (req, res) => {
   const { id } = req.params;
-  const { category_id, name, description, price, image, packages, fields, price_type, price_per_thousand, fields_title, download_link, download_link_title, is_popular, show_in_menu } = req.body;
+  const { category_id, name, description, price, image, packages, fields, price_type, price_per_thousand, fields_title, download_link, download_link_title, is_popular, show_in_menu, is_bundle, bundle_services } = req.body;
 
   if (!category_id || !name || !name.trim()) {
     return res.status(400).json({ message: 'حقول معرف القسم واسم الخدمة مطلوبة للتحديث.' });
@@ -579,6 +622,7 @@ router.put('/:id', authMiddleware, async (req, res) => {
   try {
     const finalImage = saveImage(image);
     const packagesStr = typeof packages === 'string' ? packages : JSON.stringify(packages || []);
+    const bundleServicesStr = typeof bundle_services === 'string' ? bundle_services : JSON.stringify(bundle_services || []);
     
     const parsedFields = safeParseJson(fields);
     const cleanedFields = removeDuplicateFields(parsedFields);
@@ -586,10 +630,11 @@ router.put('/:id', authMiddleware, async (req, res) => {
 
     const popularFlag = is_popular === true || is_popular === 'true';
     const menuFlag = show_in_menu === true || show_in_menu === 'true';
+    const bundleFlag = is_bundle === true || is_bundle === 'true';
 
     await runQuery(
-      'UPDATE services SET category_id = ?, name = ?, description = ?, price = ?, image = ?, packages = ?, fields = ?, price_type = ?, price_per_thousand = ?, fields_title = ?, download_link = ?, download_link_title = ?, is_popular = ?, show_in_menu = ? WHERE id = ?',
-      [category_id, finalName, description, price, finalImage, packagesStr, fieldsStr, price_type || 'fixed', price_per_thousand || 0.0, fields_title || '', download_link || '', download_link_title || '', popularFlag, menuFlag, id]
+      'UPDATE services SET category_id = ?, name = ?, description = ?, price = ?, image = ?, packages = ?, fields = ?, price_type = ?, price_per_thousand = ?, fields_title = ?, download_link = ?, download_link_title = ?, is_popular = ?, show_in_menu = ?, is_bundle = ?, bundle_services = ? WHERE id = ?',
+      [category_id, finalName, description, price, finalImage, packagesStr, fieldsStr, price_type || 'fixed', price_per_thousand || 0.0, fields_title || '', download_link || '', download_link_title || '', popularFlag, menuFlag, bundleFlag, bundleServicesStr, id]
     );
 
     res.json({

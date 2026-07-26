@@ -399,7 +399,7 @@ router.get('/track', async (req, res) => {
 // Get all orders (Admin Protected)
 router.get('/', authMiddleware, async (req, res) => {
   try {
-    const orders = (await allQuery('SELECT * FROM orders ORDER BY id DESC')) || [];
+    const orders = (await allQuery('SELECT o.*, s.api_provider_id FROM orders o LEFT JOIN services s ON o.service_id = s.id ORDER BY o.id DESC')) || [];
     const customers = (await allQuery('SELECT id, username FROM customers')) || [];
     const customersMap = {};
     if (Array.isArray(customers)) {
