@@ -624,6 +624,12 @@ async function createTables() {
       ip_address        VARCHAR(100),
       created_at        TIMESTAMPTZ DEFAULT NOW()
     );
+
+    CREATE TABLE IF NOT EXISTS customer_otps (
+      otp_key           VARCHAR(100) PRIMARY KEY,
+      data              TEXT NOT NULL,
+      expires_at        BIGINT NOT NULL
+    );
   `);
 
   // Migration to add color and icon columns to existing categories table, and dynamic pricing to services/orders
@@ -684,6 +690,7 @@ async function createTables() {
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS api_provider_id INT REFERENCES api_providers(id) ON DELETE SET NULL;
       ALTER TABLE customers ADD COLUMN IF NOT EXISTS api_key VARCHAR(100) UNIQUE DEFAULT NULL;
       ALTER TABLE customers ADD COLUMN IF NOT EXISTS api_enabled BOOLEAN DEFAULT false;
+      ALTER TABLE customers ADD COLUMN IF NOT EXISTS api_requested BOOLEAN DEFAULT false;
       ALTER TABLE customers ADD COLUMN IF NOT EXISTS api_markup NUMERIC(5,2) DEFAULT 0;
       ALTER TABLE customers ADD COLUMN IF NOT EXISTS api_blocked_services TEXT DEFAULT '[]';
       ALTER TABLE customers ADD COLUMN IF NOT EXISTS api_allowed_ips TEXT DEFAULT '[]';
@@ -710,7 +717,18 @@ async function createTables() {
     console.error('Migration error adding api_service_type:', err.message);
   }
 
-  // Removed hardcoded migration for Amrr Unlocker
+  // ── Performance Indexes ─────────
+  try {
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_customers_api_key ON customers(api_key);
+      CREATE INDEX IF NOT EXISTS idx_orders_customer_id ON orders(customer_id);
+      CREATE INDEX IF NOT EXISTS idx_wallet_tx_customer_id ON wallet_transactions(customer_id);
+      CREATE INDEX IF NOT EXISTS idx_api_logs_api_key ON api_logs(api_key);
+    `);
+    console.log('Migration: Performance indexes verified / created.');
+  } catch (err) {
+    console.error('Migration error adding indexes:', err.message);
+  }
 
   console.log('PostgreSQL tables verified / created.');
 }

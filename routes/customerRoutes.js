@@ -12,13 +12,32 @@ const emailService = require('../utils/emailService');
 const { allQuery: allQuerySettings } = require('../db');
 const wa = require('../whatsapp');
 
-// In-memory store for customer OTPs during login & registration: key -> { code, customerId, username, email, phone, isNew, expiresAt }
-const activeCustomerOtps = new Map();
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, item] of activeCustomerOtps.entries()) {
-    if (now > item.expiresAt) activeCustomerOtps.delete(key);
+// Database-backed store for customer OTPs during login & registration
+async function setCustomerOtp(otpKey, data) {
+  const expiresAt = data.expiresAt || (Date.now() + 10 * 60 * 1000);
+  data.expiresAt = expiresAt;
+  await runQuery('DELETE FROM customer_otps WHERE otp_key = ?', [otpKey]);
+  await runQuery('INSERT INTO customer_otps (otp_key, data, expires_at) VALUES (?, ?, ?)', [otpKey, JSON.stringify(data), expiresAt]);
+}
+
+async function getCustomerOtp(otpKey) {
+  const row = await getQuery('SELECT * FROM customer_otps WHERE otp_key = ?', [otpKey]);
+  if (!row) return null;
+  if (Date.now() > Number(row.expires_at)) {
+    await deleteCustomerOtp(otpKey);
+    return null;
   }
+  return JSON.parse(row.data);
+}
+
+async function deleteCustomerOtp(otpKey) {
+  await runQuery('DELETE FROM customer_otps WHERE otp_key = ?', [otpKey]);
+}
+
+setInterval(async () => {
+  try {
+    await runQuery('DELETE FROM customer_otps WHERE expires_at < ?', [Date.now()]);
+  } catch (e) {}
 }, 60000);
 
 // Customer Auth Middleware
@@ -90,7 +109,7 @@ router.post('/register', async (req, res) => {
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     const otpKey = `reg_${cleanUsername}_${Date.now()}`;
 
-    activeCustomerOtps.set(otpKey, {
+    await setCustomerOtp(otpKey, {
       code,
       type: 'register',
       username: cleanUsername,
@@ -186,7 +205,7 @@ router.post('/login', async (req, res) => {
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     const otpKey = `login_${customer.id}_${Date.now()}`;
 
-    activeCustomerOtps.set(otpKey, {
+    await setCustomerOtp(otpKey, {
       code,
       type: 'login',
       customerId: customer.id,
@@ -242,13 +261,13 @@ router.post('/verify-auth-otp', async (req, res) => {
     return res.status(400).json({ message: 'يرجى إدخال كود التحقق (OTP).' });
   }
 
-  const item = activeCustomerOtps.get(otpKey);
+  const item = await getCustomerOtp(otpKey);
   if (!item) {
     return res.status(400).json({ message: 'كود التحقق منتهي الصلاحية أو غير موجود. يرجى المحاولة مجدداً.' });
   }
 
   if (Date.now() > item.expiresAt) {
-    activeCustomerOtps.delete(otpKey);
+    await deleteCustomerOtp(otpKey);
     return res.status(400).json({ message: 'انتهت صلاحية كود التحقق.' });
   }
 
@@ -264,7 +283,7 @@ router.post('/verify-auth-otp', async (req, res) => {
         [item.username, item.email, item.password, item.phone]
       );
 
-      activeCustomerOtps.delete(otpKey);
+      await deleteCustomerOtp(otpKey);
 
       const token = jwt.sign(
         { id: result.lastID, username: item.username },
@@ -279,7 +298,7 @@ router.post('/verify-auth-otp', async (req, res) => {
       });
     } else if (item.type === 'login') {
       const customer = await getQuery('SELECT * FROM customers WHERE id = ?', [item.customerId]);
-      activeCustomerOtps.delete(otpKey);
+      await deleteCustomerOtp(otpKey);
 
       if (!customer) {
         return res.status(404).json({ message: 'الحساب غير موجود.' });
@@ -947,7 +966,7 @@ router.post('/request-otp', customerAuth, async (req, res) => {
     const expiresAt = Date.now() + 10 * 60 * 1000;
     const otpKey = `change_${customer.id}`;
 
-    activeCustomerOtps.set(otpKey, {
+    await setCustomerOtp(otpKey, {
       code,
       type: 'change-password',
       customerId: customer.id,
@@ -984,11 +1003,11 @@ router.post('/change-password', customerAuth, async (req, res) => {
 
   try {
     const otpKey = `change_${req.customer.id}`;
-    const item = activeCustomerOtps.get(otpKey);
+    const item = await getCustomerOtp(otpKey);
 
     if (!item) return res.status(400).json({ message: 'كود التحقق منتهي الصلاحية أو غير موجود.' });
     if (Date.now() > item.expiresAt) {
-      activeCustomerOtps.delete(otpKey);
+      await deleteCustomerOtp(otpKey);
       return res.status(400).json({ message: 'انتهت صلاحية كود التحقق.' });
     }
     if (item.code !== otp.trim()) return res.status(400).json({ message: 'كود التحقق غير صحيح.' });
@@ -996,11 +1015,93 @@ router.post('/change-password', customerAuth, async (req, res) => {
     const hashedPassword = await bcrypt.hash(newPassword, 10);
     await runQuery('UPDATE customers SET password = ? WHERE id = ?', [hashedPassword, req.customer.id]);
     
-    activeCustomerOtps.delete(otpKey);
+    await deleteCustomerOtp(otpKey);
     return res.json({ message: 'تم تغيير كلمة المرور بنجاح.' });
   } catch (error) {
     console.error('Change password error:', error);
     return res.status(500).json({ message: 'حدث خطأ أثناء تغيير كلمة المرور.' });
+  }
+});
+
+// ==============================
+// API Key Management Routes
+// ==============================
+
+const crypto = require('crypto');
+
+// Generate a random 32-character hex API key
+function generateApiKey() {
+  return crypto.randomBytes(16).toString('hex').toUpperCase();
+}
+
+// Get Customer's API Key and settings
+router.get('/api-key', authMiddleware, async (req, res) => {
+  try {
+    const customer = await getQuery('SELECT api_key, api_enabled, api_allowed_ips, api_markup, api_requested FROM customers WHERE id = ?', [req.customer.id]);
+    if (!customer) {
+      return res.status(404).json({ message: 'العميل غير موجود' });
+    }
+    res.json({
+      success: true,
+      api_key: customer.api_key || '',
+      api_enabled: Boolean(customer.api_enabled),
+      api_requested: Boolean(customer.api_requested),
+      api_allowed_ips: customer.api_allowed_ips || '[]',
+      api_markup: customer.api_markup || 0
+    });
+  } catch (error) {
+    console.error('Fetch API key error:', error);
+    res.status(500).json({ message: 'حدث خطأ أثناء جلب بيانات الـ API.' });
+  }
+});
+
+// Request API Access
+router.post('/request-api', authMiddleware, async (req, res) => {
+  try {
+    await runQuery('UPDATE customers SET api_requested = true WHERE id = ?', [req.customer.id]);
+    res.json({ success: true, message: 'تم إرسال طلب تفعيل الـ API بنجاح.' });
+  } catch (error) {
+    console.error('Request API error:', error);
+    res.status(500).json({ message: 'حدث خطأ أثناء إرسال الطلب.' });
+  }
+});
+
+// Regenerate API Key
+router.post('/api-key/regenerate', authMiddleware, async (req, res) => {
+  try {
+    const newApiKey = generateApiKey();
+    await runQuery('UPDATE customers SET api_key = ? WHERE id = ?', [newApiKey, req.customer.id]);
+    res.json({
+      success: true,
+      api_key: newApiKey,
+      message: 'تم توليد مفتاح API جديد بنجاح.'
+    });
+  } catch (error) {
+    console.error('Regenerate API key error:', error);
+    if (error.message && error.message.includes('UNIQUE')) {
+       // Highly unlikely, but just in case
+       return res.status(500).json({ message: 'حدث تضارب في المفتاح، يرجى المحاولة مرة أخرى.' });
+    }
+    res.status(500).json({ message: 'حدث خطأ أثناء توليد المفتاح الجديد.' });
+  }
+});
+
+// Update Allowed IPs
+router.put('/api-key/allowed-ips', authMiddleware, async (req, res) => {
+  const { ips } = req.body;
+  if (!Array.isArray(ips)) {
+    return res.status(400).json({ message: 'يجب أن يكون الحقل ips مصفوفة من العناوين.' });
+  }
+
+  try {
+    await runQuery('UPDATE customers SET api_allowed_ips = ? WHERE id = ?', [JSON.stringify(ips), req.customer.id]);
+    res.json({
+      success: true,
+      message: 'تم تحديث قائمة الـ IPs المسموحة بنجاح.'
+    });
+  } catch (error) {
+    console.error('Update allowed IPs error:', error);
+    res.status(500).json({ message: 'حدث خطأ أثناء تحديث قائمة الـ IPs.' });
   }
 });
 

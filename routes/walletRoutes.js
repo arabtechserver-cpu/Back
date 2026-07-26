@@ -63,8 +63,8 @@ router.put('/:id', authMiddleware, async (req, res) => {
 
       // Update main balance and total_deposited
       await runQuery(
-        'UPDATE customers SET balance = balance + ?, total_deposited = COALESCE(total_deposited, 0) + ?, balances = ? WHERE id = ?',
-        [amountInBase, amountInBase, JSON.stringify({}), request.customer_id]
+        'UPDATE customers SET balance = balance + ?, total_deposited = COALESCE(total_deposited, 0) + ? WHERE id = ?',
+        [amountInBase, amountInBase, request.customer_id]
       );
 
       // Record transaction
