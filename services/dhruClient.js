@@ -4,7 +4,15 @@ const https = require('https');
 function callDhruApi(apiUrl, username, apiKey, action, parameters = {}) {
   return new Promise((resolve, reject) => {
     try {
-      const urlObj = new URL(apiUrl);
+      let finalUrl = apiUrl.trim();
+      if (!finalUrl.endsWith('/api/index.php') && !finalUrl.endsWith('/api/index.php/')) {
+        if (finalUrl.endsWith('/api/') || finalUrl.endsWith('/api')) {
+          finalUrl = finalUrl.replace(/\/$/, '') + '/index.php';
+        } else {
+          finalUrl = finalUrl.replace(/\/$/, '') + '/api/index.php';
+        }
+      }
+      const urlObj = new URL(finalUrl);
       const postParams = new URLSearchParams();
       postParams.append('username', username);
       postParams.append('apiaccesskey', apiKey);
