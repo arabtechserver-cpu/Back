@@ -70,7 +70,9 @@ router.post('/create', authMiddleware, async (req, res) => {
     const tableNames = [
       'users', 'categories', 'services', 'orders', 
       'customers', 'banners', 'wallet_requests', 
-      'wallet_transactions', 'settings', 'customer_discounts'
+      'wallet_transactions', 'settings', 'customer_discounts',
+      'membership_tiers', 'membership_discounts', 'user_memberships',
+      'reviews', 'api_providers', 'api_logs', 'customer_otps'
     ];
 
     if (mode.fallbackMode) {
@@ -221,7 +223,9 @@ async function restoreSnapshot(backupData) {
     const tableNames = [
       'users', 'categories', 'services', 'orders', 
       'customers', 'banners', 'wallet_requests', 
-      'wallet_transactions', 'settings', 'customer_discounts'
+      'wallet_transactions', 'settings', 'customer_discounts',
+      'membership_tiers', 'membership_discounts', 'user_memberships',
+      'reviews', 'api_providers', 'api_logs', 'customer_otps'
     ];
     tableNames.forEach(table => {
       newDb[table] = tables[table] || [];
@@ -241,6 +245,13 @@ async function restoreSnapshot(backupData) {
       // Truncate tables in dependency order
       await client.query(`
         TRUNCATE TABLE 
+          customer_otps,
+          api_logs,
+          api_providers,
+          reviews,
+          user_memberships,
+          membership_discounts,
+          membership_tiers,
           customer_discounts, 
           wallet_transactions, 
           wallet_requests, 
@@ -257,7 +268,9 @@ async function restoreSnapshot(backupData) {
       const tableNames = [
         'users', 'settings', 'customers', 'categories', 
         'services', 'orders', 'banners', 'wallet_requests', 
-        'wallet_transactions', 'customer_discounts'
+        'wallet_transactions', 'customer_discounts',
+        'membership_tiers', 'membership_discounts', 'user_memberships',
+        'reviews', 'api_providers', 'api_logs', 'customer_otps'
       ];
 
       for (const tableName of tableNames) {
