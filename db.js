@@ -791,9 +791,9 @@ const patchedRunQuery = async (sql, params = []) => {
   const trimmed = sql.trim().toUpperCase();
   let finalSql = sql;
   if (trimmed.startsWith('INSERT') && !trimmed.includes('RETURNING')) {
-    // settings table uses 'key' as primary key, not 'id' — skip RETURNING id
-    const isSettingsInsert = /INSERT\s+INTO\s+settings/i.test(sql);
-    if (!isSettingsInsert) {
+    // settings and customer_otps tables do not have an 'id' column — skip RETURNING id
+    const isSettingsOrOtpInsert = /INSERT\s+INTO\s+(settings|customer_otps)/i.test(sql);
+    if (!isSettingsOrOtpInsert) {
       finalSql = sql.trimEnd().replace(/;?\s*$/, '') + ' RETURNING id';
     }
   }
