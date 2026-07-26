@@ -1044,7 +1044,7 @@ function generateApiKey() {
 }
 
 // Get Customer's API Key and settings
-router.get('/api-key', authMiddleware, async (req, res) => {
+router.get('/dev-settings', authMiddleware, async (req, res) => {
   try {
     const customer = await getQuery('SELECT api_key, api_enabled, api_allowed_ips, api_markup, api_requested FROM customers WHERE id = ?', [req.customer.id]);
     if (!customer) {
@@ -1076,7 +1076,7 @@ router.post('/request-api', authMiddleware, async (req, res) => {
 });
 
 // Regenerate API Key
-router.post('/api-key/regenerate', authMiddleware, async (req, res) => {
+router.post('/dev-settings/regenerate', authMiddleware, async (req, res) => {
   try {
     const newApiKey = generateApiKey();
     await runQuery('UPDATE customers SET api_key = ? WHERE id = ?', [newApiKey, req.customer.id]);
@@ -1096,7 +1096,7 @@ router.post('/api-key/regenerate', authMiddleware, async (req, res) => {
 });
 
 // Update Allowed IPs
-router.put('/api-key/allowed-ips', authMiddleware, async (req, res) => {
+router.put('/dev-settings/allowed-ips', authMiddleware, async (req, res) => {
   const { ips } = req.body;
   if (!Array.isArray(ips)) {
     return res.status(400).json({ message: 'يجب أن يكون الحقل ips مصفوفة من العناوين.' });
