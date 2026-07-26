@@ -1044,7 +1044,7 @@ function generateApiKey() {
 }
 
 // Get Customer's API Key and settings
-router.get('/dev-settings', authMiddleware, async (req, res) => {
+router.get('/dev-settings', customerAuth, async (req, res) => {
   try {
     const customer = await getQuery('SELECT api_key, api_enabled, api_allowed_ips, api_markup, api_requested FROM customers WHERE id = ?', [req.customer.id]);
     if (!customer) {
@@ -1065,7 +1065,7 @@ router.get('/dev-settings', authMiddleware, async (req, res) => {
 });
 
 // Request API Access
-router.post('/request-api', authMiddleware, async (req, res) => {
+router.post('/request-api', customerAuth, async (req, res) => {
   try {
     await runQuery('UPDATE customers SET api_requested = true WHERE id = ?', [req.customer.id]);
     res.json({ success: true, message: 'تم إرسال طلب تفعيل الـ API بنجاح.' });
@@ -1076,7 +1076,7 @@ router.post('/request-api', authMiddleware, async (req, res) => {
 });
 
 // Regenerate API Key
-router.post('/dev-settings/regenerate', authMiddleware, async (req, res) => {
+router.post('/dev-settings/regenerate', customerAuth, async (req, res) => {
   try {
     const newApiKey = generateApiKey();
     await runQuery('UPDATE customers SET api_key = ? WHERE id = ?', [newApiKey, req.customer.id]);
@@ -1096,7 +1096,7 @@ router.post('/dev-settings/regenerate', authMiddleware, async (req, res) => {
 });
 
 // Update Allowed IPs
-router.put('/dev-settings/allowed-ips', authMiddleware, async (req, res) => {
+router.put('/dev-settings/allowed-ips', customerAuth, async (req, res) => {
   const { ips } = req.body;
   if (!Array.isArray(ips)) {
     return res.status(400).json({ message: 'يجب أن يكون الحقل ips مصفوفة من العناوين.' });
