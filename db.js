@@ -117,7 +117,16 @@ function writeDb(data) {
   const finalData = ensureDefaultSettings({ ...data });
   const tmpPath = `${dbPath}.tmp`;
   fs.writeFileSync(tmpPath, JSON.stringify(finalData, null, 2));
-  fs.renameSync(tmpPath, dbPath);
+  try {
+      fs.renameSync(tmpPath, dbPath);
+    } catch (err) {
+      if (err.code === 'EPERM') {
+        fs.copyFileSync(tmpPath, dbPath);
+        fs.unlinkSync(tmpPath);
+      } else {
+        throw err;
+      }
+    }
 }
 
 function executeJsonRunQuery(sql, params = []) {
