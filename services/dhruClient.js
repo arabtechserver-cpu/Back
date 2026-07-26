@@ -5,6 +5,9 @@ function callDhruApi(apiUrl, username, apiKey, action, parameters = {}) {
   return new Promise((resolve, reject) => {
     try {
       let finalUrl = apiUrl.trim();
+      if (!finalUrl.startsWith('http://') && !finalUrl.startsWith('https://')) {
+        finalUrl = 'https://' + finalUrl;
+      }
       if (!finalUrl.endsWith('/api/index.php') && !finalUrl.endsWith('/api/index.php/')) {
         if (finalUrl.endsWith('/api/') || finalUrl.endsWith('/api')) {
           finalUrl = finalUrl.replace(/\/$/, '') + '/index.php';
@@ -14,8 +17,8 @@ function callDhruApi(apiUrl, username, apiKey, action, parameters = {}) {
       }
       const urlObj = new URL(finalUrl);
       const postParams = new URLSearchParams();
-      postParams.append('username', username);
-      postParams.append('apiaccesskey', apiKey);
+      postParams.append('username', (username || '').trim());
+      postParams.append('apiaccesskey', (apiKey || '').trim());
       postParams.append('action', action);
       postParams.append('requestformat', 'JSON');
 
