@@ -1067,8 +1067,15 @@ router.get('/dev-settings', customerAuth, async (req, res) => {
 // Request API Access
 router.post('/request-api', customerAuth, async (req, res) => {
   try {
-    await runQuery('UPDATE customers SET api_requested = true WHERE id = ?', [req.customer.id]);
-    res.json({ success: true, message: 'تم إرسال طلب تفعيل الـ API بنجاح.' });
+    const customer = await getQuery('SELECT api_key FROM customers WHERE id = ?', [req.customer.id]);
+    
+    let newApiKey = customer.api_key;
+    if (!newApiKey) {
+        newApiKey = generateApiKey();
+    }
+
+    await runQuery('UPDATE customers SET api_enabled = true, api_requested = false, api_key = ? WHERE id = ?', [newApiKey, req.customer.id]);
+    res.json({ success: true, message: 'تم تفعيل الـ API وإنشاء المفتاح بنجاح.' });
   } catch (error) {
     console.error('Request API error:', error);
     res.status(500).json({ message: 'حدث خطأ أثناء إرسال الطلب.' });
