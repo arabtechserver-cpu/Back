@@ -124,6 +124,9 @@ function extractCustomFields(s) {
   let raw =
     s["Requires.Custom"] ||
     s["REQUIRES.CUSTOM"] ||
+    s.CUSTOM ||
+    s.Custom ||
+    s.custom ||
     (s.Requires && s.Requires.Custom) ||
     (s.REQUIRES && s.REQUIRES.CUSTOM) ||
     (s.REQUIRES && s.REQUIRES.Custom) ||
@@ -139,6 +142,11 @@ function extractCustomFields(s) {
     null;
 
   if (!raw) return [];
+
+  // If raw is a single object (like CUSTOM object) and not an array, wrap it in an array
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    raw = [raw];
+  }
 
   if (typeof raw === 'string') {
     const trimmed = raw.trim();
@@ -179,7 +187,7 @@ function extractCustomFields(s) {
 
 // Helper: normalize a single raw custom field object into our standard format
 function normalizeCustomField(cf) {
-  const name = (cf.fieldname || cf.FIELDNAME || cf.name || cf.NAME || '').trim();
+  const name = (cf.customname || cf.fieldname || cf.FIELDNAME || cf.field_name || cf.name || cf.NAME || '').trim();
   if (!name) return null;
   return {
     field_id: cf.field_id || cf.reqid || cf.REQID || cf.id || cf.ID || name,
