@@ -1122,7 +1122,7 @@ router.put('/dev-settings/allowed-ips', customerAuth, async (req, res) => {
 });
 
 // Admin: Get API Logs for a specific customer
-router.get('/admin/:id/api-logs', verifyToken, verifyAdmin, async (req, res) => {
+router.get('/admin/:id/api-logs', authMiddleware, async (req, res) => {
   try {
     const customerId = req.params.id;
     const logs = await allQuery('SELECT * FROM api_logs WHERE customer_id = ? ORDER BY id DESC LIMIT 100', [customerId]);
