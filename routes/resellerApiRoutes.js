@@ -8,14 +8,19 @@ async function verifyApiAccess(req, res, next) {
     const key = req.body.key || req.query.key;
     const username = req.body.username || req.query.username;
 
-    if (!key || !username) {
-      return res.status(401).json({ SUCCESS: false, Error: 'Missing API key or username' });
+    if (!key) {
+      return res.status(401).json({ SUCCESS: false, Error: 'Missing API key' });
     }
 
-    const customer = await getQuery('SELECT * FROM customers WHERE username = ? AND api_key = ?', [username, key]);
+    let customer;
+    if (username) {
+       customer = await getQuery('SELECT * FROM customers WHERE username = ? AND api_key = ?', [username, key]);
+    } else {
+       customer = await getQuery('SELECT * FROM customers WHERE api_key = ?', [key]);
+    }
 
     if (!customer) {
-      return res.status(401).json({ SUCCESS: false, Error: 'Invalid API key or username' });
+      return res.status(401).json({ SUCCESS: false, Error: 'Invalid API key' });
     }
 
     if (!customer.api_enabled) {
