@@ -182,12 +182,14 @@ router.post('/', verifyApiAccess, async (req, res) => {
         payment_status: 'paid',
         is_api_order: true,
         api_reseller_id: customer.id,
-        custom_fields: JSON.stringify({ IMEI: imei })
+        custom_fields: JSON.stringify({ IMEI: imei }),
+        api_source: service.api_source || '',
+        api_service_id: service.api_service_id || ''
       };
 
       const result = await runQuery(
-        'INSERT INTO orders (customer_id, service_id, service_name, package_name, package_price, status, payment_method, is_api_order, api_reseller_id, custom_fields) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [orderData.customer_id, orderData.service_id, orderData.service_name, orderData.package_name, orderData.price, orderData.status, orderData.payment_method, true, customer.id, orderData.custom_fields]
+        'INSERT INTO orders (customer_id, service_id, service_name, package_name, package_price, status, payment_method, is_api_order, api_reseller_id, custom_fields, api_source, api_service_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [orderData.customer_id, orderData.service_id, orderData.service_name, orderData.package_name, orderData.price, orderData.status, orderData.payment_method, true, customer.id, orderData.custom_fields, orderData.api_source, orderData.api_service_id]
       );
 
       // Log wallet transaction
