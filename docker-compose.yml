@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  # postgres:
+  #   image: postgres:15-alpine
+  #   container_name: spider-store-db
+  #   restart: always
+  #   environment:
+  #     POSTGRES_DB: spiderstore
+  #     POSTGRES_USER: postgres
+  #     POSTGRES_PASSWORD: postgrespassword
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - pgdata:/var/lib/postgresql/data
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: spider-store-backend
+    restart: always
+    shm_size: '256mb'    # Required for Puppeteer/Chromium (WhatsApp) to not crash
+    ports:
+      - "5000:5000"
+    env_file:
+      - .env               # All secrets come from .env — never hardcoded
+    volumes:
+      - backend-uploads:/app/uploads
+      - wa-session:/app/wa-session
+      - ./database.json:/app/database.json    # Persist JSON Database across rebuilds
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=https://spider-store-api.duckdns.org
+        - NEXT_PUBLIC_SITE_URL=https://arab-tech1.online
+    container_name: spider-store-frontend
+    restart: always
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  # pgdata:
+  backend-uploads:
+  wa-session:    # Named volume for persistent WhatsApp session

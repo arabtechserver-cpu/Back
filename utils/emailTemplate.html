@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{DATA_VARIABLE:site_name} - {{subject}}</title>
+  <style>
+    /* Global Reset & Base Styles */
+    body, table, td, a { -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
+    table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
+    img { -ms-interpolation-mode: bicubic; border: 0; height: auto; line-height: 100%; outline: none; text-decoration: none; }
+    body { height: 100% !important; margin: 0 !important; padding: 0 !important; width: 100% !important; background-color: #0f172a; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #e2e8f0; }
+
+    /* Container & Card */
+    .email-wrapper { width: 100%; background-color: #0f172a; padding: 40px 10px; }
+    .email-card { max-width: 600px; margin: 0 auto; background: #1e293b; border-radius: 16px; border: 1px solid #334155; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5); }
+    
+    /* Header Gradient */
+    .email-header { background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 50%, #1e40af 100%); padding: 32px 24px; text-align: center; }
+    .header-logo { font-size: 26px; font-weight: 800; color: #ffffff; text-decoration: none; letter-spacing: 0.5px; text-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+    .header-subtext { font-size: 14px; color: #93c5fd; margin-top: 6px; font-weight: 500; }
+
+    /* Content Area */
+    .email-body { padding: 36px 32px; text-align: right; }
+    .user-greeting { font-size: 20px; font-weight: 700; color: #f8fafc; margin-bottom: 16px; }
+    .user-greeting span { color: #60a5fa; }
+    .message-text { font-size: 15px; line-height: 1.8; color: #cbd5e1; margin-bottom: 24px; }
+
+    /* OTP Code Box */
+    .otp-box { background: rgba(37, 99, 235, 0.1); border: 2px dashed #3b82f6; border-radius: 12px; padding: 20px; text-align: center; margin: 28px 0; }
+    .otp-label { font-size: 13px; font-weight: 600; color: #93c5fd; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+    .otp-code { font-size: 34px; font-weight: 900; color: #60a5fa; letter-spacing: 8px; font-family: 'Courier New', Courier, monospace; margin: 6px 0; }
+
+    /* Action Button (Password Reset) */
+    .btn-container { text-align: center; margin: 32px 0; }
+    .btn-action { display: inline-block; background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); color: #ffffff !important; font-size: 16px; font-weight: 700; text-decoration: none; padding: 14px 36px; border-radius: 10px; box-shadow: 0 4px 14px 0 rgba(37, 99, 235, 0.4); }
+
+    /* Alert / Security Notice Box */
+    .alert-box { background-color: #0f172a; border-right: 4px solid #f59e0b; border-radius: 8px; padding: 14px 16px; margin: 24px 0; text-align: right; }
+    .alert-title { font-size: 14px; font-weight: 700; color: #fbbf24; margin-bottom: 4px; display: flex; align-items: center; gap: 6px; }
+    .alert-desc { font-size: 13px; color: #94a3b8; margin: 0; line-height: 1.6; }
+
+    /* Divider */
+    .divider { border: 0; height: 1px; background: #334155; margin: 28px 0; }
+
+    /* Footer */
+    .email-footer { background-color: #0f172a; padding: 24px; text-align: center; border-top: 1px solid #334155; }
+    .footer-text { font-size: 13px; color: #64748b; line-height: 1.6; margin-bottom: 12px; }
+    .footer-links a { color: #60a5fa; text-decoration: none; font-size: 13px; margin: 0 8px; }
+  </style>
+</head>
+<body>
+  <div class="email-wrapper">
+    <div class="email-card">
+      
+      <!-- Header -->
+      <div class="email-header">
+        <div class="header-logo">⚡ {DATA_VARIABLE:site_name}</div>
+        <div class="header-subtext">بوابتك السريعة لخدمات السيرفرات والتفعيل</div>
+      </div>
+
+      <!-- Main Body -->
+      <div class="email-body">
+        
+        <!-- User Greeting -->
+        <div class="user-greeting">مرحباً، <span>{DATA_VARIABLE:username}</span> 👋</div>
+        
+        <!-- Message Description -->
+        <p class="message-text">
+          {DATA_VARIABLE:message_body}
+        </p>
+
+        <!-- OTP Section (يظهر في حالة إرسال كود التحقق) -->
+        {{#if otp_code}}
+        <div class="otp-box">
+          <div class="otp-label">🔑 كود تفعيل الحساب / التحقق (OTP)</div>
+          <div class="otp-code">{DATA_VARIABLE:otp_code}</div>
+          <div style="font-size: 12px; color: #94a3b8; margin-top: 6px;">صالح لمدة 10 دقائق فقط</div>
+        </div>
+        {{/if}}
+
+        <!-- Password Reset Action Button (يظهر في حالة إعادة تعيين كلمة المرور) -->
+        {{#if reset_url}}
+        <div class="btn-container">
+          <a href="{DATA_VARIABLE:reset_url}" target="_blank" class="btn-action">🔒 تعيين كلمة مرور جديدة</a>
+        </div>
+        {{/if}}
+
+        <!-- Security Warning -->
+        <div class="alert-box">
+          <div class="alert-title">⚠️ تنبيه أمان مهم</div>
+          <p class="alert-desc">
+            هذا الكود/الرابط سري للغاية وخاص بحسابك فقط. يرجى عدم مشاركته مع أي شخص أياً كان، وفريق الدعم لن يطلب منك كود التحقق أبداً.
+          </p>
+        </div>
+
+        <p class="message-text" style="font-size: 13px; color: #94a3b8; margin-top: 20px;">
+          إذا لم تقم بطلب هذا الإجراء، يمكنك تجاهل هذه الرسالة وأمان حسابك في مأمن تام.
+        </p>
+
+        <hr class="divider">
+
+        <p class="message-text" style="font-size: 14px; text-align: center; color: #cbd5e1; margin-bottom: 0;">
+          مع تحيات فريق عمل <strong>{DATA_VARIABLE:site_name}</strong> ❤️
+        </p>
+      </div>
+
+      <!-- Footer -->
+      <div class="email-footer">
+        <div class="footer-text">
+          جميع الحقوق محفوظة © {{year}} {DATA_VARIABLE:site_name}
+          <br>هذه الرسالة تم إرسالها آلياً، يرجى عدم الرد عليها مباشرة.
+        </div>
+      </div>
+
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,83 @@
+<mjml>
+  <mj-head>
+    <mj-title>عرب تك سيرفر</mj-title>
+    <mj-attributes>
+      <mj-all font-family="'Segoe UI', Tahoma, Geneva, Verdana, sans-serif" dir="rtl" />
+      <mj-text font-size="15px" color="#e2e8f0" line-height="1.8" align="right" />
+    </mj-attributes>
+  </mj-head>
+  <mj-body background-color="#0f172a">
+    
+    <!-- Email Main Container -->
+    <mj-section background-color="#1e293b" border-radius="16px" border="1px solid #334155" padding="0px" margin="30px 0">
+      
+      <!-- Header -->
+      <mj-column width="100%" background-color="#2563eb" padding="28px 20px">
+        <mj-text align="center" font-size="26px" font-weight="800" color="#ffffff">
+          ⚡ {DATA_VARIABLE:site_name}
+        </mj-text>
+        <mj-text align="center" font-size="14px" color="#93c5fd" padding-top="6px">
+          بوابتك السريعة لخدمات السيرفرات والتفعيل
+        </mj-text>
+      </mj-column>
+
+      <!-- Main Body Content -->
+      <mj-column width="100%" padding="30px 24px">
+        
+        <!-- User Greeting -->
+        <mj-text font-size="20px" font-weight="700" color="#f8fafc">
+          مرحباً، <span style="color: #60a5fa;">{DATA_VARIABLE:username}</span> 👋
+        </mj-text>
+
+        <!-- Message Body -->
+        <mj-text color="#cbd5e1">
+          {DATA_VARIABLE:message_body}
+        </mj-text>
+
+        <!-- OTP Code Block -->
+        <mj-raw>
+          <div style="background: rgba(37, 99, 235, 0.1); border: 2px dashed #3b82f6; border-radius: 12px; padding: 20px; text-align: center; margin: 20px 0;">
+            <div style="font-size: 13px; font-weight: 600; color: #93c5fd; text-transform: uppercase;">🔑 كود تفعيل الحساب / التحقق (OTP)</div>
+            <div style="font-size: 36px; font-weight: 900; color: #60a5fa; letter-spacing: 8px; font-family: monospace; margin: 8px 0;">{DATA_VARIABLE:code}</div>
+            <div style="font-size: 12px; color: #94a3b8;">⏱️ صالح لمدة 10 دقائق فقط</div>
+          </div>
+        </mj-raw>
+
+        <!-- Password Reset Action Button -->
+        <mj-button background-color="#2563eb" color="#ffffff" font-size="16px" font-weight="700" border-radius="10px" href="{DATA_VARIABLE:reset_url}" padding="20px 0">
+          🔒 تعيين كلمة مرور جديدة
+        </mj-button>
+
+        <!-- Security Notice -->
+        <mj-raw>
+          <div style="background-color: #0f172a; border-right: 4px solid #f59e0b; border-radius: 8px; padding: 14px 16px; margin: 24px 0; text-align: right;">
+            <div style="font-size: 14px; font-weight: 700; color: #fbbf24; margin-bottom: 4px;">⚠️ تنبيه أمان مهم</div>
+            <div style="font-size: 13px; color: #94a3b8; line-height: 1.6;">
+              هذه البيانات سرية للغاية وتُستخدم لمرة واحدة فقط. يرجى عدم مشاركتها مع أي شخص، وفريق الدعم لن يطلب منك كلمة المرور أو كود التحقق أبداً.
+            </div>
+          </div>
+        </mj-raw>
+
+        <mj-text font-size="13px" color="#94a3b8">
+          إذا لم تقم بطلب هذا الإجراء، يمكنك تجاهل هذه الرسالة وأمان حسابك في مأمن تام.
+        </mj-text>
+
+        <mj-divider border-color="#334155" border-width="1px" padding="20px 0" />
+
+        <mj-text align="center" font-size="14px" color="#cbd5e1">
+          مع تحيات فريق عمل <strong>{DATA_VARIABLE:site_name}</strong> ❤️
+        </mj-text>
+      </mj-column>
+
+      <!-- Footer -->
+      <mj-column width="100%" background-color="#0f172a" padding="20px">
+        <mj-text align="center" font-size="13px" color="#64748b" line-height="1.6">
+          جميع الحقوق محفوظة © {DATA_VARIABLE:site_name}
+          <br />هذه الرسالة تم إرسالها آلياً، يرجى عدم الرد عليها مباشرة.
+        </mj-text>
+      </mj-column>
+
+    </mj-section>
+
+  </mj-body>
+</mjml>

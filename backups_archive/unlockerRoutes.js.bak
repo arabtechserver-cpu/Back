@@ -1,0 +1,1891 @@
+const express = require('express');
+const router = express.Router();
+const https = require('https');
+const { runQuery, allQuery, getQuery } = require('../db');
+const authMiddleware = require('../middleware/auth');
+const wa = require('../whatsapp');
+
+// In-memory lock to prevent concurrent auto-submit calls for the same order.
+// Without this, two simultaneous requests can both pass the api_status check
+// before either one writes the error back, causing duplicate provider calls.
+const submittingOrders = new Set();
+
+// Helper to make API calls to Dhru Fusion Server
+function callDhruApi(apiUrl, username, apiKey, action, parameters = {}) {
+  return new Promise((resolve, reject) => {
+    try {
+      const urlObj = new URL(apiUrl);
+      const postParams = new URLSearchParams();
+      postParams.append('username', username);
+      postParams.append('apiaccesskey', apiKey);
+      postParams.append('action', action);
+      postParams.append('requestformat', 'JSON');
+
+      // Helper for nested flattening to support PARAMETERS and CUSTOMFIELD correctly in Dhru Fusion
+      const appendParam = (prefix, val) => {
+        if (val === null || val === undefined) return;
+        if (typeof val === 'object' && !Array.isArray(val)) {
+          for (const [k, v] of Object.entries(val)) {
+            appendParam(`${prefix}[${k}]`, v);
+          }
+        } else if (Array.isArray(val)) {
+          val.forEach((item, idx) => {
+            appendParam(`${prefix}[${idx}]`, item);
+          });
+        } else {
+          postParams.append(prefix, String(val));
+        }
+      };
+
+      for (const [key, val] of Object.entries(parameters)) {
+        appendParam(`parameters[${key}]`, val);
+      }
+
+      const postData = postParams.toString();
+
+      const options = {
+        hostname: urlObj.hostname,
+        port: urlObj.port || (urlObj.protocol === 'https:' ? 443 : 80),
+        path: urlObj.pathname + urlObj.search,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Content-Length': Buffer.byteLength(postData),
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'application/json, text/plain, */*'
+        },
+        timeout: 15000
+      };
+
+      const client = urlObj.protocol === 'https:' ? https : require('http');
+      const req = client.request(options, (res) => {
+        let body = '';
+        res.on('data', (chunk) => { body += chunk; });
+        res.on('end', () => {
+          try {
+            if (res.statusCode >= 400) {
+              reject(new Error(`API responded with status code ${res.statusCode}. Cloudflare or server block may be active.`));
+              return;
+            }
+            const json = JSON.parse(body);
+            resolve(json);
+          } catch (e) {
+            reject(new Error(`Response is not valid JSON. Response starts with: ${body.substring(0, 200)}`));
+          }
+        });
+      });
+
+      req.on('error', (e) => {
+        reject(new Error(`Network error connecting to API: ${e.message}`));
+      });
+
+      req.setTimeout(15000, () => {
+        req.destroy(new Error('API request timed out after 15 seconds.'));
+      });
+
+      req.write(postData);
+      req.end();
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+// Helper to strip HTML tags from a string
+function stripHtml(str) {
+  if (typeof str !== 'string') return str;
+  return str.replace(/<[^>]*>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').trim();
+}
+
+// Helper to extract error message from Dhru response
+function getDhruErrorMessage(responseData) {
+  if (!responseData || !responseData.ERROR) return 'Unknown error';
+  if (Array.isArray(responseData.ERROR)) {
+    // Collect all messages from the array
+    const messages = responseData.ERROR
+      .map(item => {
+        if (!item) return null;
+        const msg = item.MESSAGE || item.message || (typeof item === 'string' ? item : null);
+        return msg ? stripHtml(msg) : null;
+      })
+      .filter(Boolean);
+    if (messages.length > 0) return messages.join('. ');
+    return stripHtml(JSON.stringify(responseData.ERROR));
+  }
+  if (typeof responseData.ERROR === 'string') return stripHtml(responseData.ERROR);
+  if (responseData.ERROR && (responseData.ERROR.MESSAGE || responseData.ERROR.message)) {
+    return stripHtml(responseData.ERROR.MESSAGE || responseData.ERROR.message);
+  }
+  return stripHtml(JSON.stringify(responseData.ERROR));
+}
+
+// Helper to parse Dhru Fusion response format into a clean array of services
+// Helper: extract customFields from all possible Dhru Fusion / Omar-server field formats
+function extractCustomFields(s) {
+  // Try all known key patterns that Dhru Fusion/Omar server might use
+  let raw =
+    s["Requires.Custom"] ||
+    s["REQUIRES.CUSTOM"] ||
+    (s.Requires && s.Requires.Custom) ||
+    (s.REQUIRES && s.REQUIRES.CUSTOM) ||
+    (s.REQUIRES && s.REQUIRES.Custom) ||
+    (s.Requires && s.Requires.CUSTOM) ||
+    s.RequiresCustom ||
+    s.CUSTOMFIELD ||
+    s.CUSTOMFIELDS ||
+    s.customfields ||
+    s.CustomFields ||
+    s.FIELDS ||
+    s.Fields ||
+    s.FIELD ||
+    null;
+
+  if (!raw) return [];
+
+  // If it's a string containing JSON, parse it first
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      try {
+        raw = JSON.parse(trimmed);
+      } catch (e) {
+        // ignore parse error, will fall back to comma-separated below
+      }
+    }
+  }
+
+  // If it's an array of objects
+  if (Array.isArray(raw)) {
+    return raw.filter(f => f && (f.fieldname || f.FIELDNAME || f.name || f.NAME));
+  }
+
+  // If it's an object map: { "501": { reqid: "501", fieldtype, ... } }
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    return Object.entries(raw).map(([key, val]) => ({
+      field_id: (val && (val.reqid || val.REQID || val.id || val.ID)) || key,
+      fieldname: (val && (val.FIELDNAME || val.fieldname || val.name)) || key,
+      fieldtype: (val && (val.FIELDTYPE || val.fieldtype || val.type)) || 'text',
+      required: (val && (val.REQUIRED || val.required)) || 'on',
+      description: (val && (val.DESCRIPTION || val.description || val.placeholder)) || '',
+      fieldoptions: (val && (val.FIELDOPTIONS || val.fieldoptions || val.options)) || ''
+    }));
+  }
+
+  // If it's still a string, it must be comma-separated
+  if (typeof raw === 'string') {
+    return raw.split(',').map(n => n.trim()).filter(Boolean).map(n => ({
+      fieldname: n,
+      fieldtype: 'text',
+      required: 'on',
+      description: ''
+    }));
+  }
+
+  return [];
+}
+
+// Helper: normalize a single raw custom field object into our standard format
+function normalizeCustomField(cf) {
+  const name = (cf.fieldname || cf.FIELDNAME || cf.name || cf.NAME || '').trim();
+  if (!name) return null;
+  return {
+    field_id: cf.field_id || cf.reqid || cf.REQID || cf.id || cf.ID || name,
+    fieldname: name,
+    fieldtype: (cf.fieldtype || cf.FIELDTYPE || cf.type || 'text').toLowerCase(),
+    required: cf.required || cf.REQUIRED || 'on',
+    description: cf.description || cf.DESCRIPTION || cf.placeholder || '',
+    fieldoptions: cf.fieldoptions || cf.FIELDOPTIONS || cf.options || ''
+  };
+}
+
+function parseDhruServices(data, serviceType = 'imei') {
+  let rawServices = [];
+  if (!data) return [];
+  
+  // Helper to extract price/credit dynamically from various possible keys
+  const getServicePrice = (s) => {
+    return parseFloat(s.PRICE || s.CREDIT || s.Price || s.Credit || s.price || s.credit || 0) || 0;
+  };
+
+  const pushService = (s, category) => {
+    let requiresImei = serviceType !== 'server';
+    const req = s.REQUIRES || s.Requires || s;
+    if (req && (req.IMEI === false || req.IMEI === 'false' || req.IMEI === '0' || req['IMEI'] === false || req['IMEI'] === 'false' || req['IMEI'] === '0')) requiresImei = false;
+    if (s['REQUIRES.IMEI'] === false || s['REQUIRES.IMEI'] === 'false' || s['REQUIRES.IMEI'] === '0') requiresImei = false;
+    
+    const sName = String(s.SERVICENAME || '').toLowerCase();
+    const cName = String(category || '').toLowerCase();
+
+    // Override for services like ChatGPT Premium that might be wrongly categorised
+    if (sName.includes('chatgpt') || sName.includes('premium')) requiresImei = false;
+
+    rawServices.push({
+      id: s.SERVICEID,
+      name: s.SERVICENAME,
+      category: category,
+      price: getServicePrice(s),
+      time: s.TIME || '',
+      customFields: extractCustomFields(s).map(normalizeCustomField).filter(Boolean),
+      min_quantity: parseInt(s.MIN || s.min || s.QNT_MIN || s.qnt_min || s.MIN_QNT || s.min_qnt || s.QNT || 1) || 1,
+      max_quantity: parseInt(s.MAX || s.max || s.QNT_MAX || s.qnt_max || s.MAX_QNT || s.max_qnt || 0) || 0,
+      requires_quantity: s.QNT === "1" || s.QNT === "Y" || s.QNT === 1 || s.qnt === "1" || s.qnt === "Y" || s.qnt === 1,
+      requires_imei: requiresImei,
+      serviceType: serviceType || 'imei'
+    });
+  };
+
+  // Format C: { SUCCESS: true, RESULT: [ { GROUPNAME, SERVICES: [ ... ] } ] }
+  if (data.SUCCESS === true && Array.isArray(data.RESULT)) {
+    for (const group of data.RESULT) {
+      const categoryName = group.GROUPNAME || 'عام';
+      if (Array.isArray(group.SERVICES)) {
+        for (const s of group.SERVICES) pushService(s, categoryName);
+      }
+    }
+  } 
+  // Format A, B, D: SUCCESS is an array
+  else if (Array.isArray(data.SUCCESS)) {
+    const first = data.SUCCESS[0];
+    if (first && first.LIST && typeof first.LIST === 'object') {
+      for (const catKey of Object.keys(first.LIST)) {
+        const catObj = first.LIST[catKey];
+        // Format B: SUCCESS[0].LIST is { "Category": [ { SERVICEID, SERVICENAME, ... } ] }
+        if (Array.isArray(catObj)) {
+          for (const s of catObj) pushService(s, catKey);
+        } 
+        // Format D (Amrr Unlocker): SUCCESS[0].LIST is { "Category": { GROUPNAME, SERVICES: { "3686": { SERVICEID, ... } } } }
+        else if (catObj && typeof catObj === 'object') {
+          const categoryName = catObj.GROUPNAME || catKey || 'عام';
+          const servicesObj = catObj.SERVICES;
+          if (Array.isArray(servicesObj)) {
+            for (const s of servicesObj) pushService(s, categoryName);
+          } else if (servicesObj && typeof servicesObj === 'object') {
+            for (const svcKey of Object.keys(servicesObj)) {
+              const s = servicesObj[svcKey];
+              if (s && s.SERVICEID) pushService(s, categoryName);
+            }
+          }
+        }
+      }
+    } else {
+      // Format A: SUCCESS is an array of service objects directly
+      for (const s of data.SUCCESS) {
+        if (s.SERVICEID) pushService(s, s.GROUPNAME || 'عام');
+      }
+    }
+  }
+  return rawServices;
+}
+
+// 1. Get Settings (Admin Protected or Public fallback)
+router.get('/settings', async (req, res) => {
+  try {
+    const apiKeyRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_key'");
+    const apiUrlRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_url'");
+    const apiUserRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_username'");
+    
+    let apiKey = apiKeyRow ? apiKeyRow.value : '';
+    let apiUrl = apiUrlRow ? apiUrlRow.value : '';
+    let apiUser = apiUserRow ? apiUserRow.value : '';
+    
+    if (apiUser === null || apiUser === undefined) {
+      apiUser = '';
+      const exists = await getQuery("SELECT * FROM settings WHERE key = 'amrr_unlocker_username'");
+      if (!exists) {
+        await runQuery("INSERT INTO settings (key, value) VALUES ('amrr_unlocker_username', '')");
+      }
+    }
+    
+    // Seed defaults if empty
+    if (!apiKey) {
+      apiKey = '5TC-O62-NRZ-HF3-NQ4-3VJ-S7V-FPK';
+      const exists = await getQuery("SELECT * FROM settings WHERE key = 'amrr_unlocker_api_key'");
+      if (!exists) {
+        await runQuery("INSERT INTO settings (key, value) VALUES ('amrr_unlocker_api_key', ?)", [apiKey]);
+      } else {
+        await runQuery("UPDATE settings SET value = ? WHERE key = 'amrr_unlocker_api_key'", [apiKey]);
+      }
+    }
+    if (!apiUrl) {
+      apiUrl = 'https://amrr-unlocker.com/api/index.php';
+      const exists = await getQuery("SELECT * FROM settings WHERE key = 'amrr_unlocker_api_url'");
+      if (!exists) {
+        await runQuery("INSERT INTO settings (key, value) VALUES ('amrr_unlocker_api_url', ?)", [apiUrl]);
+      } else {
+        await runQuery("UPDATE settings SET value = ? WHERE key = 'amrr_unlocker_api_url'", [apiUrl]);
+      }
+    }
+    
+    res.json({
+      api_key: apiKey,
+      api_url: apiUrl,
+      username: apiUser
+    });
+  } catch (error) {
+    console.error('Fetch unlocker settings error:', error);
+    res.status(500).json({ message: 'حدث خطأ أثناء جلب إعدادات البوابة.' });
+  }
+});
+
+// Debug route to see exact raw fields from Dhru
+router.get('/debug-service/:id', async (req, res) => {
+  try {
+    const apiKeyRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_key'");
+    const apiUrlRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_url'");
+    const apiUserRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_username'");
+    const apiKey = apiKeyRow && apiKeyRow.value ? apiKeyRow.value : '5TC-O62-NRZ-HF3-NQ4-3VJ-S7V-FPK';
+    const apiUrl = apiUrlRow && apiUrlRow.value ? apiUrlRow.value : 'https://amrr-unlocker.com/api/index.php';
+    const apiUser = apiUserRow && apiUserRow.value ? apiUserRow.value : 'Hassen1990';
+
+    const data = await callDhruApi(apiUrl, apiUser, apiKey, 'imeiservicelist');
+    let targetService = null;
+
+    if (data.SUCCESS === true && Array.isArray(data.RESULT)) {
+      for (const group of data.RESULT) {
+        if (Array.isArray(group.SERVICES)) {
+          const found = group.SERVICES.find(s => s.SERVICEID == req.params.id);
+          if (found) targetService = found;
+        }
+      }
+    } else if (Array.isArray(data.SUCCESS)) {
+      const first = data.SUCCESS[0];
+      if (first && first.LIST && typeof first.LIST === 'object') {
+        for (const catKey of Object.keys(first.LIST)) {
+          const catObj = first.LIST[catKey];
+          if (Array.isArray(catObj)) {
+            const found = catObj.find(s => s.SERVICEID == req.params.id);
+            if (found) targetService = found;
+          } else if (catObj && typeof catObj === 'object' && catObj.SERVICES) {
+            for (const key of Object.keys(catObj.SERVICES)) {
+              const svc = catObj.SERVICES[key];
+              if (svc.SERVICEID == req.params.id) targetService = svc;
+            }
+          }
+        }
+      }
+    }
+
+    if (targetService) {
+      res.json({
+        raw_service: targetService,
+        extracted_fields: extractCustomFields(targetService)
+      });
+    } else {
+      res.status(404).json({ message: 'Service not found in API' });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Debug route: show ALL services and their raw custom fields from Omar server API
+// Usage: GET /api/unlocker/debug-all-fields?type=imei   (type = imei | server | remote)
+// Returns up to 50 services with their raw data + extracted fields so you can compare
+router.get('/debug-all-fields', async (req, res) => {
+  try {
+    const apiKeyRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_key'");
+    const apiUrlRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_url'");
+    const apiUserRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_username'");
+    const apiKey = apiKeyRow && apiKeyRow.value ? apiKeyRow.value : '5TC-O62-NRZ-HF3-NQ4-3VJ-S7V-FPK';
+    const apiUrl = apiUrlRow && apiUrlRow.value ? apiUrlRow.value : 'https://amrr-unlocker.com/api/index.php';
+    const apiUser = apiUserRow && apiUserRow.value ? apiUserRow.value : 'Hassen1990';
+
+    const serviceType = req.query.type || 'imei'; // imei | server | remote
+    const action = serviceType === 'server' ? 'serverservicelist' : (serviceType === 'remote' ? 'remoteservicelist' : 'imeiservicelist');
+    const limit = parseInt(req.query.limit) || 50; // how many services to return
+
+    const data = await callDhruApi(apiUrl, apiUser, apiKey, action);
+
+    // Collect all raw services
+    const rawServices = [];
+
+    if (data.SUCCESS === true && Array.isArray(data.RESULT)) {
+      // Format C
+      for (const group of data.RESULT) {
+        const groupName = group.GROUPNAME || 'عام';
+        if (Array.isArray(group.SERVICES)) {
+          for (const s of group.SERVICES) {
+            rawServices.push({ _group: groupName, ...s });
+          }
+        }
+      }
+    } else if (Array.isArray(data.SUCCESS)) {
+      const first = data.SUCCESS[0];
+      if (first && first.LIST && typeof first.LIST === 'object') {
+        for (const catKey of Object.keys(first.LIST)) {
+          const catObj = first.LIST[catKey];
+          if (Array.isArray(catObj)) {
+            for (const s of catObj) rawServices.push({ _group: catKey, ...s });
+          } else if (catObj && typeof catObj === 'object') {
+            const groupName = catObj.GROUPNAME || catKey;
+            const servicesObj = catObj.SERVICES;
+            if (Array.isArray(servicesObj)) {
+              for (const s of servicesObj) rawServices.push({ _group: groupName, ...s });
+            } else if (servicesObj && typeof servicesObj === 'object') {
+              for (const svcKey of Object.keys(servicesObj)) {
+                const s = servicesObj[svcKey];
+                if (s && s.SERVICEID) rawServices.push({ _group: groupName, ...s });
+              }
+            }
+          }
+        }
+      } else {
+        for (const s of data.SUCCESS) {
+          if (s.SERVICEID) rawServices.push({ _group: s.GROUPNAME || 'عام', ...s });
+        }
+      }
+    }
+
+    if (rawServices.length === 0) {
+      return res.json({
+        success: false,
+        message: 'لم يُعثر على أي خدمات. تحقق من الـ API key والـ URL.',
+        raw_response_keys: Object.keys(data),
+        raw_sample: JSON.stringify(data).substring(0, 500)
+      });
+    }
+
+    // Build a diagnostic report for each service (up to limit)
+    const sample = rawServices.slice(0, limit);
+    const report = sample.map(s => {
+      const extracted = extractCustomFields(s);
+      const normalized = extracted.map(normalizeCustomField).filter(Boolean);
+      return {
+        id: s.SERVICEID,
+        name: s.SERVICENAME,
+        group: s._group,
+        price: s.PRICE || s.CREDIT || 0,
+        has_custom_fields: normalized.length > 0,
+        custom_fields_count: normalized.length,
+        custom_fields: normalized,
+        // Show WHICH raw keys contained field data (diagnostic)
+        raw_field_keys: Object.keys(s).filter(k =>
+          k.toLowerCase().includes('custom') ||
+          k.toLowerCase().includes('field') ||
+          k.toLowerCase().includes('require') ||
+          k === 'FIELDS' || k === 'Fields'
+        ),
+        // Show the raw REQUIRES structure if present
+        raw_requires: s.REQUIRES || s.Requires || s['REQUIRES'] || null
+      };
+    });
+
+    // Summary stats
+    const withFields = report.filter(r => r.has_custom_fields);
+    const withoutFields = report.filter(r => !r.has_custom_fields);
+
+    res.json({
+      success: true,
+      service_type: serviceType,
+      api_url: apiUrl,
+      total_services_from_api: rawServices.length,
+      showing: sample.length,
+      summary: {
+        with_custom_fields: withFields.length,
+        without_custom_fields: withoutFields.length,
+        services_with_fields: withFields.map(r => ({ id: r.id, name: r.name, fields: r.custom_fields.map(f => f.fieldname) }))
+      },
+      services: report
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 2. Update Settings (Admin Protected)
+router.put('/settings', authMiddleware, async (req, res) => {
+  const { api_key, api_url, username } = req.body;
+  if (!api_key || !api_url || username === undefined) {
+    return res.status(400).json({ message: 'جميع الحقول مطلوبة.' });
+  }
+  
+  try {
+    await runQuery("UPDATE settings SET value = ? WHERE key = 'amrr_unlocker_api_key'", [api_key.trim()]);
+    await runQuery("UPDATE settings SET value = ? WHERE key = 'amrr_unlocker_api_url'", [api_url.trim()]);
+    
+    const exists = await getQuery("SELECT * FROM settings WHERE key = 'amrr_unlocker_username'");
+    if (!exists) {
+      await runQuery("INSERT INTO settings (key, value) VALUES ('amrr_unlocker_username', ?)", [username.trim()]);
+    } else {
+      await runQuery("UPDATE settings SET value = ? WHERE key = 'amrr_unlocker_username'", [username.trim()]);
+    }
+    res.json({ message: 'تم تحديث الإعدادات بنجاح.' });
+  } catch (error) {
+    console.error('Update unlocker settings error:', error);
+    res.status(500).json({ message: 'حدث خطأ أثناء تحديث إعدادات البوابة.' });
+  }
+});
+
+// 3. Fetch Services from Remote API (Admin Protected)
+router.post('/fetch-services', authMiddleware, async (req, res) => {
+  try {
+    const apiKeyRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_key'");
+    const apiUrlRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_url'");
+    
+    const apiUserRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_username'");
+    const apiKey = apiKeyRow && apiKeyRow.value ? apiKeyRow.value : '5TC-O62-NRZ-HF3-NQ4-3VJ-S7V-FPK';
+    const apiUrl = apiUrlRow && apiUrlRow.value ? apiUrlRow.value : 'https://amrr-unlocker.com/api/index.php';
+    const apiUser = apiUserRow && apiUserRow.value ? apiUserRow.value : 'Hassen1990';
+    
+    // Fetch all service types (IMEI, Server, and Remote) to guarantee complete service coverage
+    const [imeiRes, serverRes, remoteRes] = await Promise.all([
+      callDhruApi(apiUrl, apiUser, apiKey, 'imeiservicelist').catch(e => ({ ERROR: e.message })),
+      callDhruApi(apiUrl, apiUser, apiKey, 'serverservicelist').catch(e => ({ ERROR: e.message })),
+      callDhruApi(apiUrl, apiUser, apiKey, 'remoteservicelist').catch(e => ({ ERROR: e.message }))
+    ]);
+    
+    const services = [
+      ...parseDhruServices(imeiRes, 'imei'),
+      ...parseDhruServices(serverRes, 'server'),
+      ...parseDhruServices(remoteRes, 'remote')
+    ];
+    
+    if (services.length === 0) {
+      if (imeiRes.ERROR && !serverRes.SUCCESS && !remoteRes.SUCCESS) {
+        console.error('[Dhru API Error Response]:', JSON.stringify(imeiRes.ERROR));
+        const errObj = Array.isArray(imeiRes.ERROR) ? imeiRes.ERROR[0] : imeiRes.ERROR;
+        const errorMsg = errObj.MESSAGE || errObj.message || JSON.stringify(errObj);
+        return res.status(400).json({ message: `خطأ من الخادم: ${errorMsg}` });
+      }
+      return res.status(400).json({ message: 'لم يتم العثور على أي خدمات. يرجى مراجعة صلاحيات المفتاح مع مزود الخدمة.' });
+    }
+    
+    res.json({
+      success: true,
+      servicesCount: services.length,
+      services: services
+    });
+  } catch (error) {
+    console.error('Fetch unlocker services error:', error.message);
+    res.status(500).json({ message: error.message || 'فشل الاتصال بالخادم الخارجي. قد يكون جدار الحماية (Cloudflare) يمنع هذا الطلب.' });
+  }
+});
+
+// 3b. Fetch supplier account info and balance (Admin Protected)
+router.get('/balance', authMiddleware, async (req, res) => {
+  try {
+    const apiKeyRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_key'");
+    const apiUrlRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_url'");
+    const apiUserRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_username'");
+    
+    const apiKey = apiKeyRow && apiKeyRow.value ? apiKeyRow.value : '5TC-O62-NRZ-HF3-NQ4-3VJ-S7V-FPK';
+    const apiUrl = apiUrlRow && apiUrlRow.value ? apiUrlRow.value : 'https://amrr-unlocker.com/api/index.php';
+    const apiUser = apiUserRow && apiUserRow.value ? apiUserRow.value : 'Hassen1990';
+    
+    let responseData;
+    try {
+      responseData = await callDhruApi(apiUrl, apiUser, apiKey, 'accountinfo');
+    } catch (err) {
+      if (process.env.USE_LOCAL_JSON_DB === 'true' || err.message.includes('403') || err.message.includes('Cloudflare')) {
+        console.warn('Unlocker API unreachable or Cloudflare 403 blocked. Returning offline local balance simulation.');
+        return res.json({
+          success: true,
+          credit: "$0.00 (محلي/حظر Cloudflare مؤقت)",
+          credit_raw: 0,
+          currency: "USD",
+          email: "local-mode@offline"
+        });
+      }
+      throw err;
+    }
+    
+    if (responseData.ERROR) {
+      const errorMsg = getDhruErrorMessage(responseData);
+      return res.status(400).json({ message: `فشل جلب رصيد الحساب: ${errorMsg}` });
+    }
+    
+    let info = null;
+    if (responseData.SUCCESS && Array.isArray(responseData.SUCCESS)) {
+      info = responseData.SUCCESS[0]?.AccountInfo || null;
+    }
+    
+    if (!info) {
+      return res.status(400).json({ message: 'تعذر الحصول على معلومات الحساب.' });
+    }
+    
+    res.json({
+      success: true,
+      credit: info.credit ? info.credit.trim() : `$${info.creditraw}`,
+      credit_raw: parseFloat(info.creditraw) || 0,
+      currency: info.currency || 'USD',
+      email: info.mail || ''
+    });
+  } catch (error) {
+    console.error('Fetch balance error:', error.message);
+    if (process.env.USE_LOCAL_JSON_DB === 'true') {
+      return res.json({
+        success: true,
+        credit: "$0.00 (محلي/غير متصل)",
+        credit_raw: 0,
+        currency: "USD",
+        email: "local-mode@offline"
+      });
+    }
+    res.status(500).json({ message: error.message || 'حدث خطأ أثناء جلب معلومات الرصيد.' });
+  }
+});
+
+// Core Smart Sync Logic
+async function performSmartSync(customRate, customMarkup, customShouldGroup) {
+  // 1. Determine settings
+  const rateRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_exchange_rate'");
+  const markupRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_markup_percent'");
+  const groupRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_group_as_packages'");
+  
+  const rate = customRate !== undefined ? parseFloat(customRate) : (rateRow ? parseFloat(rateRow.value) : 50);
+  const markup = customMarkup !== undefined ? parseFloat(customMarkup) : (markupRow ? parseFloat(markupRow.value) : 10);
+  const shouldGroup = customShouldGroup !== undefined ? customShouldGroup : (groupRow ? groupRow.value === 'true' : true);
+
+  const apiKeyRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_key'");
+  const apiUrlRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_url'");
+  const apiUserRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_username'");
+  const apiKey = apiKeyRow && apiKeyRow.value ? apiKeyRow.value : '5TC-O62-NRZ-HF3-NQ4-3VJ-S7V-FPK';
+  const apiUrl = apiUrlRow && apiUrlRow.value ? apiUrlRow.value : 'https://amrr-unlocker.com/api/index.php';
+  const apiUser = apiUserRow && apiUserRow.value ? apiUserRow.value : 'Hassen1990';
+
+  console.log('[Smart Sync] Fetching fresh services list from provider...');
+  const [imeiRes, serverRes, remoteRes] = await Promise.all([
+    callDhruApi(apiUrl, apiUser, apiKey, 'imeiservicelist').catch(e => ({ ERROR: e.message })),
+    callDhruApi(apiUrl, apiUser, apiKey, 'serverservicelist').catch(e => ({ ERROR: e.message })),
+    callDhruApi(apiUrl, apiUser, apiKey, 'remoteservicelist').catch(e => ({ ERROR: e.message }))
+  ]);
+
+  const allServices = [
+    ...parseDhruServices(imeiRes, 'imei'),
+    ...parseDhruServices(serverRes, 'server'),
+    ...parseDhruServices(remoteRes, 'remote')
+  ];
+
+  if (allServices.length === 0) {
+    throw new Error('تعذر جلب الخدمات من المزود، تأكد من الاتصال أو المفاتيح.');
+  }
+
+  let apiCurrency = 'USD';
+  try {
+    const balanceData = await callDhruApi(apiUrl, apiUser, apiKey, 'accountinfo');
+    if (balanceData && balanceData.SUCCESS && Array.isArray(balanceData.SUCCESS)) {
+      apiCurrency = balanceData.SUCCESS[0]?.AccountInfo?.currency || 'USD';
+    }
+  } catch (e) {
+    console.warn('Failed to fetch provider currency, defaulting to USD');
+  }
+
+  console.log(`[Smart Sync] Processing ${allServices.length} services using UPSERT...`);
+
+  let addedCategoriesCount = 0;
+  let addedServicesCount = 0;
+  let updatedServicesCount = 0;
+
+  if (shouldGroup) {
+    const groups = {};
+    for (const s of allServices) {
+      const catName = s.category || 'عام';
+      if (!groups[catName]) groups[catName] = [];
+      groups[catName].push(s);
+    }
+
+    for (const [groupName, groupServices] of Object.entries(groups)) {
+      const cleanGroupName = groupName || 'عام';
+
+      const combinedFields = [];
+      const addedFieldNames = new Set();
+      
+      for (const s of groupServices) {
+        if (s.customFields && Array.isArray(s.customFields)) {
+          for (const cf of s.customFields) {
+            const fieldId = `custom_${cf.field_id || cf.fieldname}`;
+            const fieldLabel = String(cf.fieldname || '').toLowerCase().trim();
+            if (!addedFieldNames.has(fieldId) && !addedFieldNames.has(fieldLabel)) {
+              addedFieldNames.add(fieldId);
+              addedFieldNames.add(fieldLabel);
+              combinedFields.push({
+                id: fieldId,
+                name: fieldId,
+                label: cf.fieldname,
+                placeholder: cf.description || `أدخل ${cf.fieldname}`,
+                type: cf.fieldtype === 'select' ? 'select' : (cf.fieldtype === 'textarea' ? 'textarea' : 'text'),
+                options: cf.fieldoptions ? cf.fieldoptions.split(',').map(o => o.trim()) : [],
+                required: cf.required === 'on'
+              });
+            }
+          }
+        }
+      }
+
+      // If no fields collected and group is IMEI-dominant, inject IMEI fallback field
+      if (combinedFields.length === 0) {
+        const dominantTypeEarly = Object.entries(
+          groupServices.reduce((acc, s) => { const t = s.serviceType || 'imei'; acc[t] = (acc[t] || 0) + 1; return acc; }, {})
+        ).sort((a, b) => b[1] - a[1])[0]?.[0] || 'imei';
+        if (dominantTypeEarly === 'imei') {
+          combinedFields.push({ id: 'imei', name: 'imei', label: 'IMEI / SN / ECID', placeholder: 'أدخل رقم IMEI أو الرقم التسلسلي (SN) أو ECID', type: 'text', required: true });
+        } else {
+          combinedFields.push({ id: 'player_id', name: 'player_id', label: 'معرّف الجهاز / ID', placeholder: 'أدخل معرّف الجهاز بدقة هنا', type: 'text', required: true });
+        }
+      }
+
+      // UPSERT CATEGORY
+      let cat = await getQuery('SELECT id FROM categories WHERE name = ?', [cleanGroupName]);
+      let categoryId;
+      if (!cat) {
+        const catInsert = await runQuery(
+          "INSERT INTO categories (name, image, color, icon, currency, fields, fields_title) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          [cleanGroupName, 'default', '#0284c7', 'credit-card', 'USD', JSON.stringify(combinedFields), 'بيانات الخدمة']
+        );
+        categoryId = catInsert.lastID;
+        addedCategoriesCount++;
+      } else {
+        categoryId = cat.id;
+        // Optionally update category fields here if needed
+        await runQuery("UPDATE categories SET fields = ? WHERE id = ?", [JSON.stringify(combinedFields), categoryId]);
+      }
+
+      const mergedPackages = [];
+      let multiplier = 1;
+      if (apiCurrency === 'EGP') {
+        multiplier = 1 / rate;
+      }
+
+      groupServices.forEach((s, idx) => {
+        const apiPriceUsd = parseFloat(s.price) || 0;
+        const localPrice = parseFloat((apiPriceUsd * multiplier * (1 + markup / 100)).toFixed(2));
+        const cleanPkgName = s.name || 'تفعيل فوري تلقائي';
+
+        const isDynamicPkg = (s.max_quantity > 1 && s.max_quantity !== s.min_quantity) || (s.min_quantity > 1 && s.max_quantity === 0) || s.requires_quantity;
+
+        const packageFields = [];
+        const hasCustom = s.customFields && s.customFields.length > 0;
+        
+        // Removed fallback player_id injection for packages
+        if (hasCustom) {
+          s.customFields.forEach(cf => {
+            const fieldId = `custom_${cf.field_id || cf.fieldname}`;
+            packageFields.push({
+              id: fieldId,
+              name: fieldId,
+              label: cf.fieldname,
+              placeholder: cf.description || `أدخل ${cf.fieldname}`,
+              type: cf.fieldtype === 'select' ? 'select' : (cf.fieldtype === 'textarea' ? 'textarea' : 'text'),
+              options: cf.fieldoptions ? cf.fieldoptions.split(',').map(o => o.trim()) : [],
+              required: cf.required === 'on'
+            });
+          });
+        }
+
+        mergedPackages.push({
+          id: idx + 1,
+          name: cleanPkgName,
+          price: localPrice,
+          usd_price: localPrice,
+          api_service_id: s.id.toString(),
+          // Store service type per-package so order submission uses correct API action
+          api_service_type: s.serviceType || 'imei',
+          status: "Available",
+          discount: 0,
+          min_quantity: s.min_quantity || 1,
+          max_quantity: s.max_quantity || 0,
+          requires_quantity: isDynamicPkg,
+          fields: packageFields
+        });
+      });
+
+      const minPrice = mergedPackages.length > 0 ? Math.min(...mergedPackages.map(p => p.price)) : 0;
+      const packagesJson = JSON.stringify(mergedPackages);
+      const fieldsJson = JSON.stringify(combinedFields);
+
+      // Determine dominant service type for the group (most common)
+      const typeCounts = groupServices.reduce((acc, s) => { const t = s.serviceType || 'imei'; acc[t] = (acc[t] || 0) + 1; return acc; }, {});
+      const dominantType = Object.entries(typeCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || 'imei';
+
+      // UPSERT SERVICE (Grouped by name since api_service_id is 'grouped')
+      let existingSvc = await getQuery("SELECT id FROM services WHERE name = ? AND api_source = 'amrr-unlocker' AND api_service_id = 'grouped'", [cleanGroupName]);
+      
+      if (!existingSvc) {
+        await runQuery(
+          "INSERT INTO services (category_id, name, description, price, image, packages, fields, price_type, price_per_thousand, fields_title, api_service_id, api_source, api_price, min_quantity, max_quantity, api_service_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          [categoryId, cleanGroupName, `باقات وتفعيل خدمات ${cleanGroupName}`, minPrice, 'default', packagesJson, fieldsJson, 'fixed', 0, 'بيانات الخدمة', 'grouped', 'amrr-unlocker', 0, 1, 0, dominantType]
+        );
+        addedServicesCount++;
+      } else {
+        await runQuery(
+          "UPDATE services SET price = ?, packages = ?, fields = ?, category_id = ?, api_service_type = ? WHERE id = ?",
+          [minPrice, packagesJson, fieldsJson, categoryId, dominantType, existingSvc.id]
+        );
+        updatedServicesCount++;
+      }
+    }
+  } else {
+    // Individual Services UPSERT
+    for (const s of allServices) {
+      const cleanCategoryName = s.category || 'عام';
+
+      let cat = await getQuery('SELECT id FROM categories WHERE name = ?', [cleanCategoryName]);
+      let categoryId;
+      if (!cat) {
+        const defaultFields = [];
+        const catInsert = await runQuery(
+          "INSERT INTO categories (name, image, color, icon, currency, fields, fields_title) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          [cleanCategoryName, 'default', '#0284c7', 'credit-card', 'USD', JSON.stringify(defaultFields), 'بيانات الخدمة']
+        );
+        categoryId = catInsert.lastID;
+        addedCategoriesCount++;
+      } else {
+        categoryId = cat.id;
+      }
+
+      const serviceFields = [];
+      if (s.customFields && Array.isArray(s.customFields)) {
+        s.customFields.forEach(cf => {
+          const fieldId = `custom_${cf.field_id || cf.fieldname}`;
+          serviceFields.push({
+            id: fieldId,
+            name: fieldId,
+            label: cf.fieldname,
+            placeholder: cf.description || `أدخل ${cf.fieldname}`,
+            type: cf.fieldtype === 'select' ? 'select' : (cf.fieldtype === 'textarea' ? 'textarea' : 'text'),
+            options: cf.fieldoptions ? cf.fieldoptions.split(',').map(o => o.trim()) : [],
+            required: cf.required === 'on'
+          });
+        });
+      }
+      // If no custom fields and service is IMEI type, inject IMEI field as fallback
+      if (serviceFields.length === 0) {
+        const svcType = s.serviceType || 'imei';
+        if (svcType === 'imei') {
+          serviceFields.push({ id: 'imei', name: 'imei', label: 'IMEI / SN / ECID', placeholder: 'أدخل رقم IMEI أو الرقم التسلسلي (SN) أو ECID', type: 'text', required: true });
+        } else {
+          serviceFields.push({ id: 'player_id', name: 'player_id', label: 'معرّف الجهاز / ID', placeholder: 'أدخل معرّف الجهاز بدقة هنا', type: 'text', required: true });
+        }
+      }
+
+      let multiplier = 1;
+      if (apiCurrency === 'EGP') multiplier = 1 / rate;
+
+      const apiPriceUsd = parseFloat(s.price) || 0;
+      const localPrice = parseFloat((apiPriceUsd * multiplier * (1 + markup / 100)).toFixed(2));
+      const cleanServiceName = s.name || 'تفعيل فوري تلقائي';
+      const svcType = s.serviceType || 'imei';
+
+      const minQty = s.min_quantity || 1;
+      const maxQty = s.max_quantity || 0;
+      const isDynamic = (maxQty > 1 && maxQty !== minQty) || (minQty > 1 && maxQty === 0) || s.requires_quantity;
+      
+      const priceType = isDynamic ? 'dynamic' : 'fixed';
+      const pricePerThousand = isDynamic ? localPrice * 1000 : 0;
+      
+      const packagesJson = isDynamic ? '[]' : JSON.stringify([{ id: 1, name: "تفعيل فوري تلقائي", price: localPrice, usd_price: localPrice, api_service_id: s.id.toString(), api_service_type: svcType, status: "Available", discount: 0 }]);
+      const fieldsJson = JSON.stringify(serviceFields);
+
+      let existingSvc = await getQuery("SELECT id FROM services WHERE api_service_id = ? AND api_source = 'amrr-unlocker'", [s.id.toString()]);
+
+      if (!existingSvc) {
+        await runQuery(
+          "INSERT INTO services (category_id, name, description, price, image, packages, fields, price_type, price_per_thousand, fields_title, api_service_id, api_source, api_price, min_quantity, max_quantity, api_service_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          [categoryId, cleanServiceName, `تفعيل خدمة ${cleanServiceName} فوري عبر API`, isDynamic ? 0 : localPrice, 'default', packagesJson, fieldsJson, priceType, pricePerThousand, 'بيانات الخدمة', s.id.toString(), 'amrr-unlocker', apiPriceUsd, minQty, maxQty, svcType]
+        );
+        addedServicesCount++;
+      } else {
+        await runQuery(
+          "UPDATE services SET price = ?, packages = ?, fields = ?, price_type = ?, price_per_thousand = ?, api_price = ?, min_quantity = ?, max_quantity = ?, category_id = ?, name = ?, api_service_type = ? WHERE id = ?",
+          [isDynamic ? 0 : localPrice, packagesJson, fieldsJson, priceType, pricePerThousand, apiPriceUsd, minQty, maxQty, categoryId, cleanServiceName, svcType, existingSvc.id]
+        );
+        updatedServicesCount++;
+      }
+    }
+  }
+
+  return { addedCategoriesCount, addedServicesCount, updatedServicesCount };
+}
+
+// 3c. Smart Sync All from Amrr Unlocker (Admin Protected)
+router.post('/wipe-and-sync-all', authMiddleware, async (req, res) => {
+  const { exchange_rate, markup_percent, group_as_packages } = req.body;
+  
+  // Save settings globally to allow background auto-sync to use them
+  if (exchange_rate) await runQuery("INSERT INTO settings (key, value) VALUES ('amrr_exchange_rate', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [exchange_rate]);
+  if (markup_percent) await runQuery("INSERT INTO settings (key, value) VALUES ('amrr_markup_percent', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [markup_percent]);
+  if (group_as_packages !== undefined) await runQuery("INSERT INTO settings (key, value) VALUES ('amrr_group_as_packages', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [group_as_packages ? 'true' : 'false']);
+
+  try {
+    const result = await performSmartSync(exchange_rate, markup_percent, group_as_packages);
+    res.json({
+      success: true,
+      message: `تم تحديث المزامنة بذكاء (بدون حذف). تم إضافة ${result.addedCategoriesCount} قسماً جديداً و ${result.addedServicesCount} خدمة جديدة، وتحديث أسعار ${result.updatedServicesCount} خدمة.`,
+      categoriesCount: result.addedCategoriesCount,
+      servicesCount: result.addedServicesCount + result.updatedServicesCount
+    });
+  } catch (error) {
+    console.error('Smart sync all error:', error.message);
+    res.status(500).json({ message: `حدث خطأ أثناء المزامنة: ${error.message}` });
+  }
+});
+
+// 4. Import Services (Admin Protected)
+router.post('/import-services', authMiddleware, async (req, res) => {
+  const { services, exchange_rate, markup_percent, local_category_id, custom_category_name, group_as_packages } = req.body;
+  
+  if (!Array.isArray(services) || services.length === 0) {
+    return res.status(400).json({ message: 'يرجى تحديد خدمة واحدة على الأقل للاستيراد.' });
+  }
+  
+  const rate = parseFloat(exchange_rate) || 1;
+  const markup = parseFloat(markup_percent) || 0;
+  
+  try {
+    const apiKeyRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_key'");
+    const apiUrlRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_url'");
+    const apiUserRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_username'");
+    const apiKey = apiKeyRow && apiKeyRow.value ? apiKeyRow.value : '5TC-O62-NRZ-HF3-NQ4-3VJ-S7V-FPK';
+    const apiUrl = apiUrlRow && apiUrlRow.value ? apiUrlRow.value : 'https://amrr-unlocker.com/api/index.php';
+    const apiUser = apiUserRow && apiUserRow.value ? apiUserRow.value : 'Hassen1990';
+
+    let apiCurrency = 'USD';
+    try {
+      const balanceData = await callDhruApi(apiUrl, apiUser, apiKey, 'accountinfo');
+      if (balanceData && balanceData.SUCCESS && Array.isArray(balanceData.SUCCESS)) {
+        apiCurrency = balanceData.SUCCESS[0]?.AccountInfo?.currency || 'USD';
+      }
+    } catch (e) {
+      console.warn('Failed to fetch provider currency for import-services, defaulting to USD:', e.message);
+    }
+
+    const importedList = [];
+    // Check if we should create a new category or use a specific one
+    let targetCategoryId = null;
+    if (local_category_id === 'new' && custom_category_name && custom_category_name.trim()) {
+      const trimmedName = custom_category_name.replace(/(amrr\s*-?\s*unlocker|amrr|ameer)/gi, '').replace(/\s+/g, ' ').trim() || custom_category_name;
+      let cat = await getQuery('SELECT id FROM categories WHERE name = ?', [trimmedName]);
+      if (!cat) {
+        const defaultFields = [];
+        const catInsert = await runQuery(
+          "INSERT INTO categories (name, image, color, icon, currency, fields, fields_title) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          [trimmedName, 'default', '#0284c7', 'credit-card', 'USD', JSON.stringify(defaultFields), 'بيانات الخدمة']
+        );
+        targetCategoryId = catInsert.lastID;
+      } else {
+        targetCategoryId = cat.id;
+      }
+    } else if (local_category_id && local_category_id !== 'auto' && local_category_id !== 'new') {
+      targetCategoryId = parseInt(local_category_id);
+    }
+    
+    if (group_as_packages) {
+      // Group services by category name
+      const groups = {};
+      for (const s of services) {
+        const catName = (s.category || 'أدوات تخطي آيكلود').replace(/(amrr\s*-?\s*unlocker|amrr|ameer)/gi, '').replace(/\s+/g, ' ').trim() || s.category || 'أدوات تخطي آيكلود';
+        if (!groups[catName]) {
+          groups[catName] = [];
+        }
+        groups[catName].push(s);
+      }
+
+      for (const [groupName, groupServices] of Object.entries(groups)) {
+        await new Promise(r => setImmediate(r));
+        const cleanGroupName = groupName.replace(/(amrr\s*-?\s*unlocker|amrr|ameer)/gi, '').replace(/\s+/g, ' ').trim() || groupName || 'أدوات تخطي آيكلود';
+
+        let categoryId = targetCategoryId;
+        if (!categoryId) {
+          let cat = await getQuery('SELECT id FROM categories WHERE name = ?', [cleanGroupName]);
+          if (!cat) {
+            const defaultFields = [];
+            const catInsert = await runQuery(
+              "INSERT INTO categories (name, image, color, icon, currency, fields, fields_title) VALUES (?, ?, ?, ?, ?, ?, ?)",
+              [cleanGroupName, 'default', '#0284c7', 'credit-card', 'USD', JSON.stringify(defaultFields), 'بيانات الخدمة']
+            );
+            categoryId = catInsert.lastID;
+          } else {
+            categoryId = cat.id;
+          }
+        }
+
+        const combinedFields = [];
+        const addedFieldNames = new Set();
+
+        let hasCustomFields = false;
+
+        for (const s of groupServices) {
+          if (s.customFields && s.customFields.length > 0) {
+            hasCustomFields = true;
+            break;
+          }
+        }
+
+        let hasGroupCustomFields = groupServices.some(s => s.customFields && s.customFields.length > 0);
+        // Removed fallback player_id injection for group services in specific sync
+
+        for (const s of groupServices) {
+          if (s.customFields && Array.isArray(s.customFields)) {
+            for (const cf of s.customFields) {
+              const fieldId = `custom_${cf.field_id || cf.fieldname}`;
+              const fieldLabel = String(cf.fieldname || '').toLowerCase().trim();
+              if (!addedFieldNames.has(fieldId) && !addedFieldNames.has(fieldLabel)) {
+                addedFieldNames.add(fieldId);
+                addedFieldNames.add(fieldLabel);
+                combinedFields.push({
+                  id: fieldId,
+                  name: fieldId,
+                  label: cf.fieldname,
+                  placeholder: cf.description || `أدخل ${cf.fieldname}`,
+                  type: cf.fieldtype === 'select' ? 'select' : (cf.fieldtype === 'textarea' ? 'textarea' : 'text'),
+                  options: cf.fieldoptions ? cf.fieldoptions.split(',').map(o => o.trim()) : [],
+                  required: cf.required === 'on'
+                });
+              }
+            }
+          }
+        }
+
+        const existingService = await getQuery(
+          "SELECT * FROM services WHERE name = ? AND api_source = 'amrr-unlocker' AND category_id = ?",
+          [cleanGroupName, categoryId]
+        );
+
+        const categoryRow = await getQuery("SELECT currency FROM categories WHERE id = ?", [categoryId]);
+        const categoryCurrency = categoryRow ? categoryRow.currency : 'USD';
+        const isUsdCategory = categoryCurrency === 'USD';
+
+        let mergedPackages = [];
+        if (existingService) {
+          try {
+            mergedPackages = typeof existingService.packages === 'string' 
+              ? JSON.parse(existingService.packages) 
+              : (existingService.packages || []);
+          } catch (e) {
+            mergedPackages = [];
+          }
+        }
+
+        // Calculate pricing multiplier based on API account currency vs target category currency
+        let multiplier = 1;
+        if (apiCurrency === 'USD' && categoryCurrency === 'EGP') {
+          multiplier = rate;
+        } else if (apiCurrency === 'EGP' && categoryCurrency === 'USD') {
+          multiplier = 1 / rate;
+        }
+
+        for (const s of groupServices) {
+          const apiPriceUsd = parseFloat(s.price) || 0;
+          
+          let localPrice;
+          if (s.custom_price !== undefined && s.custom_price !== null) {
+            localPrice = parseFloat(s.custom_price);
+          } else {
+            if (isUsdCategory) {
+              localPrice = parseFloat(((apiPriceUsd * multiplier) * (1 + markup / 100)).toFixed(2));
+            } else {
+              localPrice = Math.ceil((apiPriceUsd * multiplier) * (1 + markup / 100));
+            }
+          }
+
+          const discount = s.custom_discount !== undefined && s.custom_discount !== null ? parseFloat(s.custom_discount) : 0;
+          const cleanPkgName = s.name.replace(/(amrr\s*-?\s*unlocker|amrr|ameer)/gi, '').replace(/\s+/g, ' ').trim() || 'تفعيل فوري تلقائي';
+
+          const pkgIndex = mergedPackages.findIndex(p => p.api_service_id === s.id.toString());
+          const packageFields = [];
+          const hasCustom = s.customFields && s.customFields.length > 0;
+
+          if (hasCustom) {
+            s.customFields.forEach(cf => {
+              const fieldId = `custom_${cf.field_id || cf.fieldname}`;
+              packageFields.push({
+                id: fieldId,
+                name: fieldId,
+                label: cf.fieldname,
+                placeholder: cf.description || `أدخل ${cf.fieldname}`,
+                type: cf.fieldtype === 'select' ? 'select' : (cf.fieldtype === 'textarea' ? 'textarea' : 'text'),
+                options: cf.fieldoptions ? cf.fieldoptions.split(',').map(o => o.trim()) : [],
+                required: cf.required === 'on'
+              });
+            });
+          } else {
+            // Inject IMEI or player_id fallback if no custom fields from API
+            const svcType = (s.serviceType || 'imei').toLowerCase();
+            if (svcType === 'imei') {
+              packageFields.push({ id: 'imei', name: 'imei', label: 'IMEI / SN / ECID', placeholder: 'أدخل رقم IMEI أو الرقم التسلسلي (SN) أو ECID', type: 'text', required: true });
+            } else {
+              packageFields.push({ id: 'player_id', name: 'player_id', label: 'معرّف الجهاز / ID', placeholder: 'أدخل معرّف الجهاز بدقة هنا', type: 'text', required: true });
+            }
+          }
+
+          const pkgData = {
+            id: pkgIndex >= 0 ? mergedPackages[pkgIndex].id : (mergedPackages.length + 1),
+            name: cleanPkgName,
+            price: localPrice,
+            usd_price: isUsdCategory ? localPrice : (apiCurrency === 'USD' ? apiPriceUsd : apiPriceUsd / rate),
+            api_service_id: s.id.toString(),
+            status: "Available",
+            discount: discount,
+            min_quantity: s.min_quantity,
+            max_quantity: s.max_quantity,
+            requires_quantity: s.requires_quantity,
+            fields: packageFields
+          };
+
+          if (pkgIndex >= 0) {
+            mergedPackages[pkgIndex] = pkgData;
+          } else {
+            mergedPackages.push(pkgData);
+          }
+        }
+
+        const minPrice = mergedPackages.length > 0 ? Math.min(...mergedPackages.map(p => p.price)) : 0;
+
+        if (existingService) {
+          await runQuery(
+            "UPDATE services SET packages = ?, fields = ?, price = ?, api_price = ? WHERE id = ?",
+            [JSON.stringify(mergedPackages), JSON.stringify(combinedFields), minPrice, 0, existingService.id]
+          );
+          importedList.push({ id: existingService.id, name: cleanGroupName, status: 'updated_grouped' });
+        } else {
+          const svcInsert = await runQuery(
+            "INSERT INTO services (category_id, name, description, price, image, packages, fields, price_type, price_per_thousand, fields_title, api_service_id, api_source, api_price) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+              categoryId,
+              cleanGroupName,
+              `باقات وتفعيل خدمات ${cleanGroupName}`,
+              minPrice,
+              'default',
+              JSON.stringify(mergedPackages),
+              JSON.stringify(combinedFields),
+              'fixed',
+              0,
+              'بيانات الخدمة',
+              'grouped',
+              'amrr-unlocker',
+              0
+            ]
+          );
+          importedList.push({ id: svcInsert.lastID, name: cleanGroupName, status: 'created_grouped' });
+        }
+      }
+    } else {
+      for (const s of services) {
+        await new Promise(r => setImmediate(r));
+        const serviceFields = [];
+        const hasCustom = s.customFields && s.customFields.length > 0;
+
+        if (hasCustom) {
+          const seen = new Set();
+          for (const cf of s.customFields) {
+            const fieldId = `custom_${cf.field_id || cf.fieldname}`;
+            const fieldLabel = String(cf.fieldname || '').toLowerCase().trim();
+            if (seen.has(fieldId) || seen.has(fieldLabel)) continue;
+            
+            seen.add(fieldId);
+            seen.add(fieldLabel);
+
+            serviceFields.push({
+              id: fieldId,
+              label: cf.fieldname,
+              placeholder: cf.description || `أدخل ${cf.fieldname}`,
+              type: cf.fieldtype === 'select' ? 'select' : (cf.fieldtype === 'textarea' ? 'textarea' : 'text'),
+              options: cf.fieldoptions ? cf.fieldoptions.split(',').map(o => o.trim()) : [],
+              required: cf.required === 'on'
+            });
+          }
+        }
+        // Inject IMEI or player_id fallback if no custom fields from API
+        if (serviceFields.length === 0) {
+          const svcType = (s.serviceType || 'imei').toLowerCase();
+          if (svcType === 'imei') {
+            serviceFields.push({ id: 'imei', name: 'imei', label: 'IMEI / SN / ECID', placeholder: 'أدخل رقم IMEI أو الرقم التسلسلي (SN) أو ECID', type: 'text', required: true });
+          } else {
+            serviceFields.push({ id: 'player_id', name: 'player_id', label: 'معرّف الجهاز / ID', placeholder: 'أدخل معرّف الجهاز بدقة هنا', type: 'text', required: true });
+          }
+        }
+        
+        const fieldsJson = JSON.stringify(serviceFields);
+        const cleanServiceName = s.name.replace(/(amrr\s*-?\s*unlocker|amrr|ameer)/gi, '').replace(/\s+/g, ' ').trim() || 'تفعيل فوري تلقائي';
+        
+        let categoryId = targetCategoryId;
+        if (!categoryId) {
+          const cleanCategoryName = (s.category || 'أدوات تخطي آيكلود').replace(/(amrr\s*-?\s*unlocker|amrr|ameer)/gi, '').replace(/\s+/g, ' ').trim() || s.category || 'أدوات تخطي آيكلود';
+          let cat = await getQuery('SELECT id FROM categories WHERE name = ?', [cleanCategoryName]);
+          if (!cat) {
+            const catInsert = await runQuery(
+              "INSERT INTO categories (name, image, color, icon, currency, fields, fields_title) VALUES (?, ?, ?, ?, ?, ?, ?)",
+              [cleanCategoryName, 'default', '#0284c7', 'credit-card', 'USD', fieldsJson, 'بيانات الخدمة']
+            );
+            categoryId = catInsert.lastID;
+          } else {
+            categoryId = cat.id;
+          }
+        }
+        
+        const categoryRow = await getQuery("SELECT currency FROM categories WHERE id = ?", [categoryId]);
+        const categoryCurrency = categoryRow ? categoryRow.currency : 'USD';
+        const isUsdCategory = categoryCurrency === 'USD';
+
+        // Calculate pricing multiplier based on API account currency vs target category currency
+        let multiplier = 1;
+        if (apiCurrency === 'USD' && categoryCurrency === 'EGP') {
+          multiplier = rate;
+        } else if (apiCurrency === 'EGP' && categoryCurrency === 'USD') {
+          multiplier = 1 / rate;
+        }
+
+        const apiPriceUsd = parseFloat(s.price) || 0;
+        
+        let localPrice;
+        if (s.custom_price !== undefined && s.custom_price !== null) {
+          localPrice = parseFloat(s.custom_price);
+        } else {
+          if (isUsdCategory) {
+            localPrice = parseFloat(((apiPriceUsd * multiplier) * (1 + markup / 100)).toFixed(2));
+          } else {
+            localPrice = Math.ceil((apiPriceUsd * multiplier) * (1 + markup / 100));
+          }
+        }
+
+        const discount = s.custom_discount !== undefined && s.custom_discount !== null ? parseFloat(s.custom_discount) : 0;
+        
+        const packagesJson = JSON.stringify([
+          { 
+            id: 1, 
+            name: "تفعيل فوري تلقائي", 
+            price: localPrice, 
+            usd_price: isUsdCategory ? localPrice : (apiCurrency === 'USD' ? apiPriceUsd : apiPriceUsd / rate), 
+            status: "Available", 
+            discount: discount,
+            min_quantity: s.min_quantity,
+            max_quantity: s.max_quantity,
+            requires_quantity: s.requires_quantity
+          }
+        ]);
+        
+        const existingService = await getQuery(
+          "SELECT id FROM services WHERE api_service_id = ? AND api_source = 'amrr-unlocker'",
+          [s.id.toString()]
+        );
+        
+        if (existingService) {
+          await runQuery(
+            "UPDATE services SET category_id = ?, name = ?, price = ?, api_price = ?, packages = ?, fields = ? WHERE id = ?",
+            [categoryId, cleanServiceName, localPrice, apiPriceUsd, packagesJson, fieldsJson, existingService.id]
+          );
+          importedList.push({ id: existingService.id, name: cleanServiceName, status: 'updated' });
+        } else {
+          const svcInsert = await runQuery(
+            "INSERT INTO services (category_id, name, description, price, image, packages, fields, price_type, price_per_thousand, fields_title, api_service_id, api_source, api_price) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+              categoryId,
+              cleanServiceName,
+              `تفعيل خدمة ${cleanServiceName} فوري عبر API`,
+              localPrice,
+              'default',
+              packagesJson,
+              fieldsJson,
+              'fixed',
+              0,
+              'بيانات الخدمة',
+              s.id.toString(),
+              'amrr-unlocker',
+              apiPriceUsd
+            ]
+          );
+          importedList.push({ id: svcInsert.lastID, name: cleanServiceName, status: 'created' });
+        }
+      }
+    }
+    
+    res.json({
+      success: true,
+      message: `تم استيراد/تحديث عدد ${importedList.length} خدمة بنجاح.`,
+      imported: importedList
+    });
+  } catch (error) {
+    console.error('Import services error:', error);
+    res.status(500).json({ message: 'حدث خطأ أثناء استيراد الخدمات إلى قاعدة البيانات.' });
+  }
+});
+
+// 5. Place order on Amrr Unlocker (Admin Protected)
+router.post('/place-order/:id', authMiddleware, async (req, res) => {
+  const { id } = req.params;
+  try {
+    // Clear any previous API error so the admin can force-retry after fixing the issue
+    await runQuery("UPDATE orders SET api_status = NULL WHERE id = ? AND api_status LIKE 'API Error:%'", [id]);
+    const result = await autoSubmitUnlockerOrder(id);
+    if (!result.success) {
+      return res.status(400).json({ message: result.error || 'فشل إرسال الطلب للمزود الخارجي.' });
+    }
+    res.json({
+      success: true,
+      message: 'تم إرسال الطلب بنجاح وهو الآن قيد المعالجة لدى المزود.',
+      api_order_id: result.api_order_id,
+      api_status: 'Pending'
+    });
+  } catch (error) {
+    console.error('Place external order error:', error);
+    res.status(500).json({ message: error.message || 'حدث خطأ أثناء إرسال الطلب إلى الخادم الخارجي.' });
+  }
+});
+
+// 6. Check status and complete order (Admin Protected)
+router.post('/check-status/:id', authMiddleware, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await checkAndUpdateOrder(id);
+    res.json(result);
+  } catch (error) {
+    console.error('Check external order status error:', error);
+    res.status(500).json({ message: error.message || 'حدث خطأ أثناء الاستعلام عن حالة الطلب.' });
+  }
+});
+
+// Helper to check and update order status
+async function checkAndUpdateOrder(orderId) {
+  const order = await getQuery("SELECT * FROM orders WHERE id = ?", [orderId]);
+  if (!order) {
+    throw new Error('الطلب غير موجود.');
+  }
+
+  if (order.status === 'completed' || order.status === 'cancelled') {
+    return {
+      success: true,
+      status: order.status,
+      code: order.code || (order.status === 'completed' ? 'ACTIVATED' : 'Cancelled'),
+      message: `هذا الطلب بالفعل في حالة '${order.status}' ومكتمل/ملغي مسبقاً ولا يحتاج تحديث أو استرداد رصيد.`
+    };
+  }
+  
+  if (!order.api_order_id || order.api_source !== 'amrr-unlocker') {
+    throw new Error('هذا الطلب غير مرتبط بطلب خارجي فعال.');
+  }
+  
+  const apiKeyRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_key'");
+  const apiUrlRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_url'");
+  const apiUserRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_username'");
+  
+  const apiKey = apiKeyRow && apiKeyRow.value ? apiKeyRow.value : '5TC-O62-NRZ-HF3-NQ4-3VJ-S7V-FPK';
+  const apiUrl = apiUrlRow && apiUrlRow.value ? apiUrlRow.value : 'https://amrr-unlocker.com/api/index.php';
+  const apiUser = apiUserRow && apiUserRow.value ? apiUserRow.value : 'Hassen1990';
+  
+  let responseData = await callDhruApi(apiUrl, apiUser, apiKey, 'getimeiorder', {
+    ID: order.api_order_id
+  }).catch(e => ({ ERROR: e.message }));
+  
+  let remoteOrder = null;
+  if (responseData.SUCCESS && Array.isArray(responseData.SUCCESS)) {
+    remoteOrder = responseData.SUCCESS[0];
+  } else if (responseData.SUCCESS && typeof responseData.SUCCESS === 'object') {
+    remoteOrder = responseData.SUCCESS;
+  }
+  
+  // Automatic fallback to getserverorder and getremoteorder if getimeiorder didn't find the order
+  if (!remoteOrder || responseData.ERROR) {
+    const serverResp = await callDhruApi(apiUrl, apiUser, apiKey, 'getserverorder', {
+      ID: order.api_order_id
+    }).catch(e => ({ ERROR: e.message }));
+    if (serverResp.SUCCESS && Array.isArray(serverResp.SUCCESS) && serverResp.SUCCESS[0]) {
+      remoteOrder = serverResp.SUCCESS[0];
+      responseData = serverResp;
+    } else if (serverResp.SUCCESS && typeof serverResp.SUCCESS === 'object') {
+      remoteOrder = serverResp.SUCCESS;
+      responseData = serverResp;
+    } else {
+      const remoteResp = await callDhruApi(apiUrl, apiUser, apiKey, 'getremoteorder', {
+        ID: order.api_order_id
+      }).catch(e => ({ ERROR: e.message }));
+      if (remoteResp.SUCCESS && Array.isArray(remoteResp.SUCCESS) && remoteResp.SUCCESS[0]) {
+        remoteOrder = remoteResp.SUCCESS[0];
+        responseData = remoteResp;
+      } else if (remoteResp.SUCCESS && typeof remoteResp.SUCCESS === 'object') {
+        remoteOrder = remoteResp.SUCCESS;
+        responseData = remoteResp;
+      }
+    }
+  }
+
+  if (responseData.ERROR && !remoteOrder) {
+    const errorMsg = getDhruErrorMessage(responseData);
+    throw new Error(`فشل التحقق من الحالة: ${errorMsg}`);
+  }
+  
+  if (!remoteOrder) {
+    throw new Error('تعذر العثور على تفاصيل الطلب من الخادم الخارجي (تم الفحص عبر IMEI و Server و Remote).');
+  }
+
+  const statusVal = remoteOrder.STATUS || remoteOrder.status || remoteOrder.State || remoteOrder.state || '';
+  const unlockCode = remoteOrder.CODE || remoteOrder.code || remoteOrder.result || remoteOrder.RESULT || remoteOrder.UNLOCKCODE || remoteOrder.unlockcode || '';
+  const statusStr = String(statusVal).toLowerCase().trim();
+
+  console.log(`[Check Order #${orderId}] Raw provider response:`, JSON.stringify(remoteOrder));
+  console.log(`[Check Order #${orderId}] STATUS=${JSON.stringify(statusVal)} | CODE=${JSON.stringify(unlockCode)}`);
+
+  // Dhru Fusion status codes:
+  // 0 = Pending (NOT rejected! Some providers use 0 for new/pending orders)
+  // 1 = Pending
+  // 2 = In Process  
+  // 3 = Completed
+  // 4 = Rejected/Cancelled
+  // 'rejected', 'cancel', 'fail', 'error' = explicit rejection
+
+  const isCompleted = statusVal === '3' || statusVal === 3
+    || statusStr.includes('complete')
+    || statusStr.includes('success')
+    || statusStr.includes('accept')
+    || statusStr.includes('done')
+    || (unlockCode && unlockCode.trim() !== ''); // If we have a code, the order is done
+  
+  if (isCompleted) {
+    const updateFields = unlockCode
+      ? "UPDATE orders SET status = 'completed', api_status = 'Completed', code = ? WHERE id = ?"
+      : "UPDATE orders SET status = 'completed', api_status = 'Completed' WHERE id = ?";
+    const updateParams = unlockCode ? [unlockCode, orderId] : [orderId];
+    await runQuery(updateFields, updateParams);
+
+    // Notify customer!
+    try {
+      const notificationHelper = require('../utils/notificationHelper');
+      await notificationHelper.notifyCustomerOfOrderUpdate(orderId, 'completed', unlockCode || '', order.download_link || '', order.download_link_title || '');
+    } catch (err) {
+      console.warn(`[Auto Sync Customer Notify Error] Failed to notify customer for completed order #${orderId}:`, err.message);
+    }
+
+    return {
+      success: true,
+      status: 'completed',
+      api_status: 'Completed',
+      code: unlockCode || '',
+      message: `اكتمل الطلب لدى المزود ${unlockCode ? '— كود الفتح: ' + unlockCode : ''}`
+    };
+  }
+
+  // Explicit rejection: only status 4, or clear rejection keywords
+  // NOTE: status 0 is NOT rejection — it means Pending at many providers
+  const isRejected = statusVal === '4' || statusVal === 4
+    || statusStr === 'rejected'
+    || statusStr === 'cancelled'
+    || statusStr === 'canceled'
+    || statusStr === 'failed'
+    || statusStr === 'invalid'
+    || (statusStr.includes('reject') && !statusStr.includes('not'))
+    || (statusStr.includes('cancel') && !statusStr.includes('not'));
+
+  if (isRejected) {
+    await runQuery(
+      "UPDATE orders SET api_status = 'Rejected' WHERE id = ?",
+      [orderId]
+    );
+    return {
+      success: true,
+      status: order.status,
+      api_status: 'Rejected',
+      message: `تم رفض الطلب من المزود (حالة المزود: ${statusVal}).`
+    };
+  }
+  
+  // Still processing: 0, 1, 2 or any other pending/process status
+  const isInProcess = statusVal === '2' || statusVal === 2
+    || statusStr.includes('process')
+    || statusStr.includes('progress')
+    || statusStr.includes('working');
+  const displayStatus = isInProcess ? 'In Process' : 'Pending';
+  await runQuery("UPDATE orders SET api_status = ? WHERE id = ?", [displayStatus, orderId]);
+  
+  return {
+    success: true,
+    status: 'processing',
+    api_status: displayStatus,
+    message: `الطلب لا يزال قيد المعالجة لدى المزود (حالة: ${statusVal}).`
+  };
+}
+
+// Auto-submit helper function for external API orders
+async function autoSubmitUnlockerOrder(orderId) {
+  // --- Concurrency lock: prevent two simultaneous calls for the same order ---
+  const lockKey = `order_${orderId}`;
+  if (submittingOrders.has(lockKey)) {
+    console.warn(`[Auto Place Order] Order #${orderId} already being submitted — skipping duplicate call.`);
+    return { success: false, error: 'الطلب قيد الإرسال حالياً، يرجى الانتظار.' };
+  }
+  submittingOrders.add(lockKey);
+
+  try {
+    const order = await getQuery("SELECT * FROM orders WHERE id = ?", [orderId]);
+    if (!order) {
+      throw new Error('الطلب غير موجود.');
+    }
+    if (order.status !== 'pending') {
+      throw new Error('يمكن فقط إرسال الطلبات التي في حالة الانتظار.');
+    }
+    // NOTE: We do NOT skip on api_status='API Error:' here.
+    // The /place-order route clears that status before calling this function,
+    // allowing admin force-retries. The auto-trigger path (order approval)
+    // should still skip to avoid hammering the provider on duplicate events.
+    
+    const service = await getQuery("SELECT api_service_id, api_source, api_service_type, packages FROM services WHERE id = ?", [order.service_id]);
+    if (!service || service.api_source !== 'amrr-unlocker') {
+      throw new Error('هذه الخدمة غير مرتبطة ببوابة Amrr Unlocker.');
+    }
+
+    let targetApiServiceId = service.api_service_id;
+    // Default service type from the service row, may be overridden by package
+    let targetServiceType = service.api_service_type || 'imei';
+
+    if (order.package_name) {
+      try {
+        const pkgs = typeof service.packages === 'string' ? JSON.parse(service.packages) : (service.packages || []);
+        const matchingPkg = pkgs.find(p => p.name === order.package_name);
+        if (matchingPkg && matchingPkg.api_service_id) {
+          targetApiServiceId = matchingPkg.api_service_id;
+          // Use package-level service type if available
+          if (matchingPkg.api_service_type) {
+            targetServiceType = matchingPkg.api_service_type;
+          }
+        }
+      } catch (e) {
+        console.error('Failed to parse service packages for external order lookup:', e.message);
+      }
+    }
+
+    if (!targetApiServiceId || targetApiServiceId === 'grouped') {
+      throw new Error('تعذر تحديد معرّف الخدمة الخارجي (API Service ID) لهذه الحزمة.');
+    }
+    
+    const apiKeyRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_key'");
+    const apiUrlRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_url'");
+    const apiUserRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_username'");
+    
+    const apiKey = apiKeyRow && apiKeyRow.value ? apiKeyRow.value : '5TC-O62-NRZ-HF3-NQ4-3VJ-S7V-FPK';
+    const apiUrl = apiUrlRow && apiUrlRow.value ? apiUrlRow.value : 'https://amrr-unlocker.com/api/index.php';
+    const apiUser = apiUserRow && apiUserRow.value ? apiUserRow.value : 'Hassen1990';
+    
+    const trimmedPlayerId = (order.player_id || '').trim();
+
+    // Build custom fields object from order.custom_fields
+    // IMPORTANT: Exclude standard fields (player_id, phone) — they are sent as IMEI/QNT directly.
+    // Use the field_id (stripped of 'custom_' prefix) as the API key, since that is what
+    // the Dhru Fusion provider registered in their service definition.
+    const SKIP_FIELDS = new Set(['player_id', 'phone', 'tel', 'sender_phone']);
+    let customFields = {};
+    if (order.custom_fields) {
+      try {
+        const parsed = typeof order.custom_fields === 'string' ? JSON.parse(order.custom_fields) : order.custom_fields;
+        for (const [k, v] of Object.entries(parsed)) {
+          const rawKey = k.startsWith('custom_') ? k.replace('custom_', '') : k;
+          // Skip standard/system fields and empty values
+          if (SKIP_FIELDS.has(rawKey.toLowerCase()) || SKIP_FIELDS.has(k.toLowerCase())) continue;
+          if (v === null || v === undefined || String(v).trim() === '') continue;
+          customFields[rawKey] = String(v).trim();
+        }
+      } catch (e) {
+        console.warn('[Auto Place Order] Failed to parse custom fields:', e.message);
+      }
+    }
+
+    // Dhru Fusion API requires CUSTOMFIELD as a Base64-encoded JSON string.
+    // Format: parameters[CUSTOMFIELD] = base64(JSON.stringify({FieldID: "value"}))
+    const buildCustomField = (fields) => {
+      if (!fields || Object.keys(fields).length === 0) return undefined;
+      return Buffer.from(JSON.stringify(fields)).toString('base64');
+    };
+
+    const customFieldEncoded = buildCustomField(customFields);
+
+    // ── Order Placement Logic ─────────────────────────────────────────────
+    console.log(`[Auto Place Order #${orderId}] ServiceType=${targetServiceType} | ServiceID=${targetApiServiceId} | IMEI=${trimmedPlayerId} | CustomFields=${JSON.stringify(customFields)}`);
+
+    let responseData = null;
+
+    if (targetServiceType === 'server' || targetServiceType === 'remote') {
+      // ── Server Order (primary) ─────────────────────────────────────────────
+      const serverFields = Object.keys(customFields).length > 0 ? customFields : (trimmedPlayerId ? { PlayerID: trimmedPlayerId } : {});
+      const serverCustom = buildCustomField(serverFields);
+      const serverPayload = {
+        ID: targetApiServiceId,
+        QNT: order.quantity || 1,
+        REFERENCE: order.id.toString(),
+        ...(serverCustom ? { CUSTOMFIELD: serverCustom } : {})
+      };
+      console.log(`[Auto Place Order #${orderId}] Trying placeserverorder | QNT=${order.quantity || 1}`);
+      responseData = await callDhruApi(apiUrl, apiUser, apiKey, 'placeserverorder', serverPayload).catch(e => ({ ERROR: e.message }));
+      
+      if (responseData.ERROR) {
+        let firstError = responseData;
+        console.warn(`[Auto Place Order #${orderId}] placeserverorder failed (${getDhruErrorMessage(firstError)}), trying placeimeiorder as fallback...`);
+        const fallbackImei = trimmedPlayerId || '000000000000000';
+        const imeiPayload = {
+          ID: targetApiServiceId,
+          IMEI: fallbackImei,
+          REFERENCE: order.id.toString(),
+          ...(customFieldEncoded ? { CUSTOMFIELD: customFieldEncoded } : {})
+        };
+        responseData = await callDhruApi(apiUrl, apiUser, apiKey, 'placeimeiorder', imeiPayload).catch(e => ({ ERROR: e.message }));
+        
+        if (responseData.ERROR && (getDhruErrorMessage(responseData).includes("Command Not Found") || getDhruErrorMessage(responseData).includes("Action Not Found"))) {
+          // Restore original error if fallback action doesn't exist
+          responseData = firstError;
+        }
+      }
+    } else {
+      // ── IMEI Order (primary, default) ─────────────────────────────────────
+      const fallbackImei = trimmedPlayerId || '000000000000000';
+      const imeiPayload = {
+        ID: targetApiServiceId,
+        IMEI: fallbackImei,
+        REFERENCE: order.id.toString(),
+        ...(customFieldEncoded ? { CUSTOMFIELD: customFieldEncoded } : {})
+      };
+      console.log(`[Auto Place Order #${orderId}] Trying placeimeiorder | IMEI=${fallbackImei}`);
+      responseData = await callDhruApi(apiUrl, apiUser, apiKey, 'placeimeiorder', imeiPayload).catch(e => ({ ERROR: e.message }));
+
+      // ── Server Order Fallback ──────────────────────────────────────────────
+      if (responseData.ERROR) {
+        let firstError = responseData;
+        console.warn(`[Auto Place Order #${orderId}] placeimeiorder failed (${getDhruErrorMessage(firstError)}), trying placeserverorder as fallback...`);
+        const serverFields = Object.keys(customFields).length > 0 ? customFields : (trimmedPlayerId ? { PlayerID: trimmedPlayerId } : {});
+        const serverCustom = buildCustomField(serverFields);
+        const serverPayload = { ID: targetApiServiceId, QNT: order.quantity || 1, REFERENCE: order.id.toString(), ...(serverCustom ? { CUSTOMFIELD: serverCustom } : {}) };
+        responseData = await callDhruApi(apiUrl, apiUser, apiKey, 'placeserverorder', serverPayload).catch(e => ({ ERROR: e.message }));
+        
+        if (responseData.ERROR && (getDhruErrorMessage(responseData).includes("Command Not Found") || getDhruErrorMessage(responseData).includes("Action Not Found"))) {
+          responseData = firstError;
+        }
+      }
+    }
+    
+    if (responseData.ERROR) {
+      const errorMsg = getDhruErrorMessage(responseData);
+      throw new Error(`فشل إرسال الطلب للمزود: ${errorMsg}`);
+    }
+    
+    let apiOrderId = '';
+    if (responseData.SUCCESS && Array.isArray(responseData.SUCCESS)) {
+      const first = responseData.SUCCESS[0];
+      console.log('[Dhru API] Order placement success response (nested SUCCESS):', JSON.stringify(first));
+      apiOrderId = first.id || first.ID || first.orderid || first.ORDERID || first.order_id || first.ORDER_ID || first.REFERENCEID || first.referenceid || '';
+    } else if (responseData.SUCCESS && typeof responseData.SUCCESS === 'object') {
+      const first = responseData.SUCCESS;
+      apiOrderId = first.id || first.ID || first.orderid || first.ORDERID || first.order_id || first.ORDER_ID || first.REFERENCEID || first.referenceid || '';
+    }
+    if (!apiOrderId) {
+      console.log('[Dhru API] Order placement success response (root):', JSON.stringify(responseData));
+      apiOrderId = responseData.id || responseData.ID || responseData.orderid || responseData.ORDERID || responseData.order_id || responseData.ORDER_ID || responseData.REFERENCEID || responseData.referenceid || '';
+    }
+    
+    if (!apiOrderId) {
+      throw new Error('نجح الطلب ولكن تعذر الحصول على رقم الطلب الخارجي.');
+    }
+    
+    await runQuery(
+      "UPDATE orders SET status = 'processing', api_order_id = ?, api_source = 'amrr-unlocker', api_status = 'Pending' WHERE id = ?",
+      [apiOrderId.toString(), orderId]
+    );
+    
+    submittingOrders.delete(lockKey); // Release lock on success
+    return { success: true, api_order_id: apiOrderId };
+  } catch (err) {
+    console.error(`[Auto Place Order Error] Order #${orderId}:`, err.message);
+
+    // Other errors: just record the api_status, keep order pending for admin review
+    await runQuery("UPDATE orders SET api_status = ? WHERE id = ?", [`API Error: ${err.message}`, orderId]);
+
+    submittingOrders.delete(lockKey); // Release lock on failure
+    return { success: false, error: err.message };
+  }
+}
+
+
+// Attach helpers to router
+router.autoSubmitUnlockerOrder = autoSubmitUnlockerOrder;
+router.checkAndUpdateOrder = checkAndUpdateOrder;
+
+// ── Startup Auto-Sync Hook (Run once 20 seconds after Docker startup) ───────
+setTimeout(async () => {
+  console.log('[Startup Auto-Sync] Starting automatic sync for processing orders and services on startup...');
+  try {
+    const processingOrders = await allQuery(
+      "SELECT id FROM orders WHERE status = 'processing' AND api_source = 'amrr-unlocker' AND api_order_id IS NOT NULL"
+    );
+    for (const o of processingOrders) {
+      console.log(`[Startup Auto-Sync] Checking status for order #${o.id}...`);
+      try {
+        await checkAndUpdateOrder(o.id);
+      } catch (err) {
+        console.error(`[Startup Auto-Sync Error] Order #${o.id}:`, err.message);
+      }
+    }
+    console.log('[Startup Auto-Sync] Completed startup order status check successfully.');
+  } catch (err) {
+    console.error('[Startup Auto-Sync Global Error]:', err.message);
+  }
+}, 20000);
+
+// Start automated background polling every 2 minutes
+setInterval(async () => {
+  try {
+    const processingOrders = await allQuery(
+      "SELECT id FROM orders WHERE status = 'processing' AND api_source = 'amrr-unlocker' AND api_order_id IS NOT NULL"
+    );
+    for (const o of processingOrders) {
+      console.log(`[Auto Poll] Checking status for order #${o.id}...`);
+      try {
+        await checkAndUpdateOrder(o.id);
+      } catch (err) {
+        console.error(`[Auto Poll Error] Order #${o.id}:`, err.message);
+      }
+    }
+  } catch (err) {
+    console.error('[Auto Poll Global Error]:', err.message);
+  }
+}, 120000); // every 2 minutes
+
+// ── Cancel Order from External Provider ─────────────────────────────────────
+router.post('/cancel-order/:id', authMiddleware, async (req, res) => {
+  const { id } = req.params;
+  
+  try {
+    const order = await getQuery("SELECT * FROM orders WHERE id = ?", [id]);
+    if (!order) {
+      return res.status(404).json({ message: 'الطلب غير موجود.' });
+    }
+    
+    // Only allow cancelling orders that are pending or processing
+    if (!['pending', 'processing'].includes(order.status)) {
+      return res.status(400).json({ message: 'لا يمكن إلغاء طلب في هذه الحالة. يمكن فقط إلغاء الطلبات المعلقة أو قيد المعالجة.' });
+    }
+    
+    // If order has an external API order ID, try to cancel it from the provider
+    if (order.api_order_id && order.api_source === 'amrr-unlocker') {
+      const apiKeyRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_key'");
+      const apiUrlRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_url'");
+      const apiUserRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_username'");
+      
+      const apiKey = apiKeyRow && apiKeyRow.value ? apiKeyRow.value : '5TC-O62-NRZ-HF3-NQ4-3VJ-S7V-FPK';
+      const apiUrl = apiUrlRow && apiUrlRow.value ? apiUrlRow.value : 'https://amrr-unlocker.com/api/index.php';
+      const apiUser = apiUserRow && apiUserRow.value ? apiUserRow.value : 'Hassen1990';
+      
+      try {
+        let responseData = await callDhruApi(apiUrl, apiUser, apiKey, 'cancelimeiorder', {
+          ID: order.api_order_id
+        });
+        
+        if (responseData.ERROR) {
+          const serverCancel = await callDhruApi(apiUrl, apiUser, apiKey, 'cancelserverorder', {
+            ID: order.api_order_id
+          }).catch(e => ({ ERROR: e.message }));
+          if (!serverCancel.ERROR) {
+            responseData = serverCancel;
+          } else {
+            const remoteCancel = await callDhruApi(apiUrl, apiUser, apiKey, 'cancelremoteorder', {
+              ID: order.api_order_id
+            }).catch(e => ({ ERROR: e.message }));
+            if (!remoteCancel.ERROR) {
+              responseData = remoteCancel;
+            }
+          }
+        }
+        
+        console.log('[Dhru API] Cancel order response:', JSON.stringify(responseData));
+        
+        if (responseData.ERROR) {
+          const errorMsg = getDhruErrorMessage(responseData);
+          console.warn(`[Cancel Order] Provider rejection for order #${id}: ${errorMsg}`);
+        }
+      } catch (apiErr) {
+        console.error(`[Cancel Order] Failed to cancel from provider for order #${id}:`, apiErr.message);
+      }
+    }
+    
+    const wasAlreadyCancelled = order.status === 'cancelled';
+
+    // Update order status to 'cancelled'
+    await runQuery("UPDATE orders SET status = 'cancelled', api_status = 'Cancelled' WHERE id = ?", [id]);
+
+    // Notify customer!
+    try {
+      const notificationHelper = require('../utils/notificationHelper');
+      await notificationHelper.notifyCustomerOfOrderUpdate(id, 'cancelled');
+    } catch (err) {
+      console.warn(`[Cancel API Order Customer Notify Error] Failed to notify customer for cancelled order #${id}:`, err.message);
+    }
+    
+    // Refund the customer's wallet balance if not already cancelled
+    if (!wasAlreadyCancelled && order.payment_method === 'wallet' && order.customer_id) {
+      try {
+        const customer = await getQuery("SELECT * FROM customers WHERE id = ?", [order.customer_id]);
+        if (customer) {
+          const refundAmount = Number(order.package_price) || 0;
+          if (refundAmount > 0) {
+            const oldBalance = Number(customer.balance) || 0;
+            const newBalance = oldBalance + refundAmount;
+            await runQuery("UPDATE customers SET balance = balance + ? WHERE id = ?", [refundAmount, customer.id]);
+            
+            // Log the refund transaction
+            await runQuery(
+              "INSERT INTO wallet_transactions (customer_id, customer_username, type, amount, balance_before, balance_after, reference_type, reference_id, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+              [
+                customer.id,
+                customer.username,
+                'credit',
+                refundAmount,
+                oldBalance,
+                newBalance,
+                'order_refund',
+                order.id,
+                `استرداد رصيد - إلغاء طلب API #${order.id}`
+              ]
+            );
+            
+            console.log(`[Cancel Order] Refunded $${refundAmount} to customer #${customer.id} for order #${id}`);
+          }
+        }
+      } catch (refundErr) {
+        console.error(`[Cancel Order] Refund error for order #${id}:`, refundErr.message);
+      }
+    }
+    
+    res.json({
+      success: true,
+      message: `تم إلغاء الطلب #${id} بنجاح واسترداد الرصيد.`
+    });
+    
+  } catch (err) {
+    console.error(`[Cancel Order] Error cancelling order #${id}:`, err.message);
+    res.status(500).json({ message: `فشل إلغاء الطلب: ${err.message}` });
+  }
+});
+
+router.performSmartSync = performSmartSync;
+
+// DUMP ZKEY
+router.get('/dump-zkey', async (req, res) => {
+  try {
+    const apiKeyRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_key'");
+    const apiUrlRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_url'");
+    const apiUserRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_username'");
+    
+    const apiKey = apiKeyRow && apiKeyRow.value ? apiKeyRow.value : '5TC-O62-NRZ-HF3-NQ4-3VJ-S7V-FPK';
+    const apiUrl = apiUrlRow && apiUrlRow.value ? apiUrlRow.value : 'https://amrr-unlocker.com/api/index.php';
+    const apiUser = apiUserRow && apiUserRow.value ? apiUserRow.value : 'Hassen1990';
+    
+    // Attempt to format URL safely
+    let safeUrl = apiUrl;
+    if (!safeUrl.startsWith('http://') && !safeUrl.startsWith('https://')) {
+      safeUrl = 'https://' + safeUrl;
+    }
+    
+    const data = await callDhruApi(safeUrl, apiUser, apiKey, 'serverservicelist');
+    const zkey = [];
+    if (data && data.SUCCESS && data.SUCCESS[0] && data.SUCCESS[0].LIST) {
+      const groups = data.SUCCESS[0].LIST;
+      for (const group of groups) {
+        if (group.SERVICES) {
+          for (const s of group.SERVICES) {
+            if (s.SERVICENAME && s.SERVICENAME.toLowerCase().includes('zkey')) {
+              zkey.push(s);
+            }
+          }
+        }
+      }
+    }
+    res.json({ url_used: safeUrl, raw_amrr: { api_url: safeUrl, api_username: apiUser, api_key: apiKey }, zkey: zkey });
+  } catch (error) {
+    res.status(500).json({ error: error.message, stack: error.stack });
+  }
+});
+
+module.exports = router;

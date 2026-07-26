@@ -1,0 +1,11 @@
+node_modules
+.env
+.git
+.gitignore
+README.md
+Dockerfile
+.wwebjs_cache
+wa-session
+backups
+uploads
+*.log

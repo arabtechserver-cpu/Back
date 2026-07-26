@@ -1,0 +1,95 @@
+name: Deploy Backend to DigitalOcean
+
+on:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH to DigitalOcean
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DROPLET_HOST }}
+          username: ${{ secrets.DROPLET_USER }}
+          key: ${{ secrets.DROPLET_SSH_KEY }}
+          port: 22
+          # Pass all env secrets to the remote script
+          envs: PORT,NODE_ENV,JWT_SECRET,ADMIN_USERNAME,ADMIN_PASSWORD,DATABASE_URL,CORS_ORIGIN,SMM_API_KEY,DB_BACKUP_INTERVAL_MS,DB_BACKUP_START_DELAY_MS,EMAIL_USER,EMAIL_PASS,EMAIL_HOST,EMAIL_PORT,WA_SESSION_PATH
+          script: |
+            set -e
+            echo "=== [Backend Deploy] Starting ==="
+
+            # ── Create / update .env file on the server ─────────────────────
+            # Secrets come from GitHub → no sensitive data in the repo
+            mkdir -p /opt/spider-store
+            cat > /opt/spider-store/.env <<EOF
+            PORT=${PORT:-5000}
+            NODE_ENV=${NODE_ENV:-production}
+            JWT_SECRET=${JWT_SECRET}
+            ADMIN_USERNAME=${ADMIN_USERNAME}
+            ADMIN_PASSWORD=${ADMIN_PASSWORD}
+            DATABASE_URL=${DATABASE_URL}
+            CORS_ORIGIN=${CORS_ORIGIN}
+            SMM_API_KEY=${SMM_API_KEY}
+            DB_BACKUP_INTERVAL_MS=${DB_BACKUP_INTERVAL_MS:-18000000}
+            DB_BACKUP_START_DELAY_MS=${DB_BACKUP_START_DELAY_MS:-60000}
+            EMAIL_USER=${EMAIL_USER}
+            EMAIL_PASS=${EMAIL_PASS}
+            EMAIL_HOST=${EMAIL_HOST:-smtp.gmail.com}
+            EMAIL_PORT=${EMAIL_PORT:-465}
+            WA_SESSION_PATH=/app/wa-session
+            PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+            PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+            EOF
+            # ────────────────────────────────────────────────────────────────
+
+            cd /opt/spider-store
+
+            # Pull latest backend code
+            if [ -d ".git" ]; then
+              echo "=== Pulling latest backend code ==="
+              git pull origin main 2>/dev/null || git pull origin master 2>/dev/null || true
+            else
+              echo "=== Cloning backend repo ==="
+              git clone https://github.com/minasamir1401/spider-store-back.git .
+            fi
+
+            # Pull latest frontend code into frontend/ subfolder
+            if [ -d "frontend/.git" ]; then
+              echo "=== Pulling latest frontend code ==="
+              cd frontend && (git pull origin main 2>/dev/null || git pull origin master 2>/dev/null || true) && cd ..
+            else
+              echo "=== Cloning frontend repo ==="
+              git clone https://github.com/minasamir1401/spider-store-front.git frontend
+            fi
+
+            # Rebuild and restart backend
+            echo "=== Rebuilding backend container ==="
+            touch database.json
+            docker-compose build --no-cache backend
+
+            echo "=== Restarting backend ==="
+            docker-compose up -d backend
+
+            # Clean up unused Docker images
+            docker image prune -f
+
+            echo "=== [Backend Deploy] Done! ==="
+            docker-compose ps
+        env:
+          PORT: ${{ secrets.PORT }}
+          NODE_ENV: production
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          CORS_ORIGIN: ${{ secrets.CORS_ORIGIN }}
+          SMM_API_KEY: ${{ secrets.SMM_API_KEY }}
+          DB_BACKUP_INTERVAL_MS: ${{ secrets.DB_BACKUP_INTERVAL_MS }}
+          DB_BACKUP_START_DELAY_MS: ${{ secrets.DB_BACKUP_START_DELAY_MS }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+          EMAIL_HOST: ${{ secrets.EMAIL_HOST }}
+          EMAIL_PORT: ${{ secrets.EMAIL_PORT }}
