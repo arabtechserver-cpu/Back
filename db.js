@@ -467,7 +467,7 @@ async function createTables() {
       fields TEXT DEFAULT '[]',
       fields_title VARCHAR(255) DEFAULT 'بيانات الخدمة',
       parent_id INT REFERENCES categories(id) ON DELETE SET NULL DEFAULT NULL,
-      show_in_menu BOOLEAN DEFAULT true
+      show_in_menu BOOLEAN DEFAULT false
     );
     
     ALTER TABLE categories ADD COLUMN IF NOT EXISTS show_in_menu BOOLEAN DEFAULT true;

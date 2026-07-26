@@ -50,7 +50,7 @@ router.get('/', async (req, res) => {
       ...cat,
       name: (cat.name || '').trim(),
       fields: safeParseJson(cat.fields),
-      show_in_menu: cat.show_in_menu === undefined || cat.show_in_menu === null ? true : !!cat.show_in_menu,
+      show_in_menu: cat.show_in_menu === undefined || cat.show_in_menu === null ? false : !!cat.show_in_menu,
       parent_id: (cat.parent_id !== null && cat.parent_id !== undefined && cat.parent_id !== "") ? Number(cat.parent_id) : null
     }));
     formatted.sort((a, b) => a.name.localeCompare(b.name, 'en'));
