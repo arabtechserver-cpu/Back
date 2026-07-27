@@ -1,0 +1,123 @@
+{
+  "created_at": "2026-07-27T18:42:13.847Z",
+  "reason": "startup",
+  "fallbackMode": true,
+  "tables": {
+    "users": [
+      {
+        "id": 1,
+        "username": "admin",
+        "password": "$2a$10$F17OmsXaPTLg14RDwLV/.e0qqVmPwEVmIMDl7nWQQhq8Ks2q4HgmO"
+      }
+    ],
+    "categories": [],
+    "services": [],
+    "orders": [],
+    "customers": [],
+    "banners": [],
+    "wallet_requests": [],
+    "wallet_transactions": [],
+    "settings": [
+      {
+        "key": "site_name",
+        "value": "عرب تك سيرفر"
+      },
+      {
+        "key": "site_logo",
+        "value": "/logo.jpg"
+      },
+      {
+        "key": "site_favicon",
+        "value": "/favicon.png"
+      },
+      {
+        "key": "email_user",
+        "value": "********"
+      },
+      {
+        "id": 1,
+        "key": "email_pass",
+        "value": "********"
+      },
+      {
+        "id": 2,
+        "value": ""
+      },
+      {
+        "id": 3,
+        "key": "email_port",
+        "value": "465"
+      },
+      {
+        "id": 4,
+        "key": "email_host",
+        "value": "smtp.gmail.com"
+      },
+      {
+        "id": 5
+      },
+      {
+        "id": 6,
+        "key": "[\"USD\"]"
+      },
+      {
+        "id": 7,
+        "key": "{\"USD\":1}"
+      },
+      {
+        "id": 8,
+        "value": ""
+      },
+      {
+        "id": 9,
+        "value": ""
+      },
+      {
+        "id": 10
+      },
+      {
+        "id": 11,
+        "key": "[\"USD\"]"
+      },
+      {
+        "id": 12,
+        "key": "{\"USD\":1}"
+      },
+      {
+        "id": 13,
+        "value": ""
+      },
+      {
+        "id": 14,
+        "value": ""
+      },
+      {
+        "id": 15,
+        "value": ""
+      },
+      {
+        "id": 16,
+        "value": ""
+      },
+      {
+        "id": 17,
+        "value": ""
+      },
+      {
+        "id": 18
+      },
+      {
+        "id": 19,
+        "key": "[\"USD\"]"
+      },
+      {
+        "id": 20,
+        "key": "{\"USD\":1}"
+      }
+    ],
+    "customer_discounts": [],
+    "reviews": [],
+    "api_providers": []
+  },
+  "source": "database.json"
+}

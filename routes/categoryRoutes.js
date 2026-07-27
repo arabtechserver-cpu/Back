@@ -32,7 +32,8 @@ router.get('/menu', async (req, res) => {
       id: cat.id,
       name: (cat.name || '').trim(),
       image: cat.image,
-      parent_id: cat.parent_id
+      parent_id: cat.parent_id,
+      linked_categories: safeParseJson(cat.linked_categories)
     }));
     formatted.sort((a, b) => a.name.localeCompare(b.name, 'en'));
     res.json(formatted);
@@ -51,6 +52,7 @@ router.get('/', async (req, res) => {
       name: (cat.name || '').trim(),
       fields: safeParseJson(cat.fields),
       show_in_menu: cat.show_in_menu === undefined || cat.show_in_menu === null ? false : !!cat.show_in_menu,
+      linked_categories: safeParseJson(cat.linked_categories),
       parent_id: (cat.parent_id !== null && cat.parent_id !== undefined && cat.parent_id !== "") ? Number(cat.parent_id) : null
     }));
     formatted.sort((a, b) => a.name.localeCompare(b.name, 'en'));
@@ -85,7 +87,7 @@ function removeDuplicateFields(fields) {
 
 // Add new category (Admin Protected)
 router.post('/', authMiddleware, async (req, res) => {
-  const { name, image, fields, fields_title, parent_id } = req.body;
+  const { name, image, fields, fields_title, parent_id, linked_categories } = req.body;
 
   if (!name || !name.trim()) {
     return res.status(400).json({ message: 'اسم القسم مطلوب.' });
@@ -114,7 +116,8 @@ router.post('/', authMiddleware, async (req, res) => {
       image: finalImage,
       fields: safeParseJson(fieldsStr),
       fields_title: finalFieldsTitle,
-      parent_id: finalParentId
+      parent_id: finalParentId,
+      linked_categories: safeParseJson(linked_categories)
     });
   } catch (error) {
     console.error('Add category error:', error);
@@ -128,7 +131,7 @@ router.post('/', authMiddleware, async (req, res) => {
 // Update category (Admin Protected)
 router.put('/:id', authMiddleware, async (req, res) => {
   const { id } = req.params;
-  const { name, image, fields, fields_title, apply_to_services, parent_id } = req.body;
+  const { name, image, fields, fields_title, apply_to_services, parent_id, linked_categories } = req.body;
 
   if (!name || !name.trim()) {
     return res.status(400).json({ message: 'اسم القسم مطلوب للتحديث.' });
