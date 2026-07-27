@@ -192,13 +192,25 @@ router.get('/', async (req, res) => {
   try {
     let services = [];
     if (category_id) {
+      // First, get the target category to check for linked_categories
+      const cat = await getQuery('SELECT linked_categories FROM categories WHERE id = ?', [category_id]);
+      let linkedIds = [];
+      if (cat && cat.linked_categories) {
+        const parsed = safeParseJson(cat.linked_categories);
+        if (Array.isArray(parsed)) {
+          linkedIds = parsed.map(id => Number(id)).filter(id => !isNaN(id));
+        }
+      }
+      const allCatIds = [Number(category_id), ...linkedIds];
+      const placeholders = allCatIds.map(() => '?').join(',');
+
       services = (await allQuery(`
         SELECT s.*, c.currency as category_currency, c.fields as category_fields, c.fields_title as category_fields_title 
         FROM services s 
         LEFT JOIN categories c ON s.category_id = c.id 
-        WHERE s.category_id = ? 
+        WHERE s.category_id IN (${placeholders}) 
         ORDER BY s.id ASC
-      `, [category_id])) || [];
+      `, allCatIds)) || [];
     } else {
       services = (await allQuery(`
         SELECT s.*, c.currency as category_currency, c.fields as category_fields, c.fields_title as category_fields_title 
@@ -264,7 +276,6 @@ router.get('/menu', async (req, res) => {
       SELECT s.id, s.name, s.category_id, s.image, s.price, s.is_popular, c.name as category_name
       FROM services s 
       LEFT JOIN categories c ON s.category_id = c.id 
-      WHERE s.show_in_menu = true
       ORDER BY s.id ASC
     `) || [];
     res.json(services);
