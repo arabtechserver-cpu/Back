@@ -543,8 +543,8 @@ async function performSmartSync(customRate, customMarkup, customShouldGroup) {
         addedServicesCount++;
       } else {
         await runQuery(
-          "UPDATE services SET price = ?, packages = ?, fields = ?, category_id = ?, api_service_type = ? WHERE id = ?",
-          [minPrice, packagesJson, fieldsJson, categoryId, dominantType, existingSvc.id]
+          "UPDATE services SET price = ?, packages = ?, fields = ?, category_id = ?, api_service_type = ?, api_delivery_time = ? WHERE id = ?",
+          [minPrice, packagesJson, fieldsJson, categoryId, dominantType, '', existingSvc.id]
         );
         updatedServicesCount++;
       }
@@ -616,13 +616,13 @@ async function performSmartSync(customRate, customMarkup, customShouldGroup) {
       if (!existingSvc) {
         await runQuery(
           "INSERT INTO services (category_id, name, description, price, image, packages, fields, price_type, price_per_thousand, fields_title, api_service_id, api_source, api_price, min_quantity, max_quantity, api_service_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-          [categoryId, cleanServiceName, `تفعيل خدمة ${cleanServiceName} فوري عبر API`, isDynamic ? 0 : localPrice, 'default', packagesJson, fieldsJson, priceType, pricePerThousand, 'بيانات الخدمة', s.id.toString(), 'amrr-unlocker', apiPriceUsd, minQty, maxQty, svcType]
+          [categoryId, cleanServiceName, `تفعيل خدمة ${cleanServiceName} فوري عبر API`, isDynamic ? 0 : localPrice, 'default', packagesJson, fieldsJson, priceType, pricePerThousand, 'بيانات الخدمة', s.id.toString(), 'amrr-unlocker', apiPriceUsd, minQty, maxQty, svcType, s.time || '']
         );
         addedServicesCount++;
       } else {
         await runQuery(
-          "UPDATE services SET price = ?, packages = ?, fields = ?, price_type = ?, price_per_thousand = ?, api_price = ?, min_quantity = ?, max_quantity = ?, category_id = ?, name = ?, api_service_type = ? WHERE id = ?",
-          [isDynamic ? 0 : localPrice, packagesJson, fieldsJson, priceType, pricePerThousand, apiPriceUsd, minQty, maxQty, categoryId, cleanServiceName, svcType, existingSvc.id]
+          "UPDATE services SET price = ?, packages = ?, fields = ?, price_type = ?, price_per_thousand = ?, api_price = ?, min_quantity = ?, max_quantity = ?, category_id = ?, name = ?, api_service_type = ?, api_delivery_time = ? WHERE id = ?",
+          [isDynamic ? 0 : localPrice, packagesJson, fieldsJson, priceType, pricePerThousand, apiPriceUsd, minQty, maxQty, categoryId, cleanServiceName, svcType, s.time || '', existingSvc.id]
         );
         updatedServicesCount++;
       }

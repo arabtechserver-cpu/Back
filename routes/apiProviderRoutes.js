@@ -282,14 +282,14 @@ async function performProviderSync(providerId, customRate, customMarkup, customS
       
       if (!existingSvc) {
         await runQuery(
-          "INSERT INTO services (category_id, name, description, price, image, packages, fields, price_type, price_per_thousand, fields_title, api_service_id, api_source, api_provider_id, api_price, min_quantity, max_quantity, api_service_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-          [categoryId, cleanGroupName, `باقات وتفعيل خدمات ${cleanGroupName}`, minPrice, 'default', packagesJson, fieldsJson, 'fixed', 0, 'بيانات الخدمة', 'grouped', 'api_provider', provider.id, 0, 1, 0, dominantType]
+          "INSERT INTO services (category_id, name, description, price, image, packages, fields, price_type, price_per_thousand, fields_title, api_service_id, api_source, api_provider_id, api_price, min_quantity, max_quantity, api_service_type, api_delivery_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          [categoryId, cleanGroupName, `باقات وتفعيل خدمات ${cleanGroupName}`, minPrice, 'default', packagesJson, fieldsJson, 'fixed', 0, 'بيانات الخدمة', 'grouped', 'api_provider', provider.id, 0, 1, 0, dominantType, '']
         );
         addedServicesCount++;
       } else {
         await runQuery(
-          "UPDATE services SET price = ?, packages = ?, fields = ?, category_id = ?, api_service_type = ? WHERE id = ?",
-          [minPrice, packagesJson, fieldsJson, categoryId, dominantType, existingSvc.id]
+          "UPDATE services SET price = ?, packages = ?, fields = ?, category_id = ?, api_service_type = ?, api_delivery_time = ? WHERE id = ?",
+          [minPrice, packagesJson, fieldsJson, categoryId, dominantType, '', existingSvc.id]
         );
         updatedServicesCount++;
       }
@@ -357,14 +357,14 @@ async function performProviderSync(providerId, customRate, customMarkup, customS
 
       if (!existingSvc) {
         await runQuery(
-          "INSERT INTO services (category_id, name, description, price, image, packages, fields, price_type, price_per_thousand, fields_title, api_service_id, api_source, api_provider_id, api_price, min_quantity, max_quantity, api_service_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-          [categoryId, cleanServiceName, `تفعيل خدمة ${cleanServiceName} فوري عبر API`, isDynamic ? 0 : localPrice, 'default', packagesJson, fieldsJson, priceType, pricePerThousand, 'بيانات الخدمة', s.id.toString(), 'api_provider', provider.id, apiPriceUsd, minQty, maxQty, svcType]
+          "INSERT INTO services (category_id, name, description, price, image, packages, fields, price_type, price_per_thousand, fields_title, api_service_id, api_source, api_provider_id, api_price, min_quantity, max_quantity, api_service_type, api_delivery_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          [categoryId, cleanServiceName, `تفعيل خدمة ${cleanServiceName} فوري عبر API`, isDynamic ? 0 : localPrice, 'default', packagesJson, fieldsJson, priceType, pricePerThousand, 'بيانات الخدمة', s.id.toString(), 'api_provider', provider.id, apiPriceUsd, minQty, maxQty, svcType, s.time || '']
         );
         addedServicesCount++;
       } else {
         await runQuery(
-          "UPDATE services SET price = ?, packages = ?, fields = ?, price_type = ?, price_per_thousand = ?, api_price = ?, min_quantity = ?, max_quantity = ?, category_id = ?, name = ?, api_service_type = ? WHERE id = ?",
-          [isDynamic ? 0 : localPrice, packagesJson, fieldsJson, priceType, pricePerThousand, apiPriceUsd, minQty, maxQty, categoryId, cleanServiceName, svcType, existingSvc.id]
+          "UPDATE services SET price = ?, packages = ?, fields = ?, price_type = ?, price_per_thousand = ?, api_price = ?, min_quantity = ?, max_quantity = ?, category_id = ?, name = ?, api_service_type = ?, api_delivery_time = ? WHERE id = ?",
+          [isDynamic ? 0 : localPrice, packagesJson, fieldsJson, priceType, pricePerThousand, apiPriceUsd, minQty, maxQty, categoryId, cleanServiceName, svcType, s.time || '', existingSvc.id]
         );
         updatedServicesCount++;
       }
@@ -577,8 +577,8 @@ router.post('/:id/import-services', authMiddleware, async (req, res) => {
         if (!existingSvc) {
           const minPrice = mergedPackages.length > 0 ? Math.min(...mergedPackages.map(p => p.price)) : 0;
           await runQuery(
-            "INSERT INTO services (category_id, name, description, price, image, packages, fields, price_type, price_per_thousand, fields_title, api_service_id, api_source, api_provider_id, api_price, min_quantity, max_quantity, api_service_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            [categoryId, cleanGroupName, `باقات وتفعيل خدمات ${cleanGroupName}`, minPrice, 'default', JSON.stringify(mergedPackages), fieldsJson, 'fixed', 0, 'بيانات الخدمة', 'grouped', 'api_provider', provider.id, 0, 1, 0, dominantType]
+            "INSERT INTO services (category_id, name, description, price, image, packages, fields, price_type, price_per_thousand, fields_title, api_service_id, api_source, api_provider_id, api_price, min_quantity, max_quantity, api_service_type, api_delivery_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [categoryId, cleanGroupName, `باقات وتفعيل خدمات ${cleanGroupName}`, minPrice, 'default', JSON.stringify(mergedPackages), fieldsJson, 'fixed', 0, 'بيانات الخدمة', 'grouped', 'api_provider', provider.id, 0, 1, 0, dominantType, '']
           );
           addedServicesCount++;
         } else {
@@ -598,8 +598,8 @@ router.post('/:id/import-services', authMiddleware, async (req, res) => {
 
           const newMinPrice = existingPackages.length > 0 ? Math.min(...existingPackages.map(p => p.price)) : 0;
           await runQuery(
-            "UPDATE services SET price = ?, packages = ?, fields = ?, category_id = ?, api_service_type = ? WHERE id = ?",
-            [newMinPrice, JSON.stringify(existingPackages), fieldsJson, categoryId, dominantType, existingSvc.id]
+            "UPDATE services SET price = ?, packages = ?, fields = ?, category_id = ?, api_service_type = ?, api_delivery_time = ? WHERE id = ?",
+            [newMinPrice, JSON.stringify(existingPackages), fieldsJson, categoryId, dominantType, '', existingSvc.id]
           );
           updatedServicesCount++;
         }
@@ -679,14 +679,14 @@ router.post('/:id/import-services', authMiddleware, async (req, res) => {
 
         if (!existingSvc) {
           await runQuery(
-            "INSERT INTO services (category_id, name, description, price, image, packages, fields, price_type, price_per_thousand, fields_title, api_service_id, api_source, api_provider_id, api_price, min_quantity, max_quantity, api_service_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            [categoryId, cleanServiceName, `تفعيل خدمة ${cleanServiceName} فوري عبر API`, isDynamic ? 0 : localPrice, 'default', packagesJson, fieldsJson, priceType, pricePerThousand, 'بيانات الخدمة', s.id.toString(), 'api_provider', provider.id, apiPriceUsd, minQty, maxQty, svcType]
+            "INSERT INTO services (category_id, name, description, price, image, packages, fields, price_type, price_per_thousand, fields_title, api_service_id, api_source, api_provider_id, api_price, min_quantity, max_quantity, api_service_type, api_delivery_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [categoryId, cleanServiceName, `تفعيل خدمة ${cleanServiceName} فوري عبر API`, isDynamic ? 0 : localPrice, 'default', packagesJson, fieldsJson, priceType, pricePerThousand, 'بيانات الخدمة', s.id.toString(), 'api_provider', provider.id, apiPriceUsd, minQty, maxQty, svcType, s.time || '']
           );
           addedServicesCount++;
         } else {
           await runQuery(
-            "UPDATE services SET price = ?, packages = ?, fields = ?, price_type = ?, price_per_thousand = ?, api_price = ?, min_quantity = ?, max_quantity = ?, category_id = ?, name = ?, api_service_type = ? WHERE id = ?",
-            [isDynamic ? 0 : localPrice, packagesJson, fieldsJson, priceType, pricePerThousand, apiPriceUsd, minQty, maxQty, categoryId, cleanServiceName, svcType, existingSvc.id]
+            "UPDATE services SET price = ?, packages = ?, fields = ?, price_type = ?, price_per_thousand = ?, api_price = ?, min_quantity = ?, max_quantity = ?, category_id = ?, name = ?, api_service_type = ?, api_delivery_time = ? WHERE id = ?",
+            [isDynamic ? 0 : localPrice, packagesJson, fieldsJson, priceType, pricePerThousand, apiPriceUsd, minQty, maxQty, categoryId, cleanServiceName, svcType, s.time || '', existingSvc.id]
           );
           updatedServicesCount++;
         }
