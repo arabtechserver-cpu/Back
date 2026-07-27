@@ -652,6 +652,7 @@ async function createTables() {
       ALTER TABLE categories ADD COLUMN IF NOT EXISTS fields TEXT DEFAULT '[]';
       ALTER TABLE categories ADD COLUMN IF NOT EXISTS fields_title VARCHAR(255) DEFAULT 'بيانات الخدمة';
       ALTER TABLE categories ADD COLUMN IF NOT EXISTS parent_id INT DEFAULT NULL;
+      ALTER TABLE categories ADD COLUMN IF NOT EXISTS linked_categories TEXT DEFAULT '[]';
       ALTER TABLE services ADD COLUMN IF NOT EXISTS price_type VARCHAR(50) DEFAULT 'fixed';
       ALTER TABLE services ADD COLUMN IF NOT EXISTS price_per_thousand NUMERIC(12,2) DEFAULT 0;
       ALTER TABLE services ADD COLUMN IF NOT EXISTS fields_title VARCHAR(255);
