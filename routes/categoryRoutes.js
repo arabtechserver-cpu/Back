@@ -105,9 +105,11 @@ router.post('/', authMiddleware, async (req, res) => {
     const finalFieldsTitle = (fields_title && fields_title.trim()) ? fields_title.trim() : 'بيانات الخدمة';
     const finalParentId = (parent_id !== null && parent_id !== undefined && parent_id !== "" && parent_id !== "null" && Number(parent_id) !== 0) ? Number(parent_id) : null;
     
+    const linkedStr = JSON.stringify(linked_categories || []);
+
     const result = await runQuery(
-      'INSERT INTO categories (name, image, fields, fields_title, parent_id) VALUES (?, ?, ?, ?, ?)',
-      [finalName, finalImage, fieldsStr, finalFieldsTitle, finalParentId]
+      'INSERT INTO categories (name, image, fields, fields_title, parent_id, linked_categories) VALUES (?, ?, ?, ?, ?, ?)',
+      [finalName, finalImage, fieldsStr, finalFieldsTitle, finalParentId, linkedStr]
     );
     res.status(201).json({
       message: 'تم إضافة القسم بنجاح.',
@@ -148,9 +150,11 @@ router.put('/:id', authMiddleware, async (req, res) => {
     const finalFieldsTitle = (fields_title && fields_title.trim()) ? fields_title.trim() : 'بيانات الخدمة';
     const finalParentId = (parent_id !== null && parent_id !== undefined && parent_id !== "" && parent_id !== "null" && Number(parent_id) !== 0 && Number(parent_id) !== Number(id)) ? Number(parent_id) : null;
     
+    const linkedStr = JSON.stringify(linked_categories || []);
+    
     await runQuery(
-      'UPDATE categories SET name = ?, image = ?, fields = ?, fields_title = ?, parent_id = ? WHERE id = ?',
-      [finalName, finalImage, fieldsStr, finalFieldsTitle, finalParentId, id]
+      'UPDATE categories SET name = ?, image = ?, fields = ?, fields_title = ?, parent_id = ?, linked_categories = ? WHERE id = ?',
+      [finalName, finalImage, fieldsStr, finalFieldsTitle, finalParentId, linkedStr, id]
     );
 
     if (apply_to_services === true) {
