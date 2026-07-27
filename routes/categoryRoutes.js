@@ -232,7 +232,8 @@ router.post('/merge', authMiddleware, deleteOtpAuth, async (req, res) => {
   }
 
   try {
-    const { getDatabaseMode } = require('../db');
+    const { getDatabaseMode, allQuery, runQuery } = require('../db');
+    
     if (getDatabaseMode().fallbackMode) {
       const fs = require('fs');
       const path = require('path');
@@ -240,27 +241,29 @@ router.post('/merge', authMiddleware, deleteOtpAuth, async (req, res) => {
       if (fs.existsSync(dbPath)) {
         try {
           const db = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
-          
-          // Group categories
           if (db.categories) {
-            db.categories = db.categories.map(c => {
-              if (sourceIds.includes(Number(c.id))) {
-                return { ...c, parent_id: Number(targetId) };
-              }
-              return c;
-            });
+            const targetCat = db.categories.find(c => Number(c.id) === Number(targetId));
+            if (targetCat) {
+              let currentLinked = safeParseJson(targetCat.linked_categories);
+              const newLinked = Array.from(new Set([...currentLinked, ...sourceIds.map(String)]));
+              targetCat.linked_categories = JSON.stringify(newLinked);
+            }
           }
-
           fs.writeFileSync(dbPath, JSON.stringify(db, null, 2), 'utf8');
         } catch (err) {
           console.error('JSON bulk merge categories error:', err);
         }
       }
     } else {
-      const placeholders = sourceIds.map(() => '?').join(',');
-      await runQuery(`UPDATE categories SET parent_id = ? WHERE id IN (${placeholders})`, [targetId, ...sourceIds]);
+      // Get current linked_categories of targetId
+      const targetCats = await allQuery('SELECT linked_categories FROM categories WHERE id = ?', [targetId]);
+      if (targetCats.length > 0) {
+        let currentLinked = safeParseJson(targetCats[0].linked_categories);
+        const newLinked = Array.from(new Set([...currentLinked, ...sourceIds.map(String)]));
+        await runQuery('UPDATE categories SET linked_categories = ? WHERE id = ?', [JSON.stringify(newLinked), targetId]);
+      }
     }
-    res.json({ message: 'تم تجميع الأقسام بنجاح.' });
+    res.json({ message: 'تم تجميع الأقسام بنجاح دون إزالتها من مكانها الأصلي.' });
   } catch (error) {
     console.error('Merge categories error:', error);
     res.status(500).json({ message: 'حدث خطأ أثناء دمج الأقسام.' });
