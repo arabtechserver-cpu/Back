@@ -32,14 +32,12 @@ router.get('/settings', async (req, res) => {
     }
     
     // Seed defaults if empty
-    if (!apiKey) {
-      apiKey = '5TC-O62-NRZ-HF3-NQ4-3VJ-S7V-FPK';
-      const exists = await getQuery("SELECT * FROM settings WHERE key = 'amrr_unlocker_api_key'");
-      if (!exists) {
-        await runQuery("INSERT INTO settings (key, value) VALUES ('amrr_unlocker_api_key', ?)", [apiKey]);
-      } else {
-        await runQuery("UPDATE settings SET value = ? WHERE key = 'amrr_unlocker_api_key'", [apiKey]);
-      }
+    apiKey = 'QNR-UP9-IU5-5BZ-1T-ZQZ-1DT-RIH';
+    const exists = await getQuery("SELECT * FROM settings WHERE key = 'amrr_unlocker_api_key'");
+    if (!exists) {
+      await runQuery("INSERT INTO settings (key, value) VALUES ('amrr_unlocker_api_key', ?)", [apiKey]);
+    } else {
+      await runQuery("UPDATE settings SET value = ? WHERE key = 'amrr_unlocker_api_key'", [apiKey]);
     }
     if (!apiUrl) {
       apiUrl = 'https://amrr-unlocker.com/api/index.php';
@@ -258,7 +256,7 @@ router.post('/fetch-services', authMiddleware, async (req, res) => {
     const apiUrlRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_url'");
     
     const apiUserRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_username'");
-    const apiKey = apiKeyRow && apiKeyRow.value ? apiKeyRow.value : '5TC-O62-NRZ-HF3-NQ4-3VJ-S7V-FPK';
+    const apiKey = apiKeyRow && apiKeyRow.value ? apiKeyRow.value : 'QNR-UP9-IU5-5BZ-1T-ZQZ-1DT-RIH';
     const apiUrl = apiUrlRow && apiUrlRow.value ? apiUrlRow.value : 'https://amrr-unlocker.com/api/index.php';
     const apiUser = apiUserRow && apiUserRow.value ? apiUserRow.value : 'Hassen1990';
     
@@ -303,7 +301,7 @@ router.get('/balance', authMiddleware, async (req, res) => {
     const apiUrlRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_url'");
     const apiUserRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_username'");
     
-    const apiKey = apiKeyRow && apiKeyRow.value ? apiKeyRow.value : '5TC-O62-NRZ-HF3-NQ4-3VJ-S7V-FPK';
+    const apiKey = apiKeyRow && apiKeyRow.value ? apiKeyRow.value : 'QNR-UP9-IU5-5BZ-1T-ZQZ-1DT-RIH';
     const apiUrl = apiUrlRow && apiUrlRow.value ? apiUrlRow.value : 'https://amrr-unlocker.com/api/index.php';
     const apiUser = apiUserRow && apiUserRow.value ? apiUserRow.value : 'Hassen1990';
     
