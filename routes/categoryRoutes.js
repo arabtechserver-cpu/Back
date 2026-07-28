@@ -28,7 +28,9 @@ function safeParseJson(value, defaultValue = []) {
 router.get('/menu', async (req, res) => {
   try {
     const categories = await allQuery('SELECT * FROM categories ORDER BY id ASC');
-    const formatted = categories.map(cat => ({
+    const visibleCategories = categories.filter(cat => cat.show_in_menu === true || String(cat.show_in_menu) === '1' || String(cat.show_in_menu) === 'true');
+    
+    const formatted = visibleCategories.map(cat => ({
       id: cat.id,
       name: (cat.name || '').trim(),
       image: cat.image,
