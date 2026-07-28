@@ -208,6 +208,17 @@ router.put('/:id', authMiddleware, async (req, res) => {
   }
 });
 
+// Hide all categories from menu (Admin Protected)
+router.put('/hide-all-menu', authMiddleware, async (req, res) => {
+  try {
+    await runQuery('UPDATE categories SET show_in_menu = false');
+    res.json({ message: 'تم إخفاء جميع الأقسام بنجاح.' });
+  } catch (error) {
+    console.error('Hide all categories menu visibility error:', error);
+    res.status(500).json({ message: 'حدث خطأ أثناء إخفاء الأقسام.' });
+  }
+});
+
 // Update category menu visibility (Admin Protected)
 router.put('/:id/menu-visibility', authMiddleware, async (req, res) => {
   const { id } = req.params;
