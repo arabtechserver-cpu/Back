@@ -217,7 +217,7 @@ router.put('/:id', authMiddleware, async (req, res) => {
     console.error('Update category error:', error);
     res.status(500).json({ message: 'حدث خطأ أثناء تحديث القسم.' });
   }
-});});
+});
 
 // Update category menu visibility (Admin Protected)
 router.put('/:id/menu-visibility', authMiddleware, async (req, res) => {
