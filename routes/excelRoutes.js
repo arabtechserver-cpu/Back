@@ -157,7 +157,7 @@ router.post('/upload', authMiddleware, async (req, res) => {
     let categoryId;
     if (!category) {
       const result = await runQuery(
-        'INSERT INTO categories (name, image, color, icon, currency) VALUES (?, ?, ?, ?, ?)',
+        'INSERT INTO categories (name, image, color, icon, currency, show_in_menu) VALUES (?, ?, ?, ?, ?, false)',
         [categoryName, 'default', categoryColor, categoryIcon, 'USD']
       );
       categoryId = result.lastID;

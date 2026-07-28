@@ -219,7 +219,7 @@ async function performProviderSync(providerId, customRate, customMarkup, customS
       let categoryId;
       if (!cat) {
         const catInsert = await runQuery(
-          "INSERT INTO categories (name, image, color, icon, currency, fields, fields_title) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id",
+          "INSERT INTO categories (name, image, color, icon, currency, fields, fields_title, show_in_menu) VALUES (?, ?, ?, ?, ?, ?, ?, false) RETURNING id",
           [cleanGroupName, 'default', '#0284c7', 'credit-card', 'USD', JSON.stringify(combinedFields), 'بيانات الخدمة']
         );
         categoryId = catInsert ? (catInsert.id || catInsert.lastID) : null;
@@ -303,7 +303,7 @@ async function performProviderSync(providerId, customRate, customMarkup, customS
       let categoryId;
       if (!cat) {
         const catInsert = await runQuery(
-          "INSERT INTO categories (name, image, color, icon, currency, fields, fields_title) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id",
+          "INSERT INTO categories (name, image, color, icon, currency, fields, fields_title, show_in_menu) VALUES (?, ?, ?, ?, ?, ?, ?, false) RETURNING id",
           [cleanCategoryName, 'default', '#0284c7', 'credit-card', 'USD', JSON.stringify([]), 'بيانات الخدمة']
         );
         categoryId = catInsert ? (catInsert.id || catInsert.lastID) : null;
@@ -508,7 +508,7 @@ router.post('/:id/import-services', authMiddleware, async (req, res) => {
         let categoryId;
         if (!cat) {
           const catInsert = await runQuery(
-            "INSERT INTO categories (name, image, color, icon, currency, fields, fields_title) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id",
+            "INSERT INTO categories (name, image, color, icon, currency, fields, fields_title, show_in_menu) VALUES (?, ?, ?, ?, ?, ?, ?, false) RETURNING id",
             [cleanGroupName, 'default', '#0284c7', 'credit-card', 'USD', JSON.stringify(combinedFields), 'بيانات الخدمة']
           );
           categoryId = catInsert ? (catInsert.id || catInsert.lastID) : null;
@@ -616,7 +616,7 @@ router.post('/:id/import-services', authMiddleware, async (req, res) => {
         let categoryId;
         if (!cat) {
           const catInsert = await runQuery(
-            "INSERT INTO categories (name, image, color, icon, currency, fields, fields_title) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id",
+            "INSERT INTO categories (name, image, color, icon, currency, fields, fields_title, show_in_menu) VALUES (?, ?, ?, ?, ?, ?, ?, false) RETURNING id",
             [cleanCategoryName, 'default', '#0284c7', 'credit-card', 'USD', JSON.stringify([]), 'بيانات الخدمة']
           );
           categoryId = catInsert ? (catInsert.id || catInsert.lastID) : null;
