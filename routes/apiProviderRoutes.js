@@ -21,8 +21,12 @@ router.post('/', authMiddleware, async (req, res) => {
   if (!name || !api_url || !api_key) {
     return res.status(400).json({ message: 'الاسم، الرابط، ومفتاح API مطلوبين.' });
   }
-
   try {
+    const countResult = await getQuery('SELECT COUNT(*) as count FROM api_providers');
+    if (countResult && countResult.count >= 3) {
+      return res.status(400).json({ message: 'عذراً، لقد وصلت للحد الأقصى (3) من مزودي الخدمات المسموح بإضافتهم.' });
+    }
+
     const result = await runQuery(
       'INSERT INTO api_providers (name, api_url, username, api_key) VALUES (?, ?, ?, ?) RETURNING id',
       [name.trim(), api_url.trim(), username ? username.trim() : '', api_key.trim()]
