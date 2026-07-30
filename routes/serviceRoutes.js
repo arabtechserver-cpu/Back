@@ -481,7 +481,7 @@ function removeDuplicateFields(fields) {
 
 // Add new service (Admin Protected)
 router.post('/', authMiddleware, async (req, res) => {
-  const { category_id, name, description, price, image, packages, fields, price_type, price_per_thousand, fields_title, download_link, download_link_title, is_popular, show_in_menu, is_bundle, bundle_services } = req.body;
+  const { category_id, name, description, price, image, packages, fields, price_type, price_per_thousand, fields_title, download_link, download_link_title, is_popular, show_in_menu, is_bundle, bundle_services, api_provider_id } = req.body;
 
   if (!category_id || !name || !name.trim()) {
     return res.status(400).json({ message: 'حقول معرف القسم واسم الخدمة مطلوبة.' });
@@ -503,8 +503,8 @@ router.post('/', authMiddleware, async (req, res) => {
     const bundleFlag = is_bundle === true || is_bundle === 'true';
 
     const result = await runQuery(
-      'INSERT INTO services (category_id, name, description, price, image, packages, fields, price_type, price_per_thousand, fields_title, download_link, download_link_title, is_popular, show_in_menu, is_bundle, bundle_services) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [category_id, finalName, description || '', price || 0.0, finalImage, packagesStr, fieldsStr, price_type || 'fixed', price_per_thousand || 0.0, fields_title || '', download_link || '', download_link_title || '', popularFlag, menuFlag, bundleFlag, bundleServicesStr]
+      'INSERT INTO services (category_id, name, description, price, image, packages, fields, price_type, price_per_thousand, fields_title, download_link, download_link_title, is_popular, show_in_menu, is_bundle, bundle_services, api_provider_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [category_id, finalName, description || '', price || 0.0, finalImage, packagesStr, fieldsStr, price_type || 'fixed', price_per_thousand || 0.0, fields_title || '', download_link || '', download_link_title || '', popularFlag, menuFlag, bundleFlag, bundleServicesStr, api_provider_id || null]
     );
 
     res.status(201).json({
@@ -623,7 +623,7 @@ router.patch('/bulk/fields-by-category', authMiddleware, async (req, res) => {
 // Update service (Admin Protected)
 router.put('/:id', authMiddleware, async (req, res) => {
   const { id } = req.params;
-  const { category_id, name, description, price, image, packages, fields, price_type, price_per_thousand, fields_title, download_link, download_link_title, is_popular, show_in_menu, is_bundle, bundle_services } = req.body;
+  const { category_id, name, description, price, image, packages, fields, price_type, price_per_thousand, fields_title, download_link, download_link_title, is_popular, show_in_menu, is_bundle, bundle_services, api_provider_id } = req.body;
 
   if (!category_id || !name || !name.trim()) {
     return res.status(400).json({ message: 'حقول معرف القسم واسم الخدمة مطلوبة للتحديث.' });
@@ -644,8 +644,8 @@ router.put('/:id', authMiddleware, async (req, res) => {
     const bundleFlag = is_bundle === true || is_bundle === 'true';
 
     await runQuery(
-      'UPDATE services SET category_id = ?, name = ?, description = ?, price = ?, image = ?, packages = ?, fields = ?, price_type = ?, price_per_thousand = ?, fields_title = ?, download_link = ?, download_link_title = ?, is_popular = ?, show_in_menu = ?, is_bundle = ?, bundle_services = ? WHERE id = ?',
-      [category_id, finalName, description, price, finalImage, packagesStr, fieldsStr, price_type || 'fixed', price_per_thousand || 0.0, fields_title || '', download_link || '', download_link_title || '', popularFlag, menuFlag, bundleFlag, bundleServicesStr, id]
+      'UPDATE services SET category_id = ?, name = ?, description = ?, price = ?, image = ?, packages = ?, fields = ?, price_type = ?, price_per_thousand = ?, fields_title = ?, download_link = ?, download_link_title = ?, is_popular = ?, show_in_menu = ?, is_bundle = ?, bundle_services = ?, api_provider_id = ? WHERE id = ?',
+      [category_id, finalName, description, price, finalImage, packagesStr, fieldsStr, price_type || 'fixed', price_per_thousand || 0.0, fields_title || '', download_link || '', download_link_title || '', popularFlag, menuFlag, bundleFlag, bundleServicesStr, api_provider_id || null, id]
     );
 
     res.json({
