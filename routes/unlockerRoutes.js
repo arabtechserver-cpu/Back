@@ -1067,6 +1067,25 @@ router.post('/check-status/:id', authMiddleware, async (req, res) => {
   }
 });
 
+// Helper to get API Provider (with fallback for legacy amrr-unlocker)
+async function resolveApiProvider(providerId, source) {
+  let provider = null;
+  if (providerId) {
+    provider = await getQuery("SELECT * FROM api_providers WHERE id = ?", [providerId]);
+  }
+  if (!provider && (source === 'amrr-unlocker' || source === 'api_provider')) {
+    const apiKeyRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_key'");
+    const apiUrlRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_url'");
+    const apiUserRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_username'");
+    provider = {
+      api_key: apiKeyRow && apiKeyRow.value ? apiKeyRow.value : 'QNR-UP9-IU5-5BZ-1T-ZQZ-1DT-RIH',
+      api_url: apiUrlRow && apiUrlRow.value ? apiUrlRow.value : 'https://amrrunlocker.com/api/index.php',
+      username: apiUserRow && apiUserRow.value ? apiUserRow.value : ''
+    };
+  }
+  return provider;
+}
+
 // Helper to check and update order status
 async function checkAndUpdateOrder(orderId) {
   const order = await getQuery("SELECT * FROM orders WHERE id = ?", [orderId]);
@@ -1083,11 +1102,11 @@ async function checkAndUpdateOrder(orderId) {
     };
   }
   
-  if (!order.api_order_id || !order.api_provider_id) {
+  if (!order.api_order_id || (!order.api_provider_id && order.api_source !== 'amrr-unlocker' && order.api_source !== 'api_provider')) {
     throw new Error('هذا الطلب غير مرتبط بطلب خارجي فعال.');
   }
   
-  const provider = await getQuery("SELECT * FROM api_providers WHERE id = ?", [order.api_provider_id]);
+  const provider = await resolveApiProvider(order.api_provider_id, order.api_source);
   if (!provider) {
     throw new Error('مزود الـ API المرتبط بهذا الطلب غير موجود.');
   }
@@ -1251,8 +1270,8 @@ async function autoSubmitUnlockerOrder(orderId) {
     // should still skip to avoid hammering the provider on duplicate events.
     
     const service = await getQuery("SELECT api_service_id, api_source, api_service_type, packages, api_provider_id FROM services WHERE id = ?", [order.service_id]);
-    if (!service || !service.api_provider_id) {
-      throw new Error('هذه الخدمة غير مرتبطة بمزود API صالح.');
+    if (!service) {
+      throw new Error('الخدمة غير موجودة.');
     }
 
     let targetApiServiceId = service.api_service_id;
@@ -1279,7 +1298,7 @@ async function autoSubmitUnlockerOrder(orderId) {
       throw new Error('تعذر تحديد معرّف الخدمة الخارجي (API Service ID) لهذه الحزمة.');
     }
     
-    const provider = await getQuery("SELECT * FROM api_providers WHERE id = ?", [service.api_provider_id]);
+    const provider = await resolveApiProvider(service.api_provider_id, service.api_source);
     if (!provider) {
       throw new Error('مزود الـ API المرتبط بهذا الطلب غير موجود.');
     }
@@ -1484,8 +1503,8 @@ router.post('/cancel-order/:id', authMiddleware, async (req, res) => {
     }
     
     // If order has an external API order ID, try to cancel it from the provider
-    if (order.api_order_id && order.api_provider_id) {
-      const provider = await getQuery("SELECT * FROM api_providers WHERE id = ?", [order.api_provider_id]);
+    if (order.api_order_id) {
+      const provider = await resolveApiProvider(order.api_provider_id, order.api_source);
       if (!provider) {
         return res.status(404).json({ message: 'مزود الـ API المرتبط بالطلب غير موجود.' });
       }
