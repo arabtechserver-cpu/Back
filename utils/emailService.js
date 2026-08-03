@@ -6,8 +6,8 @@ const { getQuery } = require('../db');
  * Get Loops configuration (API key and transactional IDs) from settings DB or process.env
  */
 async function getLoopsConfig() {
-  let loopsApiKey = process.env.LOOPS_API_KEY || '4d2c0adae7197fd0927e678eceb74c60';
-  let loopsTransactionalIdOtp = process.env.LOOPS_TRANSACTIONAL_ID_OTP || 'cmrv2rlz301lp0j2pig1clc4n';
+  let loopsApiKey = process.env.LOOPS_API_KEY || '';
+  let loopsTransactionalIdOtp = process.env.LOOPS_TRANSACTIONAL_ID_OTP || '';
   let loopsTransactionalIdReset = process.env.LOOPS_TRANSACTIONAL_ID_RESET || '';
 
   try {
