@@ -54,6 +54,8 @@ router.get('/', async (req, res) => {
       name: (cat.name || '').trim(),
       fields: safeParseJson(cat.fields),
       show_in_menu: cat.show_in_menu === undefined || cat.show_in_menu === null ? false : !!cat.show_in_menu,
+      is_featured: cat.is_featured === undefined || cat.is_featured === null ? false : !!cat.is_featured,
+      cover_image: cat.cover_image || '',
       linked_categories: safeParseJson(cat.linked_categories),
       parent_id: (cat.parent_id !== null && cat.parent_id !== undefined && cat.parent_id !== "") ? Number(cat.parent_id) : null
     }));
@@ -89,7 +91,7 @@ function removeDuplicateFields(fields) {
 
 // Add new category (Admin Protected)
 router.post('/', authMiddleware, async (req, res) => {
-  const { name, image, fields, fields_title, parent_id, linked_categories } = req.body;
+  const { name, image, fields, fields_title, parent_id, linked_categories, is_featured, cover_image } = req.body;
 
   if (!name || !name.trim()) {
     return res.status(400).json({ message: 'اسم القسم مطلوب.' });
@@ -100,6 +102,11 @@ router.post('/', authMiddleware, async (req, res) => {
     const savedImagePath = saveImage(image);
     const finalImage = savedImagePath || 'default';
     
+    let finalCoverImage = '';
+    if (cover_image) {
+      finalCoverImage = saveImage(cover_image) || '';
+    }
+    
     const parsedFields = safeParseJson(fields);
     const cleanedFields = removeDuplicateFields(parsedFields);
     const fieldsStr = JSON.stringify(cleanedFields);
@@ -108,10 +115,11 @@ router.post('/', authMiddleware, async (req, res) => {
     const finalParentId = (parent_id !== null && parent_id !== undefined && parent_id !== "" && parent_id !== "null" && Number(parent_id) !== 0) ? Number(parent_id) : null;
     
     const linkedStr = JSON.stringify(linked_categories || []);
+    const isFeaturedBool = !!is_featured;
 
     const result = await runQuery(
-      'INSERT INTO categories (name, image, fields, fields_title, parent_id, linked_categories, show_in_menu) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [finalName, finalImage, fieldsStr, finalFieldsTitle, finalParentId, linkedStr, false]
+      'INSERT INTO categories (name, image, fields, fields_title, parent_id, linked_categories, show_in_menu, is_featured, cover_image) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [finalName, finalImage, fieldsStr, finalFieldsTitle, finalParentId, linkedStr, false, isFeaturedBool, finalCoverImage]
     );
     res.status(201).json({
       message: 'تم إضافة القسم بنجاح.',
@@ -121,7 +129,9 @@ router.post('/', authMiddleware, async (req, res) => {
       fields: safeParseJson(fieldsStr),
       fields_title: finalFieldsTitle,
       parent_id: finalParentId,
-      linked_categories: safeParseJson(linked_categories)
+      linked_categories: safeParseJson(linked_categories),
+      is_featured: isFeaturedBool,
+      cover_image: finalCoverImage
     });
   } catch (error) {
     console.error('Add category error:', error);
@@ -146,7 +156,7 @@ router.put('/hide-all-menu', authMiddleware, async (req, res) => {
 // Update category (Admin Protected)
 router.put('/:id', authMiddleware, async (req, res) => {
   const { id } = req.params;
-  const { name, image, fields, fields_title, apply_to_services, parent_id, linked_categories } = req.body;
+  const { name, image, fields, fields_title, apply_to_services, parent_id, linked_categories, is_featured, cover_image } = req.body;
 
   if (!name || !name.trim()) {
     return res.status(400).json({ message: 'اسم القسم مطلوب للتحديث.' });
@@ -156,6 +166,11 @@ router.put('/:id', authMiddleware, async (req, res) => {
   try {
     const finalImage = saveImage(image);
     
+    let finalCoverImage;
+    if (cover_image !== undefined) {
+      finalCoverImage = saveImage(cover_image) || '';
+    }
+    
     const parsedFields = safeParseJson(fields);
     const cleanedFields = removeDuplicateFields(parsedFields);
     const fieldsStr = JSON.stringify(cleanedFields);
@@ -164,11 +179,19 @@ router.put('/:id', authMiddleware, async (req, res) => {
     const finalParentId = (parent_id !== null && parent_id !== undefined && parent_id !== "" && parent_id !== "null" && Number(parent_id) !== 0 && Number(parent_id) !== Number(id)) ? Number(parent_id) : null;
     
     const linkedStr = JSON.stringify(linked_categories || []);
+    const isFeaturedBool = !!is_featured;
     
-    await runQuery(
-      'UPDATE categories SET name = ?, image = ?, fields = ?, fields_title = ?, parent_id = ?, linked_categories = ? WHERE id = ?',
-      [finalName, finalImage, fieldsStr, finalFieldsTitle, finalParentId, linkedStr, id]
-    );
+    if (finalCoverImage !== undefined) {
+      await runQuery(
+        'UPDATE categories SET name = ?, image = ?, fields = ?, fields_title = ?, parent_id = ?, linked_categories = ?, is_featured = ?, cover_image = ? WHERE id = ?',
+        [finalName, finalImage, fieldsStr, finalFieldsTitle, finalParentId, linkedStr, isFeaturedBool, finalCoverImage, id]
+      );
+    } else {
+      await runQuery(
+        'UPDATE categories SET name = ?, image = ?, fields = ?, fields_title = ?, parent_id = ?, linked_categories = ?, is_featured = ? WHERE id = ?',
+        [finalName, finalImage, fieldsStr, finalFieldsTitle, finalParentId, linkedStr, isFeaturedBool, id]
+      );
+    }
 
     if (apply_to_services === true) {
       const { getDatabaseMode } = require('../db');

@@ -60,6 +60,15 @@ router.get('/', async (req, res) => {
       }
     }
 
+    let featuredSections = [];
+    if (settings.featured_sections) {
+      try {
+        featuredSections = JSON.parse(settings.featured_sections);
+      } catch (e) {
+        console.error('Error parsing featured_sections settings:', e);
+      }
+    }
+
     res.json({
       announcement_text: settings.announcement_text || '🟢 واتساب الإدارة 1: +1 (672) 897-2935 | 🟢 واتساب الإدارة 2: +249 12 366 7227',
       site_name: settings.site_name || 'عرب تك سيرفر',
@@ -76,13 +85,13 @@ router.get('/', async (req, res) => {
       email_pass: settings.email_pass || '',
       global_markup_percent: parseFloat(settings.global_markup_percent) || 0,
       api_auto_submit: settings.api_auto_submit === undefined ? true : settings.api_auto_submit === 'true',
-      announcement_text: settings.announcement_text || '🟢 واتساب الإدارة: +1 (672) 897-2935',
       home_stats: settings.home_stats || JSON.stringify([
         { id: 1, label: 'مستخدم نشط', value: '10K+', icon: '👥' },
         { id: 2, label: 'طلب ناجح', value: '50K+', icon: '✅' },
         { id: 3, label: 'خدمة متوفرة', value: '100+', icon: '⚡' },
         { id: 4, label: 'دعم فني', value: '24/7', icon: '🎧' }
-      ])
+      ]),
+      featured_sections: featuredSections
     });
   } catch (error) {
     console.error('Fetch settings error:', error);
@@ -92,7 +101,7 @@ router.get('/', async (req, res) => {
 
 // Update settings (Admin Protected)
 router.put('/', authMiddleware, async (req, res) => {
-  const { site_name, site_logo, site_favicon, payment_methods, supported_currencies, exchange_rates, base_currency, hide_wallet_payment, whatsapp_numbers, whatsapp_portal_password, email_user, email_pass, global_markup_percent, api_auto_submit, announcement_text, home_stats } = req.body;
+  const { site_name, site_logo, site_favicon, payment_methods, supported_currencies, exchange_rates, base_currency, hide_wallet_payment, whatsapp_numbers, whatsapp_portal_password, email_user, email_pass, global_markup_percent, api_auto_submit, announcement_text, home_stats, featured_sections } = req.body;
 
   try {
     if (site_name !== undefined) {
@@ -242,6 +251,16 @@ router.put('/', authMiddleware, async (req, res) => {
         await runQuery('INSERT INTO settings (key, value) VALUES (?, ?)', ['home_stats', statsStr]);
       } else {
         await runQuery('UPDATE settings SET value = ? WHERE key = ?', [statsStr, 'home_stats']);
+      }
+    }
+
+    if (featured_sections !== undefined) {
+      const sectionsStr = typeof featured_sections === 'string' ? featured_sections : JSON.stringify(featured_sections);
+      const existing = await allQuery('SELECT * FROM settings WHERE key = ?', ['featured_sections']);
+      if (existing.length === 0) {
+        await runQuery('INSERT INTO settings (key, value) VALUES (?, ?)', ['featured_sections', sectionsStr]);
+      } else {
+        await runQuery('UPDATE settings SET value = ? WHERE key = ?', [sectionsStr, 'featured_sections']);
       }
     }
 
