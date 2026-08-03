@@ -722,6 +722,14 @@ async function createTables() {
     console.error('Migration error adding table columns:', err.message);
   }
 
+  // ── Isolated migration: api_delivery_time column ─────────
+  try {
+    await pool.query(`ALTER TABLE services ADD COLUMN IF NOT EXISTS api_delivery_time VARCHAR(255) DEFAULT '';`);
+    console.log('Migration: api_delivery_time column ensured.');
+  } catch (err) {
+    console.error('Migration error adding api_delivery_time:', err.message);
+  }
+
   // ── Isolated migration: api_service_type column (runs independently) ─────────
   try {
     await pool.query(`ALTER TABLE services ADD COLUMN IF NOT EXISTS api_service_type VARCHAR(20) DEFAULT 'imei';`);
