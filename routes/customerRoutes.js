@@ -6,6 +6,7 @@ const authMiddleware = require('../middleware/auth');
 const deleteOtpAuth = require('../middleware/deleteOtpAuth');
 const { getQuery, runQuery, allQuery } = require('../db');
 const { getJwtSecret } = require('../utils/security');
+const turnstileMiddleware = require('../middleware/turnstileMiddleware');
 
 const telegram = require('../utils/telegramService');
 const emailService = require('../utils/emailService');
@@ -62,8 +63,7 @@ const customerAuth = (req, res, next) => {
 };
 
 // Register Customer (Username, mandatory Gmail, optional phone number)
-// Register Customer (Username, mandatory Gmail, optional phone number)
-router.post('/register', async (req, res) => {
+router.post('/register', turnstileMiddleware, async (req, res) => {
   const { username, email, password, phone } = req.body;
 
   if (!username || !email || !password || !phone) {
@@ -175,7 +175,7 @@ router.post('/register', async (req, res) => {
 
 
 // Login Customer (Supports Gmail / Username with OTP verification)
-router.post('/login', async (req, res) => {
+router.post('/login', turnstileMiddleware, async (req, res) => {
   const { username, password } = req.body;
 
   if (!username || !password) {
@@ -849,7 +849,7 @@ router.delete('/admin/discount/:discountId', authMiddleware, deleteOtpAuth, asyn
 });
 
 // Forgot Password Flow: 1. Send OTP
-router.post('/forgot-password', async (req, res) => {
+router.post('/forgot-password', turnstileMiddleware, async (req, res) => {
   const { identifier } = req.body; // email, username, or phone
   if (!identifier) return res.status(400).json({ message: 'يرجى إدخال البريد الإلكتروني، رقم الهاتف، أو اسم المستخدم.' });
 
