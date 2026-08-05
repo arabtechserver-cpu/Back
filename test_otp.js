@@ -1,7 +1,7 @@
 const { sendCustomerAuthOtpEmail } = require('./utils/emailService');
 
 async function test() {
-  process.env.EMAIL_USER = 'arab.tech.services2@gmail.com';
+  process.env.EMAIL_USER = 'arabtechserver@gmail.com';
   process.env.EMAIL_PASS = 'ejow pcqv otls vayx';
   process.env.EMAIL_HOST = 'smtp.gmail.com';
   process.env.EMAIL_PORT = '465';

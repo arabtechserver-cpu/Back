@@ -90,6 +90,27 @@ router.get('/popular-services', async (req, res) => {
   }
 });
 
+// Get recent orders (Public - for social proof)
+router.get('/recent', async (req, res) => {
+  try {
+    const recent = await allQuery(`
+      SELECT 
+        o.service_name, 
+        c.username as customer_name,
+        o.created_at
+      FROM orders o
+      LEFT JOIN customers c ON o.customer_id = c.id
+      WHERE o.status != 'cancelled'
+      ORDER BY o.id DESC
+      LIMIT 3
+    `);
+    res.json(recent || []);
+  } catch (error) {
+    console.error('Recent orders error:', error);
+    res.status(500).json({ message: 'حدث خطأ أثناء جلب الطلبات الأخيرة.' });
+  }
+});
+
 // Submit new order (Public)
 router.post('/', async (req, res) => {
   const { service_id, player_id, phone, package_name, package_price, payment_method, sender_phone, transfer_to, quantity, receipt_image, transfer_amount, custom_fields } = req.body;
