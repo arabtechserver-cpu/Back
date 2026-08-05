@@ -48,7 +48,7 @@ router.get('/menu', async (req, res) => {
 // Get all categories (Public)
 router.get('/', async (req, res) => {
   try {
-    const categories = await allQuery('SELECT * FROM categories ORDER BY id ASC');
+    const categories = await allQuery('SELECT * FROM categories ORDER BY sort_order ASC, id ASC');
     const formatted = categories.map(cat => ({
       ...cat,
       name: (cat.name || '').trim(),
@@ -56,10 +56,20 @@ router.get('/', async (req, res) => {
       show_in_menu: cat.show_in_menu === undefined || cat.show_in_menu === null ? false : !!cat.show_in_menu,
       is_featured: cat.is_featured === undefined || cat.is_featured === null ? false : !!cat.is_featured,
       cover_image: cat.cover_image || '',
+      sort_order: Number(cat.sort_order || 0),
       linked_categories: safeParseJson(cat.linked_categories),
       parent_id: (cat.parent_id !== null && cat.parent_id !== undefined && cat.parent_id !== "") ? Number(cat.parent_id) : null
     }));
-    formatted.sort((a, b) => a.name.localeCompare(b.name, 'en'));
+    formatted.sort((a, b) => {
+      const orderA = a.sort_order || 0;
+      const orderB = b.sort_order || 0;
+      if (orderA !== orderB) {
+        if (orderA === 0) return 1;
+        if (orderB === 0) return -1;
+        return orderA - orderB;
+      }
+      return a.name.localeCompare(b.name, 'ar');
+    });
     res.json(formatted);
   } catch (error) {
     console.error('Fetch categories error:', error);
@@ -139,6 +149,26 @@ router.post('/', authMiddleware, async (req, res) => {
       return res.status(400).json({ message: 'هذا القسم موجود بالفعل.' });
     }
     res.status(500).json({ message: 'حدث خطأ أثناء إضافة القسم.' });
+  }
+});
+
+// Bulk reorder categories (Admin Protected)
+router.put('/reorder', authMiddleware, async (req, res) => {
+  const { items } = req.body;
+  if (!Array.isArray(items)) {
+    return res.status(400).json({ message: 'قائمة الترتيب غير صحيحة.' });
+  }
+
+  try {
+    for (const item of items) {
+      if (item.id !== undefined && item.sort_order !== undefined) {
+        await runQuery('UPDATE categories SET sort_order = ? WHERE id = ?', [Number(item.sort_order), item.id]);
+      }
+    }
+    res.json({ message: 'تم حفظ ترتيب الأقسام بنجاح.' });
+  } catch (error) {
+    console.error('Reorder categories error:', error);
+    res.status(500).json({ message: 'حدث خطأ أثناء تعديل ترتيب الأقسام.' });
   }
 });
 

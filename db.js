@@ -485,6 +485,7 @@ async function createTables() {
     ALTER TABLE categories ADD COLUMN IF NOT EXISTS show_in_menu BOOLEAN DEFAULT true;
     ALTER TABLE categories ADD COLUMN IF NOT EXISTS is_featured BOOLEAN DEFAULT false;
     ALTER TABLE categories ADD COLUMN IF NOT EXISTS cover_image TEXT DEFAULT '';
+    ALTER TABLE categories ADD COLUMN IF NOT EXISTS sort_order INT DEFAULT 0;
 
     CREATE TABLE IF NOT EXISTS services (
       id          SERIAL PRIMARY KEY,
