@@ -536,7 +536,8 @@ async function createTables() {
       description TEXT DEFAULT '',
       badge     VARCHAR(100) DEFAULT '',
       color     VARCHAR(30) DEFAULT '#8b5cf6',
-      icon      TEXT DEFAULT '⚡'
+      icon      TEXT DEFAULT '⚡',
+      link      TEXT DEFAULT ''
     );
 
     CREATE TABLE IF NOT EXISTS wallet_requests (
@@ -716,6 +717,7 @@ async function createTables() {
       ALTER TABLE customers ADD COLUMN IF NOT EXISTS api_allowed_ips TEXT DEFAULT '[]';
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS is_api_order BOOLEAN DEFAULT false;
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS api_reseller_id INT REFERENCES customers(id) ON DELETE SET NULL;
+      ALTER TABLE banners ADD COLUMN IF NOT EXISTS link TEXT DEFAULT '';
     `);
 
     // Migration: rename old fields_title labels and fix default currency
