@@ -463,8 +463,11 @@ async function createTables() {
       balances TEXT DEFAULT '{"USD":0,"USDT":0}',
       password_plain VARCHAR(255) DEFAULT '',
       reset_otp VARCHAR(20) DEFAULT NULL,
-      reset_otp_expires TIMESTAMPTZ DEFAULT NULL
+      reset_otp_expires TIMESTAMPTZ DEFAULT NULL,
+      google_id VARCHAR(255) DEFAULT ''
     );
+
+    ALTER TABLE customers ADD COLUMN IF NOT EXISTS google_id VARCHAR(255) DEFAULT '';
 
     CREATE TABLE IF NOT EXISTS categories (
       id    SERIAL PRIMARY KEY,

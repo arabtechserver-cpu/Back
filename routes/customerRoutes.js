@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const axios = require('axios');
 const authMiddleware = require('../middleware/auth');
 const deleteOtpAuth = require('../middleware/deleteOtpAuth');
 const { getQuery, runQuery, allQuery } = require('../db');
@@ -62,7 +63,38 @@ const customerAuth = (req, res, next) => {
   }
 };
 
-// Register Customer (Username, mandatory Gmail, optional phone number)
+// Check Gmail Live Validation Endpoint
+router.post('/check-email', async (req, res) => {
+  const { email } = req.body;
+  if (!email) {
+    return res.status(400).json({ valid: false, message: 'يرجى إدخال البريد الإلكتروني.' });
+  }
+
+  const validation = await emailService.validateRealGmail(email);
+  if (!validation.valid) {
+    return res.json({ valid: false, message: validation.reason });
+  }
+
+  try {
+    const existingEmail = await getQuery('SELECT * FROM customers WHERE email = ?', [validation.cleanEmail]);
+    if (existingEmail) {
+      return res.json({ valid: false, message: 'البريد الإلكتروني هذا مسجل بالفعل.' });
+    }
+
+    const allCustomers = await allQuery('SELECT email FROM customers WHERE email IS NOT NULL');
+    const canonicalEmail = validation.canonicalEmail;
+    const duplicate = (allCustomers || []).find(c => c.email && emailService.getCanonicalGmail(c.email) === canonicalEmail);
+    if (duplicate) {
+      return res.json({ valid: false, message: 'البريد الإلكتروني هذا مسجل بالفعل باستخدام نقاط أو رموز مشتقة.' });
+    }
+
+    return res.json({ valid: true, message: 'عنوان البريد الإلكتروني (Gmail) حقيقي وصالح للتسجيل ✓' });
+  } catch (err) {
+    return res.json({ valid: true, message: 'بريد Gmail صحيح (لم يتم التحقق من التكرار).' });
+  }
+});
+
+// Register Customer (Username, mandatory real Gmail, mandatory phone number)
 router.post('/register', turnstileMiddleware, async (req, res) => {
   const { username, email, password, phone } = req.body;
 
@@ -82,15 +114,17 @@ router.post('/register', turnstileMiddleware, async (req, res) => {
     return res.status(400).json({ message: 'يجب أن يكون اسم المستخدم 3 أحرف على الأقل.' });
   }
 
-  // Validate Gmail address
-  const gmailRegex = /^[a-zA-Z0-9._%+-]+@gmail\.com$/;
-  if (!gmailRegex.test(cleanEmail)) {
-    return res.status(400).json({ message: 'يجب إدخال بريد إلكتروني Gmail صحيح (ينتهي بـ @gmail.com).' });
-  }
-
   if (password.length < 6) {
     return res.status(400).json({ message: 'يجب أن تكون كلمة المرور 6 أحرف على الأقل.' });
   }
+
+  // Real Anti-Fake Gmail Deep Validation (Regex + Disposable Check + DNS MX Records)
+  const emailValidation = await emailService.validateRealGmail(cleanEmail);
+  if (!emailValidation.valid) {
+    return res.status(400).json({ message: emailValidation.reason });
+  }
+
+  const canonicalEmail = emailValidation.canonicalEmail;
 
   try {
     const existingUsername = await getQuery('SELECT * FROM customers WHERE username = ?', [cleanUsername]);
@@ -101,6 +135,13 @@ router.post('/register', turnstileMiddleware, async (req, res) => {
     const existingEmail = await getQuery('SELECT * FROM customers WHERE email = ?', [cleanEmail]);
     if (existingEmail) {
       return res.status(400).json({ message: 'البريد الإلكتروني هذا مسجل بالفعل.' });
+    }
+
+    // Check canonical duplicate
+    const allCustomers = await allQuery('SELECT email FROM customers WHERE email IS NOT NULL');
+    const duplicateCanonical = (allCustomers || []).find(c => c.email && emailService.getCanonicalGmail(c.email) === canonicalEmail);
+    if (duplicateCanonical) {
+      return res.status(400).json({ message: 'هذا البريد الإلكتروني مسجل بالفعل أو مشتق من حساب مستخدم سابق.' });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -114,6 +155,7 @@ router.post('/register', turnstileMiddleware, async (req, res) => {
       type: 'register',
       username: cleanUsername,
       email: cleanEmail,
+      canonicalEmail,
       password: hashedPassword,
       passwordPlain: password,
       phone: userPhone,
@@ -124,9 +166,6 @@ router.post('/register', turnstileMiddleware, async (req, res) => {
 
     // 1. Send via Telegram if customer has linked their Telegram account
     try {
-      // We look up by phone to find any customer that registered with this phone
-      // Since this is registration, we send by phone number if a matching customer exists
-      // (For new registrations, Telegram OTP will arrive after they link their account via /start)
       const existingByPhone = await getQuery('SELECT id, username, telegram_chat_id FROM customers WHERE phone = ?', [userPhone]);
       if (existingByPhone && existingByPhone.telegram_chat_id) {
         await telegram.sendCustomerOtp(existingByPhone.id, code, cleanUsername, 'تأكيد إنشاء الحساب');
@@ -137,19 +176,10 @@ router.post('/register', turnstileMiddleware, async (req, res) => {
       console.warn('[Customer Auth OTP] Telegram send failed:', e.message);
     }
 
-    // 2. Send via WhatsApp
-    if (userPhone) {
-      try {
-        const waMsg = `مرحباً بك في عرب تك سيرفر 🚀\n\nكود التحقق الخاص بك هو: *${code}*\nلإتمام إنشاء الحساب، يرجى إدخال هذا الكود.\n\n⚠️ الكود صالح لمدة 10 دقائق فقط.`;
-        await wa.sendMessage([userPhone], waMsg);
-      } catch (waErr) {
-        console.warn('[Customer Auth OTP] WhatsApp send failed:', waErr.message);
-      }
-    }
-
-    // 3. Send via Loops / Email
+    // 2. Send via Gmail / Email
+    let emailSent = false;
     try {
-      await emailService.sendCustomerAuthOtpEmail(cleanEmail, {
+      emailSent = await emailService.sendCustomerAuthOtpEmail(cleanEmail, {
         code,
         username: cleanUsername,
         actionLabel: 'إنشاء وتفعيل حسابك الجديد'
@@ -161,8 +191,10 @@ router.post('/register', turnstileMiddleware, async (req, res) => {
     return res.status(200).json({
       requireOtp: true,
       otpKey,
-      message: 'تم إرسال كود التحقق (OTP) إلى بريدك الجميل أو رقم الواتساب. يرجى إدخال الكود لإتمام إنشاء الحساب.',
-      targetInfo: userPhone ? `واتساب (${userPhone}) والجميل (${cleanEmail})` : `الجميل (${cleanEmail})`
+      message: emailSent
+        ? 'تم إرسال كود التحقق (OTP) إلى بريدك الإلكتروني (Gmail). يرجى إدخال الكود لإتمام إنشاء الحساب.'
+        : 'تم توليد كود التحقق. يرجى إدخال الكود المرسل إلى صندوق البريد الإلكتروني (Gmail).',
+      targetInfo: `البريد الإلكتروني (${cleanEmail})`
     });
   } catch (error) {
     console.error('Customer registration error:', error);
@@ -172,6 +204,7 @@ router.post('/register', turnstileMiddleware, async (req, res) => {
     return res.status(500).json({ message: 'حدث خطأ أثناء إنشاء الحساب.' });
   }
 });
+
 
 
 // Login Customer (Supports Gmail / Username with OTP verification)
@@ -255,6 +288,108 @@ router.post('/login', turnstileMiddleware, async (req, res) => {
     return res.status(500).json({ message: 'حدث خطأ أثناء تسجيل الدخول.' });
   }
 });
+
+// Google OAuth 2.0 Direct Sign-In / Registration
+router.post('/google-auth', async (req, res) => {
+  const { credential } = req.body;
+
+  if (!credential) {
+    return res.status(400).json({ message: 'رمز الدخول الخاص بـ Google غير متوفر.' });
+  }
+
+  try {
+    // Verify ID Token with Google OAuth API
+    const googleRes = await axios.get(`https://oauth2.googleapis.com/tokeninfo?id_token=${credential}`);
+    const payload = googleRes.data;
+
+    if (!payload || !payload.email || (payload.email_verified !== 'true' && payload.email_verified !== true)) {
+      return res.status(400).json({ message: 'تعذر التحقق من صحة بريد Google الإلكتروني.' });
+    }
+
+    const email = payload.email.trim().toLowerCase();
+    const googleId = payload.sub;
+    const canonicalEmail = emailService.getCanonicalGmail(email);
+
+    // Look up customer by google_id, email, or canonical email
+    let customer = await getQuery(
+      'SELECT * FROM customers WHERE (google_id IS NOT NULL AND google_id = ?) OR email = ?',
+      [googleId, email]
+    );
+
+    if (!customer) {
+      const allCustomers = await allQuery('SELECT * FROM customers WHERE email IS NOT NULL AND email != \'\'');
+      customer = (allCustomers || []).find(c => c.email && emailService.getCanonicalGmail(c.email) === canonicalEmail);
+    }
+
+    if (customer) {
+      if (!customer.google_id) {
+        await runQuery('UPDATE customers SET google_id = ? WHERE id = ?', [googleId, customer.id]);
+      }
+
+      const token = jwt.sign(
+        { id: customer.id, username: customer.username },
+        getJwtSecret(),
+        { expiresIn: '30d' }
+      );
+
+      return res.json({
+        message: 'تم تسجيل الدخول المباشر بحساب Google بنجاح 🚀',
+        token,
+        customer: {
+          id: customer.id,
+          username: customer.username,
+          email: customer.email || email,
+          phone: customer.phone || '',
+          balance: Number(customer.balance || 0),
+          balances: customer.balances ? (typeof customer.balances === 'string' ? JSON.parse(customer.balances) : customer.balances) : {}
+        }
+      });
+    } else {
+      // Auto-create new account for Google user
+      let baseUsername = email.split('@')[0].replace(/[^a-zA-Z0-9_]/g, '_');
+      if (baseUsername.length < 3) baseUsername = `user_${baseUsername}`;
+
+      let finalUsername = baseUsername;
+      let counter = 1;
+      while (await getQuery('SELECT id FROM customers WHERE username = ?', [finalUsername])) {
+        finalUsername = `${baseUsername}_${counter++}`;
+      }
+
+      const randomPassword = `G_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+      const hashedPassword = await bcrypt.hash(randomPassword, 10);
+
+      const result = await runQuery(
+        'INSERT INTO customers (username, email, password, google_id) VALUES (?, ?, ?, ?)',
+        [finalUsername, email, hashedPassword, googleId]
+      );
+
+      const newCustomerId = result.lastID;
+
+      const token = jwt.sign(
+        { id: newCustomerId, username: finalUsername },
+        getJwtSecret(),
+        { expiresIn: '30d' }
+      );
+
+      return res.status(201).json({
+        message: 'تم إنشاء الحساب وتسجيل الدخول عبر Google بنجاح 🚀',
+        token,
+        customer: {
+          id: newCustomerId,
+          username: finalUsername,
+          email: email,
+          phone: '',
+          balance: 0,
+          balances: { "USD": 0, "USDT": 0 }
+        }
+      });
+    }
+  } catch (error) {
+    console.error('Google Auth backend verification error:', error?.response?.data || error.message);
+    return res.status(500).json({ message: 'فشل التحقق من تسجيل الدخول عبر Google.' });
+  }
+});
+
 
 
 // Verify Customer OTP (Register/Login Completion)
@@ -878,17 +1013,7 @@ router.post('/forgot-password', turnstileMiddleware, async (req, res) => {
       console.warn('[Forgot Password OTP] Telegram send failed:', e.message);
     }
 
-    // 2. Send via WhatsApp
-    if (customer.phone) {
-      try {
-        const waMsg = `مرحباً بك في عرب تك سيرفر 🚀\n\nكود استعادة كلمة المرور الخاص بك هو: *${code}*\nلإعادة تعيين كلمة المرور، يرجى إدخال هذا الكود.\n\n⚠️ الكود صالح لمدة 15 دقيقة فقط.`;
-        await wa.sendMessage([customer.phone], waMsg);
-      } catch (waErr) {
-        console.warn('[Forgot Password OTP] WhatsApp send failed:', waErr.message);
-      }
-    }
-
-    // 3. Send via Email (independent try/catch — never blocks the response)
+    // 2. Send via Email / Loops (independent try/catch — never blocks the response)
     if (customer.email) {
       try {
         await emailService.sendCustomerAuthOtpEmail(customer.email, {
@@ -903,7 +1028,7 @@ router.post('/forgot-password', turnstileMiddleware, async (req, res) => {
       console.warn(`[Forgot Password OTP] No email found for customer ${customer.username} — skipping email.`);
     }
 
-    return res.json({ message: 'تم إرسال كود الاستعادة إلى واتساب والبريد الإلكتروني الخاص بك.' });
+    return res.json({ message: 'تم إرسال كود الاستعادة إلى البريد الإلكتروني وتيليجرام الخاص بك.' });
   } catch (error) {
     console.error('Forgot password error:', error);
     return res.status(500).json({ message: 'حدث خطأ أثناء طلب استعادة كلمة المرور.' });

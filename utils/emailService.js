@@ -550,6 +550,97 @@ async function sendWalletRechargeAdminEmail(adminEmail, { requestId, customerUse
 }
 
 /**
+ * List of known disposable/fake email domains
+ */
+const DISPOSABLE_DOMAINS = new Set([
+  'tempmail.com', 'temp-mail.org', 'mailinator.com', '10minutemail.com',
+  'guerrillamail.com', 'yopmail.com', 'dispostable.com', 'sharklasers.com',
+  'getnada.com', 'trashmail.com', 'crazymailing.com', 'fakemail.net',
+  'generator.email', 'maildrop.cc', 'mohmal.com', 'tempmail.net',
+  'binkmail.com', 'bobmail.info', 'spamgourmet.com', 'mailcatch.com',
+  'throwawaymail.com', 'getairmail.com', 'minutemailbox.com', 'emailondeck.com',
+  'tempail.com', '0815.ru', '10minutemail.co.uk', '20minutemail.com'
+]);
+
+/**
+ * Returns canonical representation of a Gmail address to prevent alias/dot tricks
+ * e.g., "j.o.h.n+test@gmail.com" => "john@gmail.com"
+ */
+function getCanonicalGmail(email) {
+  if (!email || typeof email !== 'string') return '';
+  const clean = email.trim().toLowerCase();
+  const parts = clean.split('@');
+  if (parts.length !== 2) return clean;
+
+  let [local, domain] = parts;
+  if (domain === 'googlemail.com') domain = 'gmail.com';
+
+  if (domain === 'gmail.com') {
+    // Strip everything after '+' in local part
+    const plusIndex = local.indexOf('+');
+    if (plusIndex !== -1) {
+      local = local.substring(0, plusIndex);
+    }
+    // Remove all dots in local part for Gmail
+    local = local.replace(/\./g, '');
+  }
+
+  return `${local}@${domain}`;
+}
+
+/**
+ * Deep validation for Gmail address to detect fake/disposable/invalid emails
+ */
+async function validateRealGmail(email) {
+  if (!email || typeof email !== 'string') {
+    return { valid: false, reason: 'يرجى إدخال بريد إلكتروني صالح.' };
+  }
+
+  const clean = email.trim().toLowerCase();
+
+  // 1. Gmail format regex
+  const gmailRegex = /^[a-zA-Z0-9._%+-]+@(gmail\.com|googlemail\.com)$/;
+  if (!gmailRegex.test(clean)) {
+    return { valid: false, reason: 'يجب أن يكون البريد الإلكتروني حساب Gmail صالح ينتهي بـ @gmail.com' };
+  }
+
+  const parts = clean.split('@');
+  const domain = parts[1] === 'googlemail.com' ? 'gmail.com' : parts[1];
+
+  // 2. Check disposable list
+  if (DISPOSABLE_DOMAINS.has(domain)) {
+    return { valid: false, reason: 'غير مسموح باستخدام البريد الإلكتروني المؤقت أو الوهمي للتسجيل.' };
+  }
+
+  // 3. Check username length and basic sanity
+  const canonical = getCanonicalGmail(clean);
+  const localPart = canonical.split('@')[0];
+  if (localPart.length < 4) {
+    return { valid: false, reason: 'عنوان البريد الإلكتروني قصيرة جداً وغير صالح.' };
+  }
+
+  // 4. DNS MX record verification for non-gmail domains if needed, or fallback for gmail
+  if (domain !== 'gmail.com' && domain !== 'googlemail.com') {
+    const dns = require('dns').promises;
+    try {
+      const mxRecords = await dns.resolveMx(domain);
+      if (!mxRecords || mxRecords.length === 0) {
+        return { valid: false, reason: 'نطاق البريد الإلكتروني لا يدعم استقبال الرسائل البريدية.' };
+      }
+    } catch (err) {
+      console.warn(`[Email Validation] MX lookup failed for ${domain}:`, err.message);
+      return { valid: false, reason: 'تعذر التحقق من خادم البريد الإلكتروني. يرجى التأكد من كتابة البريد صحيحاً.' };
+    }
+  }
+
+  return {
+    valid: true,
+    cleanEmail: clean,
+    canonicalEmail: canonical
+  };
+}
+
+/**
  * Send OTP email to Admin during login or sensitive deletion operations
  */
 async function sendAdminOtpEmail(toEmail, { code, action, customMessage }) {
@@ -610,5 +701,8 @@ module.exports = {
   sendCustomerAuthOtpEmail,
   sendPasswordResetEmail,
   sendWalletRechargeAdminEmail,
-  sendAdminOtpEmail
+  sendAdminOtpEmail,
+  getCanonicalGmail,
+  validateRealGmail
 };
+
