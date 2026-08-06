@@ -1157,6 +1157,71 @@ router.post('/change-password', customerAuth, async (req, res) => {
   }
 });
 
+// Silent Refresh Token Endpoint for Active Users
+router.post('/refresh-token', customerAuth, async (req, res) => {
+  try {
+    const customer = await getQuery('SELECT id, username, email, phone, balance, balances FROM customers WHERE id = ?', [req.customer.id]);
+    if (!customer) {
+      return res.status(404).json({ message: 'الحساب غير موجود.' });
+    }
+
+    const newToken = jwt.sign(
+      { id: customer.id, username: customer.username },
+      getJwtSecret(),
+      { expiresIn: '30d' }
+    );
+
+    return res.json({
+      success: true,
+      token: newToken,
+      customer: {
+        id: customer.id,
+        username: customer.username,
+        email: customer.email || '',
+        phone: customer.phone || '',
+        balance: Number(customer.balance || 0),
+        balances: customer.balances ? (typeof customer.balances === 'string' ? JSON.parse(customer.balances) : customer.balances) : {}
+      }
+    });
+  } catch (error) {
+    console.error('Silent refresh token error:', error);
+    return res.status(500).json({ message: 'فشل تجديد توكن الجلسة.' });
+  }
+});
+
+// Request OTP for Sensitive Profile Update (Phone or Email change)
+router.post('/profile-stepup-otp', customerAuth, async (req, res) => {
+  const { action, targetValue } = req.body;
+  try {
+    const customer = await getQuery('SELECT * FROM customers WHERE id = ?', [req.customer.id]);
+    if (!customer) return res.status(404).json({ message: 'الحساب غير موجود.' });
+
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpKey = `stepup_profile_${customer.id}`;
+
+    await setCustomerOtp(otpKey, {
+      code,
+      action,
+      targetValue,
+      customerId: customer.id,
+      expiresAt: Date.now() + 10 * 60 * 1000
+    });
+
+    const targetEmail = action === 'email' ? targetValue : customer.email;
+    if (targetEmail) {
+      await emailService.sendCustomerAuthOtpEmail(targetEmail, {
+        code,
+        username: customer.username,
+        actionLabel: `تأكيد تحديث ${action === 'email' ? 'البريد الإلكتروني' : 'رقم الهاتف'}`
+      });
+    }
+
+    return res.json({ message: 'تم إرسال كود التحقق الأمني (Step-Up OTP) إلى بريدك الإلكتروني.' });
+  } catch (err) {
+    return res.status(500).json({ message: 'فشل إرسال كود التحقق للأمان.' });
+  }
+});
+
 // ==============================
 // API Key Management Routes
 // ==============================
