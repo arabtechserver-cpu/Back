@@ -372,7 +372,7 @@ async function sendOrderCompletedEmail(toEmail, { orderId, serviceName, packageN
 }
 
 /**
- * Send OTP email to customer during registration or login
+ * Send OTP email to customer during registration or login or password change
  */
 async function sendCustomerAuthOtpEmail(toEmail, { code, username, actionLabel }) {
   if (!toEmail) return false;
@@ -380,7 +380,34 @@ async function sendCustomerAuthOtpEmail(toEmail, { code, username, actionLabel }
   const siteName = 'عرب تك سيرفر';
   const messageBody = `لقد تم طلب كود تحقق الأمان من أجل <strong>${actionLabel || 'تفعيل وإتمام الدخول لحسابك'}</strong>. يرجى استخدام الكود التالي لإكمال العملية بنجاح:`;
 
-  // 1. Try Loops.so for Customer Email
+  // 1. Try Local Nodemailer Library First (Sends directly to customer's email)
+  const transporter = await getTransporter();
+  if (transporter) {
+    const title = `[عرب تك سيرفر] كود تحقق الأمان (OTP) لحسابك`;
+    const htmlContent = getCustomerEmailTemplate({
+      siteName: siteName,
+      username: username || 'عزيزنا العميل',
+      title: 'كود تحقق الأمان (OTP)',
+      messageBody,
+      otpCode: code
+    });
+
+    try {
+      const info = await transporter.sendMail({
+        from: `"عرب تك سيرفر" <${transporter.options.auth.user}>`,
+        replyTo: transporter.options.auth.user,
+        to: toEmail,
+        subject: title,
+        html: htmlContent
+      });
+      console.log(`[Email Service - Nodemailer] Customer Auth OTP email sent to ${toEmail} (MessageID: ${info.messageId}) ✓`);
+      return true;
+    } catch (err) {
+      console.error(`[Email Service - Nodemailer] Failed to send Auth OTP email to ${toEmail}:`, err.message);
+    }
+  }
+
+  // 2. Fallback to Loops.so
   const { loopsTransactionalIdOtp } = await getLoopsConfig();
   if (loopsTransactionalIdOtp) {
     const loopsSuccess = await sendViaLoops(toEmail, loopsTransactionalIdOtp, {
@@ -390,43 +417,13 @@ async function sendCustomerAuthOtpEmail(toEmail, { code, username, actionLabel }
       otp_code: code,
       message_body: `لقد تم طلب كود تحقق الأمان من أجل ${actionLabel || 'تفعيل وإتمام الدخول لحسابك'}.`,
       actionLabel: actionLabel || 'تأكيد الحساب',
-      reset_url: 'https://arab-tech1.online' // Required by Loops unified template
+      reset_url: 'https://arab-tech1.online'
     });
     if (loopsSuccess) return true;
-    console.warn('[Email Service] Loops send failed or not found. Falling back to local Nodemailer library...');
   }
 
-  // 2. Fallback to Local Nodemailer Library
-  const transporter = await getTransporter();
-  if (!transporter) {
-    console.warn('[Email Service] Transporter not configured. Skipping OTP email for ' + toEmail);
-    return false;
-  }
-
-  const title = `[عرب تك سيرفر] كود تحقق الأمان (OTP) لحسابك`;
-
-  const htmlContent = getCustomerEmailTemplate({
-    siteName: siteName,
-    username: username || 'عزيزنا العميل',
-    title: 'كود تحقق الأمان (OTP)',
-    messageBody,
-    otpCode: code
-  });
-
-  try {
-    const info = await transporter.sendMail({
-      from: `"عرب تك سيرفر" <${transporter.options.auth.user}>`,
-      replyTo: transporter.options.auth.user,
-      to: toEmail,
-      subject: title,
-      html: htmlContent
-    });
-    console.log(`[Email Service - Local Nodemailer] Customer Auth OTP email sent to ${toEmail} (MessageID: ${info.messageId}) ✓`);
-    return true;
-  } catch (err) {
-    console.error(`[Email Service - Local Nodemailer] Failed to send Auth OTP email to ${toEmail}:`, err.message);
-    return false;
-  }
+  console.warn('[Email Service] All email sending methods failed for ' + toEmail);
+  return false;
 }
 
 /**
@@ -437,54 +434,52 @@ async function sendPasswordResetEmail(toEmail, { username, resetUrl }) {
 
   const siteName = 'عرب تك سيرفر';
 
-  // 1. Try Loops.so for Customer Email
+  // 1. Try Local Nodemailer Library First (Sends directly to customer's email)
+  const transporter = await getTransporter();
+  if (transporter) {
+    const title = `[عرب تك سيرفر] رابط إعادة تعيين كلمة المرور 🔒`;
+    const messageBody = `لقد استلمنا طلباً لإعادة تعيين كلمة المرور الخاصة بحسابك. يمكنك البدء في تعيين كلمة مرور جديدة وآمنة عن طريق الضغط على الزر أدناه:`;
+
+    const htmlContent = getCustomerEmailTemplate({
+      siteName: 'عرب تك سيرفر',
+      username: username || 'عزيزنا العميل',
+      title: 'إعادة تعيين كلمة المرور',
+      messageBody,
+      resetUrl
+    });
+
+    try {
+      const info = await transporter.sendMail({
+        from: `"عرب تك سيرفر" <${transporter.options.auth.user}>`,
+        replyTo: transporter.options.auth.user,
+        to: toEmail,
+        subject: title,
+        html: htmlContent
+      });
+      console.log(`[Email Service - Nodemailer] Password reset email sent to ${toEmail} (MessageID: ${info.messageId}) ✓`);
+      return true;
+    } catch (err) {
+      console.error(`[Email Service - Nodemailer] Failed to send Password Reset email to ${toEmail}:`, err.message);
+    }
+  }
+
+  // 2. Fallback to Loops.so
   const { loopsTransactionalIdReset } = await getLoopsConfig();
   if (loopsTransactionalIdReset) {
     const loopsSuccess = await sendViaLoops(toEmail, loopsTransactionalIdReset, {
       site_name: siteName,
       username: username || 'عزيزنا العميل',
-      code: '-', // Required by Loops unified template
+      code: '-',
       otp_code: '-',
       reset_url: resetUrl,
       resetUrl: resetUrl,
       message_body: 'لقد استلمنا طلباً لإعادة تعيين كلمة المرور الخاصة بحسابك.'
     });
     if (loopsSuccess) return true;
-    console.warn('[Email Service] Loops send failed or not found. Falling back to local Nodemailer library...');
   }
 
-  // 2. Fallback to Local Nodemailer Library
-  const transporter = await getTransporter();
-  if (!transporter) {
-    console.warn('[Email Service] Transporter not configured. Skipping password reset email for ' + toEmail);
-    return false;
-  }
-
-  const title = `[عرب تك سيرفر] رابط إعادة تعيين كلمة المرور 🔒`;
-  const messageBody = `لقد استلمنا طلباً لإعادة تعيين كلمة المرور الخاصة بحسابك. يمكنك البدء في تعيين كلمة مرور جديدة وآمنة عن طريق الضغط على الزر أدناه:`;
-
-  const htmlContent = getCustomerEmailTemplate({
-    siteName: 'عرب تك سيرفر',
-    username: username || 'عزيزنا العميل',
-    title: 'إعادة تعيين كلمة المرور',
-    messageBody,
-    resetUrl
-  });
-
-  try {
-    const info = await transporter.sendMail({
-      from: `"عرب تك سيرفر" <${transporter.options.auth.user}>`,
-      replyTo: transporter.options.auth.user,
-      to: toEmail,
-      subject: title,
-      html: htmlContent
-    });
-    console.log(`[Email Service - Local Nodemailer] Password reset email sent to ${toEmail} (MessageID: ${info.messageId}) ✓`);
-    return true;
-  } catch (err) {
-    console.error(`[Email Service - Local Nodemailer] Failed to send Password Reset email to ${toEmail}:`, err.message);
-    return false;
-  }
+  console.warn('[Email Service] All password reset email sending methods failed for ' + toEmail);
+  return false;
 }
 
 /**
