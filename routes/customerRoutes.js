@@ -127,7 +127,7 @@ router.post('/register', turnstileMiddleware, async (req, res) => {
   const canonicalEmail = emailValidation.canonicalEmail;
 
   try {
-    const existingUsername = await getQuery('SELECT * FROM customers WHERE username = ?', [cleanUsername]);
+    const existingUsername = await getQuery('SELECT * FROM customers WHERE LOWER(username) = LOWER(?)', [cleanUsername]);
     if (existingUsername) {
       return res.status(400).json({ message: 'اسم المستخدم هذا مسجل بالفعل.' });
     }
@@ -218,7 +218,7 @@ router.post('/login', turnstileMiddleware, async (req, res) => {
   const trimmedUsername = username.trim();
 
   try {
-    let customer = await getQuery('SELECT * FROM customers WHERE username = ? OR email = ?', [trimmedUsername, trimmedUsername.toLowerCase()]);
+    let customer = await getQuery('SELECT * FROM customers WHERE LOWER(username) = LOWER(?) OR LOWER(email) = LOWER(?)', [trimmedUsername, trimmedUsername]);
 
     if (!customer) {
       return res.status(401).json({ message: 'البريد الإلكتروني أو اسم المستخدم أو كلمة المرور غير صحيحة.' });
@@ -351,7 +351,7 @@ router.post('/google-auth', async (req, res) => {
 
       let finalUsername = baseUsername;
       let counter = 1;
-      while (await getQuery('SELECT id FROM customers WHERE username = ?', [finalUsername])) {
+      while (await getQuery('SELECT id FROM customers WHERE LOWER(username) = LOWER(?)', [finalUsername])) {
         finalUsername = `${baseUsername}_${counter++}`;
       }
 
@@ -730,7 +730,7 @@ router.put('/admin/:id', authMiddleware, async (req, res) => {
       return res.status(400).json({ message: 'الرصيد غير صالح.' });
     }
 
-    const duplicate = await getQuery('SELECT * FROM customers WHERE username = ?', [nextUsername]);
+    const duplicate = await getQuery('SELECT * FROM customers WHERE LOWER(username) = LOWER(?)', [nextUsername]);
     if (duplicate && duplicate.id !== Number(id)) {
       return res.status(400).json({ message: 'اسم المستخدم مستخدم بالفعل.' });
     }
@@ -990,7 +990,7 @@ router.post('/forgot-password', turnstileMiddleware, async (req, res) => {
 
   try {
     const identLower = identifier.trim().toLowerCase();
-    const customer = await getQuery('SELECT * FROM customers WHERE username = ? OR email = ? OR phone = ?', [identLower, identLower, identifier.trim()]);
+    const customer = await getQuery('SELECT * FROM customers WHERE LOWER(username) = LOWER(?) OR LOWER(email) = LOWER(?) OR phone = ?', [identLower, identLower, identifier.trim()]);
     if (!customer) {
       return res.status(404).json({ message: 'لم يتم العثور على حساب مرتبط بهذه البيانات.' });
     }
@@ -1042,7 +1042,7 @@ router.post('/verify-forgot-otp', async (req, res) => {
 
   try {
     const identLower = identifier.trim().toLowerCase();
-    const customer = await getQuery('SELECT * FROM customers WHERE username = ? OR email = ? OR phone = ?', [identLower, identLower, identifier.trim()]);
+    const customer = await getQuery('SELECT * FROM customers WHERE LOWER(username) = LOWER(?) OR LOWER(email) = LOWER(?) OR phone = ?', [identLower, identLower, identifier.trim()]);
     if (!customer) return res.status(404).json({ message: 'لم يتم العثور على حساب مرتبط بهذه البيانات.' });
 
     if (!customer.reset_otp || customer.reset_otp !== code.trim()) {
