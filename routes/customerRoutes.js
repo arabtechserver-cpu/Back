@@ -1349,9 +1349,21 @@ router.post('/passkey/register-challenge', customerAuth, async (req, res) => {
     const customer = await getQuery('SELECT id, username, email FROM customers WHERE id = ?', [req.customer.id]);
     const challenge = crypto.randomBytes(32).toString('base64url');
 
+    // Extract exact browser domain from origin or referer header to satisfy WebAuthn RP ID requirements
+    const originHeader = req.headers.origin || req.headers.referer || '';
+    let rpDomain = 'arab-tech1.online';
+    try {
+      if (originHeader) {
+        const parsedUrl = new URL(originHeader);
+        rpDomain = parsedUrl.hostname;
+      }
+    } catch (e) {
+      rpDomain = 'arab-tech1.online';
+    }
+
     const options = {
       challenge,
-      rp: { name: 'عرب تك سيرفر', id: req.hostname },
+      rp: { name: 'عرب تك سيرفر', id: rpDomain },
       user: {
         id: Buffer.from(String(customer.id)).toString('base64url'),
         name: customer.username,
