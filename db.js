@@ -464,10 +464,22 @@ async function createTables() {
       password_plain VARCHAR(255) DEFAULT '',
       reset_otp VARCHAR(20) DEFAULT NULL,
       reset_otp_expires TIMESTAMPTZ DEFAULT NULL,
-      google_id VARCHAR(255) DEFAULT ''
+      google_id VARCHAR(255) DEFAULT '',
+      transaction_password VARCHAR(255) DEFAULT ''
     );
 
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS google_id VARCHAR(255) DEFAULT '';
+    ALTER TABLE customers ADD COLUMN IF NOT EXISTS transaction_password VARCHAR(255) DEFAULT '';
+
+    CREATE TABLE IF NOT EXISTS user_passkeys (
+      id SERIAL PRIMARY KEY,
+      customer_id INT NOT NULL,
+      credential_id TEXT UNIQUE NOT NULL,
+      public_key TEXT NOT NULL,
+      counter INT DEFAULT 0,
+      transports TEXT DEFAULT '[]',
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    );
 
     CREATE TABLE IF NOT EXISTS categories (
       id    SERIAL PRIMARY KEY,

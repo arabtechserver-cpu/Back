@@ -1222,6 +1222,179 @@ router.post('/profile-stepup-otp', customerAuth, async (req, res) => {
   }
 });
 
+// ==========================================
+// Transaction Security Password & Passkeys
+// ==========================================
+
+// Request OTP to set or change Transaction Password (Sent to Email & Telegram)
+router.post('/transaction-password/request-otp', customerAuth, async (req, res) => {
+  try {
+    const customer = await getQuery('SELECT * FROM customers WHERE id = ?', [req.customer.id]);
+    if (!customer) return res.status(404).json({ message: 'الحساب غير موجود.' });
+
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpKey = `tx_pass_otp_${customer.id}`;
+
+    await setCustomerOtp(otpKey, {
+      code,
+      customerId: customer.id,
+      expiresAt: Date.now() + 10 * 60 * 1000
+    });
+
+    let sentMessage = [];
+    if (customer.email) {
+      try {
+        await emailService.sendCustomerAuthOtpEmail(customer.email, {
+          code,
+          username: customer.username,
+          actionLabel: 'تعيين/تغيير كلمة مرور المعاملات والقفل'
+        });
+        sentMessage.push('البريد الإلكتروني');
+      } catch (e) {
+        console.warn('Email OTP send failed:', e.message);
+      }
+    }
+
+    try {
+      await telegram.sendCustomerOtp(customer.id, code, customer.username, 'تعيين/تغيير كلمة مرور المعاملات');
+      sentMessage.push('تليجرام');
+    } catch (e) {
+      console.warn('Telegram OTP send failed:', e.message);
+    }
+
+    return res.json({
+      success: true,
+      message: `تم إرسال كود التحقق (OTP) بنجاح عبر (${sentMessage.join(' و ') || 'البريد الإلكتروني'}).`
+    });
+  } catch (error) {
+    console.error('Request Transaction Password OTP Error:', error);
+    return res.status(500).json({ message: 'فشل إرسال كود التحقق لكلمة مرور المعاملات.' });
+  }
+});
+
+// Set or Update Transaction Security Password
+router.post('/transaction-password/set', customerAuth, async (req, res) => {
+  const { currentPassword, newTxPassword, otp } = req.body;
+
+  if (!newTxPassword || newTxPassword.length < 4) {
+    return res.status(400).json({ message: 'يجب أن تتكون كلمة مرور المعاملات من 4 أرقام/أحرف على الأقل.' });
+  }
+
+  try {
+    const customer = await getQuery('SELECT * FROM customers WHERE id = ?', [req.customer.id]);
+    if (!customer) return res.status(404).json({ message: 'الحساب غير موجود.' });
+
+    if (customer.transaction_password) {
+      if (!otp && !currentPassword) {
+        return res.status(400).json({ message: 'يرجى إدخال كلمة المرور الحالية أو كود التحقق OTP.' });
+      }
+
+      if (otp) {
+        const otpKey = `tx_pass_otp_${customer.id}`;
+        const item = await getCustomerOtp(otpKey);
+        if (!item || item.code !== otp.trim() || Date.now() > item.expiresAt) {
+          return res.status(400).json({ message: 'كود التحقق (OTP) غير صحيح أو منتهي الصلاحية.' });
+        }
+        await deleteCustomerOtp(otpKey);
+      } else if (currentPassword) {
+        const valid = await bcrypt.compare(currentPassword, customer.password);
+        if (!valid) {
+          return res.status(400).json({ message: 'كلمة المرور الحالية غير صحيحة.' });
+        }
+      }
+    }
+
+    const hashedTxPassword = await bcrypt.hash(newTxPassword, 10);
+    await runQuery('UPDATE customers SET transaction_password = ? WHERE id = ?', [hashedTxPassword, customer.id]);
+
+    return res.json({
+      success: true,
+      message: 'تم حفظ وتعيين كلمة مرور المعاملات والقفل بنجاح 🔒'
+    });
+  } catch (error) {
+    console.error('Set Transaction Password Error:', error);
+    return res.status(500).json({ message: 'حدث خطأ أثناء حفظ كلمة مرور المعاملات.' });
+  }
+});
+
+// Verify Transaction Security Password for Unlocking Actions
+router.post('/transaction-password/verify', customerAuth, async (req, res) => {
+  const { txPassword } = req.body;
+  if (!txPassword) return res.status(400).json({ message: 'يرجى إدخال كلمة مرور المعاملات.' });
+
+  try {
+    const customer = await getQuery('SELECT transaction_password, password FROM customers WHERE id = ?', [req.customer.id]);
+    if (!customer) return res.status(404).json({ message: 'الحساب غير موجود.' });
+
+    const storedHash = customer.transaction_password || customer.password;
+    const isValid = await bcrypt.compare(txPassword, storedHash);
+
+    if (!isValid) {
+      return res.status(400).json({ message: 'كلمة مرور المعاملات غير صحيحة.' });
+    }
+
+    return res.json({
+      success: true,
+      message: 'تم التحقق بنجاح وفتح الموقع/المعاملة 🔓'
+    });
+  } catch (error) {
+    console.error('Verify Transaction Password Error:', error);
+    return res.status(500).json({ message: 'حدث خطأ أثناء التحقق من كلمة مرور المعاملات.' });
+  }
+});
+
+// WebAuthn Passkeys Registration Challenge
+router.post('/passkey/register-challenge', customerAuth, async (req, res) => {
+  try {
+    const customer = await getQuery('SELECT id, username, email FROM customers WHERE id = ?', [req.customer.id]);
+    const challenge = crypto.randomBytes(32).toString('base64url');
+
+    const options = {
+      challenge,
+      rp: { name: 'عرب تك سيرفر', id: req.hostname },
+      user: {
+        id: Buffer.from(String(customer.id)).toString('base64url'),
+        name: customer.username,
+        displayName: customer.username
+      },
+      pubKeyCredParams: [
+        { alg: -7, type: 'public-key' },  // ES256
+        { alg: -257, type: 'public-key' } // RS256
+      ],
+      authenticatorSelection: {
+        userVerification: 'preferred',
+        authenticatorAttachment: 'platform'
+      },
+      timeout: 60000
+    };
+
+    return res.json({ success: true, options, challenge });
+  } catch (error) {
+    console.error('Passkey challenge error:', error);
+    return res.status(500).json({ message: 'فشل بدء تسجيل البصمة الرقمية.' });
+  }
+});
+
+// Save Registered Passkey Credential
+router.post('/passkey/register-verify', customerAuth, async (req, res) => {
+  const { credential } = req.body;
+  if (!credential || !credential.id) {
+    return res.status(400).json({ message: 'بيانات البصمة غير مكتملة.' });
+  }
+
+  try {
+    await runQuery(
+      'INSERT INTO user_passkeys (customer_id, credential_id, public_key, transports) VALUES (?, ?, ?, ?) ON CONFLICT (credential_id) DO NOTHING',
+      [req.customer.id, credential.id, credential.rawId || credential.id, JSON.stringify(credential.response?.transports || [])]
+    );
+
+    return res.json({ success: true, message: 'تم تفعيل وحفظ البصمة الرقمية (Face ID / Touch ID) بنجاح 👆🎉' });
+  } catch (error) {
+    console.error('Passkey verify error:', error);
+    return res.status(500).json({ message: 'حدث خطأ أثناء حفظ البصمة الرقمية.' });
+  }
+});
+
 // ==============================
 // API Key Management Routes
 // ==============================
