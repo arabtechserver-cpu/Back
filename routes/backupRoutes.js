@@ -69,7 +69,7 @@ router.post('/create', authMiddleware, async (req, res) => {
     // Retrieve database tables
     const tableNames = [
       'users', 'categories', 'services', 'orders', 
-      'customers', 'banners', 'wallet_requests', 
+      'customers', 'user_passkeys', 'banners', 'wallet_requests', 
       'wallet_transactions', 'settings', 'customer_discounts',
       'membership_tiers', 'membership_discounts', 'user_memberships',
       'reviews', 'api_providers', 'api_logs', 'customer_otps'
@@ -100,19 +100,33 @@ router.post('/create', authMiddleware, async (req, res) => {
       }
     }
 
-    // Retrieve uploaded files (images, etc) and encode them to Base64
+    // Retrieve uploaded files (images, receipts, etc) recursively and encode them to Base64
     const uploads = {};
+    
+    function getFilesRecursively(dir) {
+      let results = [];
+      const list = fs.readdirSync(dir);
+      list.forEach(file => {
+        const fullPath = path.join(dir, file);
+        const stat = fs.statSync(fullPath);
+        if (stat && stat.isDirectory()) {
+          results = results.concat(getFilesRecursively(fullPath));
+        } else {
+          results.push(fullPath);
+        }
+      });
+      return results;
+    }
+
     if (fs.existsSync(UPLOADS_DIR)) {
-      const files = fs.readdirSync(UPLOADS_DIR);
-      files.forEach(file => {
-        const filePath = path.join(UPLOADS_DIR, file);
-        if (fs.statSync(filePath).isFile()) {
-          try {
-            const fileData = fs.readFileSync(filePath);
-            uploads[file] = fileData.toString('base64');
-          } catch (e) {
-            console.error(`Failed to read upload file ${file}:`, e);
-          }
+      const files = getFilesRecursively(UPLOADS_DIR);
+      files.forEach(filePath => {
+        try {
+          const relativePath = path.relative(UPLOADS_DIR, filePath).replace(/\\/g, '/');
+          const fileData = fs.readFileSync(filePath);
+          uploads[relativePath] = fileData.toString('base64');
+        } catch (e) {
+          console.error(`Failed to read upload file ${filePath}:`, e);
         }
       });
     }
@@ -194,7 +208,7 @@ router.delete('/:filename', authMiddleware, deleteOtpAuth, (req, res) => {
 async function restoreSnapshot(backupData) {
   const mode = getDatabaseMode();
   
-  // 1. Restore Uploaded Files
+  // 1. Restore Uploaded Files (creating parent directories if needed)
   if (backupData.uploads && typeof backupData.uploads === 'object') {
     if (!fs.existsSync(UPLOADS_DIR)) {
       fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -203,6 +217,9 @@ async function restoreSnapshot(backupData) {
       const fileContentBase64 = backupData.uploads[fileName];
       const filePath = path.join(UPLOADS_DIR, fileName);
       try {
+        const dir = path.dirname(filePath);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        
         const buffer = Buffer.from(fileContentBase64, 'base64');
         fs.writeFileSync(filePath, buffer);
       } catch (err) {
@@ -222,7 +239,7 @@ async function restoreSnapshot(backupData) {
     const newDb = {};
     const tableNames = [
       'users', 'categories', 'services', 'orders', 
-      'customers', 'banners', 'wallet_requests', 
+      'customers', 'user_passkeys', 'banners', 'wallet_requests', 
       'wallet_transactions', 'settings', 'customer_discounts',
       'membership_tiers', 'membership_discounts', 'user_memberships',
       'reviews', 'api_providers', 'api_logs', 'customer_otps'
@@ -258,6 +275,7 @@ async function restoreSnapshot(backupData) {
           orders, 
           services, 
           categories, 
+          user_passkeys,
           customers, 
           banners, 
           settings, 
@@ -266,7 +284,7 @@ async function restoreSnapshot(backupData) {
       `);
 
       const tableNames = [
-        'users', 'settings', 'customers', 'categories', 
+        'users', 'settings', 'customers', 'user_passkeys', 'categories', 
         'services', 'orders', 'banners', 'wallet_requests', 
         'wallet_transactions', 'customer_discounts',
         'membership_tiers', 'membership_discounts', 'user_memberships',
