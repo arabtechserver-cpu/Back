@@ -11,6 +11,9 @@ require('dotenv').config();
 const poolConfig = process.env.DATABASE_URL
   ? {
     connectionString: process.env.DATABASE_URL,
+    max: 75,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 2000,
     ssl: process.env.PGSSLMODE === 'require' || process.env.DATABASE_URL.includes('sslmode=require') || process.env.PGSSL === 'true'
       ? { rejectUnauthorized: false }
       : false,

@@ -138,6 +138,35 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads'), {
   }
 }));
 
+// ── Server-Side API Caching (Extreme Performance Boost) ──────────────
+const apiCache = new Map();
+app.use('/api', (req, res, next) => {
+  if (req.method !== 'GET') return next();
+  
+  // Do not cache sensitive or dynamic user data routes
+  const skipPaths = ['/auth', '/customer', '/wallet', '/otp', '/orders', '/backups', '/v1', '/telegram'];
+  if (skipPaths.some(p => req.path.startsWith(p))) return next();
+
+  const key = req.originalUrl;
+  const cached = apiCache.get(key);
+  
+  // Cache for 10 seconds (enough to handle huge bursts of traffic with 0 DB load)
+  if (cached && (Date.now() - cached.time < 10000)) {
+    res.setHeader('X-Server-Cache', 'HIT');
+    return res.json(cached.data);
+  }
+
+  // Intercept response and save to cache
+  const originalJson = res.json;
+  res.json = function(body) {
+    if (res.statusCode === 200) {
+      apiCache.set(key, { time: Date.now(), data: body });
+    }
+    return originalJson.call(this, body);
+  };
+  next();
+});
+
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/categories', categoryRoutes);
