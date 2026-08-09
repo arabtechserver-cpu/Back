@@ -238,11 +238,11 @@ async function restoreSnapshot(backupData) {
     const dbPath = path.join(__dirname, '..', 'database.json');
     const newDb = {};
     const tableNames = [
-      'users', 'categories', 'services', 'orders', 
-      'customers', 'user_passkeys', 'banners', 'wallet_requests', 
-      'wallet_transactions', 'settings', 'customer_discounts',
-      'membership_tiers', 'membership_discounts', 'user_memberships',
-      'reviews', 'api_providers', 'api_logs', 'customer_otps'
+      'users', 'settings', 'customers', 'api_providers', 'membership_tiers',
+      'categories', 'services', 'user_passkeys', 'banners', 'reviews',
+      'customer_discounts', 'membership_discounts', 'user_memberships',
+      'api_logs', 'customer_otps', 'wallet_requests', 'wallet_transactions',
+      'orders'
     ];
     tableNames.forEach(table => {
       newDb[table] = tables[table] || [];
@@ -284,11 +284,11 @@ async function restoreSnapshot(backupData) {
       `);
 
       const tableNames = [
-        'users', 'settings', 'customers', 'user_passkeys', 'categories', 
-        'services', 'orders', 'banners', 'wallet_requests', 
-        'wallet_transactions', 'customer_discounts',
-        'membership_tiers', 'membership_discounts', 'user_memberships',
-        'reviews', 'api_providers', 'api_logs', 'customer_otps'
+        'users', 'settings', 'customers', 'api_providers', 'membership_tiers',
+        'categories', 'services', 'user_passkeys', 'banners', 'reviews',
+        'customer_discounts', 'membership_discounts', 'user_memberships',
+        'api_logs', 'customer_otps', 'wallet_requests', 'wallet_transactions',
+        'orders'
       ];
 
       for (const tableName of tableNames) {
