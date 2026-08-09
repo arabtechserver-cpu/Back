@@ -69,6 +69,13 @@ function ensureDefaultSettings(data) {
   if (!data.settings) {
     data.settings = [...defaultJsonDb.settings];
   }
+  if (!data.users || data.users.length === 0) {
+    data.users = [{
+      id: 1,
+      username: 'admin',
+      password: bcrypt.hashSync('admin123', 10)
+    }];
+  }
   return data;
 }
 
