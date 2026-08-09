@@ -9,6 +9,15 @@ const { getAllowedOrigins, getJwtSecret, isOriginAllowed } = require('./utils/se
 // Ensure database is initialized
 const db = require('./db');
 
+// Global Error Handlers to prevent random crashes
+process.on('uncaughtException', (err) => {
+  console.error('[Anti-Crash] Uncaught Exception:', err);
+});
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[Anti-Crash] Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+
 const authRoutes = require('./routes/authRoutes');
 const categoryRoutes = require('./routes/categoryRoutes');
 const serviceRoutes = require('./routes/serviceRoutes');
@@ -231,4 +240,13 @@ app.listen(PORT, HOST, () => {
   }).catch(err => console.warn('[Telegram] Bot check error:', err.message));
   startDatabaseBackupScheduler();
   startAutoSyncScheduler();
+
+  // Keep-alive self-ping to prevent Koyeb / Render free tiers from sleeping
+  setInterval(() => {
+    const targetUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://api.arab-tech1.online';
+    fetch(`${targetUrl}/api/health`)
+      .then(res => console.log('[Keep-Alive] Ping successful:', res.status))
+      .catch(err => console.error('[Keep-Alive] Ping failed:', err.message));
+  }, 10 * 60 * 1000); // Every 10 minutes
 });
+
