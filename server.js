@@ -149,6 +149,10 @@ app.use('/api/telegram', telegramRoutes);
 app.use('/api/reviews', reviewRoutes);
 
 // Health check endpoint
+app.get('/', (req, res) => {
+  res.status(200).send('API is running successfully!');
+});
+
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'healthy',
