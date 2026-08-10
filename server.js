@@ -33,6 +33,7 @@ const whatsappPortalRoutes = require('./routes/whatsappPortalRoutes');
 const otpRoutes = require('./routes/otpRoutes');
 const excelRoutes = require('./routes/excelRoutes');
 const unlockerRoutes = require('./routes/unlockerRoutes');
+const apiProviderRoutes = require('./routes/apiProviderRoutes');
 const backupRoutes = require('./routes/backupRoutes');
 const membershipRoutes = require('./routes/membershipRoutes');
 const telegramRoutes = require('./routes/telegramRoutes');
