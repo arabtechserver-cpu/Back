@@ -7,7 +7,7 @@ const authMiddleware = require('../middleware/auth');
 const { getJwtSecret } = require('../utils/security');
 const otpService = require('../utils/otpService');
 
-// Admin Login (Protected with WhatsApp 2FA OTP if configured)
+// Admin Login (Protected with WhatsApp / Telegram / Gmail 2FA OTP if configured)
 router.post('/login', async (req, res) => {
   const { username, password } = req.body;
 
@@ -27,25 +27,30 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ message: 'بيانات الدخول غير صحيحة.' });
     }
 
-    // Check if WhatsApp OTP enforcement is enabled and active
-    const enforced = await otpService.isOtpEnforced();
-    if (enforced) {
-      const otpRes = await otpService.generateAndSendOtp(
-        'admin_login',
-        user.id,
-        `🚨 *تنبيه أمان: محاولة تسجيل دخول للوحة التحكم (الداشبورد)*\n👤 *المستخدم:* ${user.username}`
-      );
-      if (!otpRes.success) {
-        return res.status(500).json({ message: otpRes.message });
+    // Check if 2FA OTP enforcement is active
+    try {
+      const enforced = await otpService.isOtpEnforced();
+      if (enforced) {
+        const otpRes = await otpService.generateAndSendOtp(
+          'admin_login',
+          user.id,
+          `🚨 *تنبيه أمان: محاولة تسجيل دخول للوحة التحكم (الداشبورد)*\n👤 *المستخدم:* ${user.username}`
+        );
+        if (otpRes && otpRes.success) {
+          return res.json({
+            requireOtp: true,
+            userId: user.id,
+            message: otpRes.message || 'تم إرسال كود التحقق (OTP) لإتمام تسجيل الدخول.'
+          });
+        } else {
+          console.warn('[Admin Login] OTP delivery failed, falling back to direct login:', otpRes ? otpRes.message : '');
+        }
       }
-      return res.json({
-        requireOtp: true,
-        userId: user.id,
-        message: 'تم إرسال كود التحقق (OTP) عبر الواتساب لإتمام تسجيل الدخول.'
-      });
+    } catch (otpErr) {
+      console.warn('[Admin Login] OTP service exception:', otpErr.message);
     }
 
-    // If WhatsApp is not ready yet or no numbers configured, allow normal login
+    // Standard login (if OTP is not enforced or failed to send)
     const token = jwt.sign(
       { id: user.id, username: user.username, role: 'admin' },
       getJwtSecret(),
