@@ -11,10 +11,11 @@ const db = require('./db');
 
 // Global Error Handlers to prevent random crashes
 process.on('uncaughtException', (err) => {
-  console.error('[Anti-Crash] Uncaught Exception:', err);
+  console.error('[FATAL] Uncaught Exception:', err.message, err.stack);
+  process.exit(1);
 });
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('[Anti-Crash] Unhandled Rejection at:', promise, 'reason:', reason);
+  console.error('[WARN] Unhandled Rejection at:', promise, 'reason:', reason);
 });
 
 
@@ -53,17 +54,7 @@ app.set('trust proxy', 1);
 app.disable('x-powered-by');
 getJwtSecret();
 
-// ── Global error handlers — prevent silent server death ────────────────────────────────
-process.on('uncaughtException', (err) => {
-  console.error('[FATAL] Uncaught Exception — server will continue:', err.message, err.stack);
-  // Log but do NOT call process.exit() — let PM2/Docker restart handle it only on actual crash
-});
 
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('[WARN] Unhandled Promise Rejection:', reason);
-  // Do NOT crash on unhandled rejections — this prevents background fire-and-forget from killing server
-});
-// ──────────────────────────────────────────────────────────────────────────────
 
 const allowedOrigins = getAllowedOrigins();
 
@@ -115,10 +106,6 @@ const bodyLimit = process.env.BODY_LIMIT || '15mb';
 app.use(express.json({ limit: bodyLimit }));
 app.use(express.urlencoded({ limit: bodyLimit, extended: true }));
 
-// Enable gzip/brotli compression for all responses
-app.use(compression());
-
-const apiProviderRoutes = require('./routes/apiProviderRoutes');
 
 // Prevent sensitive responses from being cached by browsers or proxies
 app.use(['/api/auth', '/api/customer', '/api/orders', '/api/wallet', '/api/whatsapp', '/api/whatsapp-portal', '/api/otp'], (req, res, next) => {
