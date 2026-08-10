@@ -13,7 +13,7 @@ const poolConfig = process.env.DATABASE_URL
     connectionString: process.env.DATABASE_URL,
     max: Number(process.env.PGPOOL_MAX) || 20,
     idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 2000,
+    connectionTimeoutMillis: 15000,
     ssl: process.env.PGSSLMODE === 'require' || process.env.DATABASE_URL.includes('sslmode=require') || process.env.PGSSL === 'true'
       ? { rejectUnauthorized: false }
       : false,
@@ -1476,10 +1476,25 @@ async function initializeDatabase() {
   }
 
   try {
-    // Try to connect once with a short timeout
-    const client = await pool.connect();
-    client.release();
-    console.log('PostgreSQL connection established.');
+    // Try to connect with retry loop (handles initial container startup latency)
+    let connected = false;
+    let lastErr = null;
+    for (let attempt = 1; attempt <= 4; attempt++) {
+      try {
+        const client = await pool.connect();
+        client.release();
+        connected = true;
+        console.log(`PostgreSQL connection established successfully on attempt ${attempt}.`);
+        break;
+      } catch (e) {
+        lastErr = e;
+        console.warn(`[PostgreSQL] Connection attempt ${attempt}/4 failed: ${e.message}. Retrying in 2.5s...`);
+        if (attempt < 4) await new Promise(r => setTimeout(r, 2500));
+      }
+    }
+    if (!connected) {
+      throw lastErr || new Error('Failed to connect to PostgreSQL after 4 attempts');
+    }
     await createTables();
 
     // PostgreSQL Migration to initialize existing rows with default currencies
