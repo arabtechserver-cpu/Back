@@ -47,7 +47,7 @@ router.post('/login', async (req, res) => {
 
     // If WhatsApp is not ready yet or no numbers configured, allow normal login
     const token = jwt.sign(
-      { id: user.id, username: user.username },
+      { id: user.id, username: user.username, role: 'admin' },
       getJwtSecret(),
       { expiresIn: '7d' }
     );
@@ -93,7 +93,7 @@ router.post('/verify-login-otp', async (req, res) => {
     }
 
     const token = jwt.sign(
-      { id: user.id, username: user.username },
+      { id: user.id, username: user.username, role: 'admin' },
       getJwtSecret(),
       { expiresIn: '7d' }
     );

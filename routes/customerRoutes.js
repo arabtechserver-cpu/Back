@@ -56,6 +56,9 @@ const customerAuth = (req, res, next) => {
     }
 
     const decoded = jwt.verify(token, getJwtSecret());
+    if (decoded.role !== 'customer') {
+      return res.status(403).json({ message: 'Customer access is required.' });
+    }
     req.customer = decoded; // { id, username }
     next();
   } catch (error) {
@@ -327,7 +330,7 @@ router.post('/google-auth', async (req, res) => {
       }
 
       const token = jwt.sign(
-        { id: customer.id, username: customer.username },
+        { id: customer.id, username: customer.username, role: 'customer' },
         getJwtSecret(),
         { expiresIn: '30d' }
       );
@@ -366,7 +369,7 @@ router.post('/google-auth', async (req, res) => {
       const newCustomerId = result.lastID;
 
       const token = jwt.sign(
-        { id: newCustomerId, username: finalUsername },
+        { id: newCustomerId, username: finalUsername, role: 'customer' },
         getJwtSecret(),
         { expiresIn: '30d' }
       );
@@ -425,7 +428,7 @@ router.post('/verify-auth-otp', async (req, res) => {
       await deleteCustomerOtp(otpKey);
 
       const token = jwt.sign(
-        { id: result.lastID, username: item.username },
+        { id: result.lastID, username: item.username, role: 'customer' },
         getJwtSecret(),
         { expiresIn: '30d' }
       );
@@ -444,7 +447,7 @@ router.post('/verify-auth-otp', async (req, res) => {
       }
 
       const token = jwt.sign(
-        { id: customer.id, username: customer.username },
+        { id: customer.id, username: customer.username, role: 'customer' },
         getJwtSecret(),
         { expiresIn: '30d' }
       );
@@ -1166,7 +1169,7 @@ router.post('/refresh-token', customerAuth, async (req, res) => {
     }
 
     const newToken = jwt.sign(
-      { id: customer.id, username: customer.username },
+      { id: customer.id, username: customer.username, role: 'customer' },
       getJwtSecret(),
       { expiresIn: '30d' }
     );

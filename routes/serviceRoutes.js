@@ -47,6 +47,7 @@ const getCustomerIdFromRequest = (req) => {
     const token = authHeader.split(' ')[1];
     if (!token) return null;
     const decoded = jwt.verify(token, getJwtSecret());
+    if (decoded.role !== 'customer') return null;
     return decoded.id;
   } catch (e) {
     return null;
@@ -546,27 +547,10 @@ router.patch('/:id/fields', authMiddleware, async (req, res) => {
     const fieldsStr = JSON.stringify(cleanedFields);
     const finalTitle = (fields_title && fields_title.trim()) ? fields_title.trim() : 'بيانات الخدمة';
 
-    const { getDatabaseMode } = require('../db');
-    if (getDatabaseMode && getDatabaseMode().fallbackMode) {
-      const fs = require('fs');
-      const path = require('path');
-      const dbPath = path.join(__dirname, '../database.json');
-      if (fs.existsSync(dbPath)) {
-        const db = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
-        db.services = (db.services || []).map(s => {
-          if (Number(s.id) === Number(id)) {
-            return { ...s, fields: cleanedFields, fields_title: finalTitle };
-          }
-          return s;
-        });
-        fs.writeFileSync(dbPath, JSON.stringify(db, null, 2), 'utf8');
-      }
-    } else {
-      await runQuery(
-        'UPDATE services SET fields = ?, fields_title = ? WHERE id = ?',
-        [fieldsStr, finalTitle, id]
-      );
-    }
+    await runQuery(
+      'UPDATE services SET fields = ?, fields_title = ? WHERE id = ?',
+      [fieldsStr, finalTitle, id]
+    );
 
     res.json({
       message: 'تم تحديث حقول الخدمة بنجاح.',
@@ -592,7 +576,7 @@ router.patch('/bulk/fields-by-category', authMiddleware, async (req, res) => {
     const finalTitle = (fields_title && fields_title.trim()) ? fields_title.trim() : 'بيانات الخدمة';
 
     const { getDatabaseMode } = require('../db');
-    if (getDatabaseMode && getDatabaseMode().fallbackMode) {
+    if (false && getDatabaseMode && getDatabaseMode().fallbackMode) {
       const fs = require('fs');
       const path = require('path');
       const dbPath = path.join(__dirname, '../database.json');

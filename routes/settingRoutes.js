@@ -3,6 +3,72 @@ const router = express.Router();
 const { runQuery, allQuery } = require('../db');
 const authMiddleware = require('../middleware/auth');
 const { saveImage } = require('../utils/imageSaver');
+const bcrypt = require('bcryptjs');
+
+function parseSetting(value, fallback) {
+  if (!value) return fallback;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+}
+
+// Private settings are intentionally separated from the public storefront response.
+router.get('/admin', authMiddleware, async (req, res) => {
+  try {
+    const rows = await allQuery('SELECT * FROM settings');
+    const settings = Object.fromEntries(rows.map(item => [item.key, item.value]));
+
+    res.set('Cache-Control', 'no-store, max-age=0');
+    res.json({
+      site_name: settings.site_name || 'Arab Tech Server',
+      site_logo: settings.site_logo || '/logo.jpg',
+      site_favicon: settings.site_favicon || '/favicon.png',
+      payment_methods: parseSetting(settings.payment_methods, []),
+      supported_currencies: parseSetting(settings.supported_currencies, ['USD', 'USDT']),
+      exchange_rates: parseSetting(settings.exchange_rates, { USD: 50, USDT: 51 }),
+      base_currency: settings.base_currency || 'USD',
+      hide_wallet_payment: settings.hide_wallet_payment === 'true',
+      whatsapp_numbers: parseSetting(settings.whatsapp_numbers, []),
+      email_user: settings.email_user || '',
+      email_pass_configured: Boolean(settings.email_pass),
+      whatsapp_portal_password_configured: Boolean(settings.whatsapp_portal_password),
+      global_markup_percent: parseFloat(settings.global_markup_percent) || 0,
+      api_auto_submit: settings.api_auto_submit === undefined ? true : settings.api_auto_submit === 'true',
+      announcement_text: settings.announcement_text || '',
+      home_stats: settings.home_stats || '[]',
+      featured_sections: parseSetting(settings.featured_sections, [])
+    });
+  } catch (error) {
+    console.error('Fetch private settings error:', error);
+    res.status(500).json({ message: 'Unable to fetch private settings.' });
+  }
+});
+
+// Lightweight public settings for SEO metadata and build-time rendering.
+router.get('/metadata', async (req, res) => {
+  try {
+    const settingsList = await allQuery(
+      "SELECT key, value FROM settings WHERE key IN ('site_name', 'site_logo', 'site_favicon', 'base_currency')"
+    );
+    const settings = {};
+    settingsList.forEach(item => {
+      settings[item.key] = item.value;
+    });
+
+    res.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=3600');
+    res.json({
+      site_name: settings.site_name || 'عرب تك سيرفر',
+      site_logo: settings.site_logo || '/logo.jpg',
+      site_favicon: settings.site_favicon || '/favicon.png',
+      base_currency: settings.base_currency || 'USD',
+    });
+  } catch (error) {
+    console.error('Fetch metadata settings error:', error);
+    res.status(500).json({ message: 'حدث خطأ أثناء جلب إعدادات الميتاداتا.' });
+  }
+});
 
 // Get settings
 router.get('/', async (req, res) => {
@@ -80,11 +146,6 @@ router.get('/', async (req, res) => {
       base_currency: settings.base_currency || 'USD',
       hide_wallet_payment: settings.hide_wallet_payment === 'true',
       whatsapp_numbers: whatsappNumbers,
-      whatsapp_portal_password: settings.whatsapp_portal_password || '',
-      email_user: settings.email_user || '',
-      email_pass: settings.email_pass || '',
-      global_markup_percent: parseFloat(settings.global_markup_percent) || 0,
-      api_auto_submit: settings.api_auto_submit === undefined ? true : settings.api_auto_submit === 'true',
       home_stats: settings.home_stats || JSON.stringify([
         { id: 1, label: 'مستخدم نشط', value: '10K+', icon: '👥' },
         { id: 2, label: 'طلب ناجح', value: '50K+', icon: '✅' },
@@ -189,12 +250,13 @@ router.put('/', authMiddleware, async (req, res) => {
       }
     }
 
-    if (whatsapp_portal_password !== undefined) {
+    if (whatsapp_portal_password !== undefined && String(whatsapp_portal_password).trim()) {
+      const hashedPortalPassword = await bcrypt.hash(String(whatsapp_portal_password).trim(), 12);
       const existing = await allQuery('SELECT * FROM settings WHERE key = ?', ['whatsapp_portal_password']);
       if (existing.length === 0) {
-        await runQuery('INSERT INTO settings (key, value) VALUES (?, ?)', ['whatsapp_portal_password', whatsapp_portal_password]);
+        await runQuery('INSERT INTO settings (key, value) VALUES (?, ?)', ['whatsapp_portal_password', hashedPortalPassword]);
       } else {
-        await runQuery('UPDATE settings SET value = ? WHERE key = ?', [whatsapp_portal_password, 'whatsapp_portal_password']);
+        await runQuery('UPDATE settings SET value = ? WHERE key = ?', [hashedPortalPassword, 'whatsapp_portal_password']);
       }
     }
 
@@ -207,7 +269,7 @@ router.put('/', authMiddleware, async (req, res) => {
       }
     }
 
-    if (email_pass !== undefined) {
+    if (email_pass !== undefined && String(email_pass).trim()) {
       const existing = await allQuery('SELECT * FROM settings WHERE key = ?', ['email_pass']);
       if (existing.length === 0) {
         await runQuery('INSERT INTO settings (key, value) VALUES (?, ?)', ['email_pass', email_pass.trim()]);

@@ -59,7 +59,7 @@ router.post('/request-access', authMiddleware, async (req, res) => {
     if (!enforced) {
       // Generate portal token directly if QR not scanned / no numbers yet
       const portalToken = jwt.sign(
-        { id: req.user.id, username: req.user.username, portalAccess: true },
+        { id: req.user.id, username: req.user.username, role: 'admin', portalAccess: true },
         getJwtSecret(),
         { expiresIn: '60m' }
       );
@@ -104,7 +104,7 @@ router.post('/verify-access', authMiddleware, async (req, res) => {
     }
 
     const portalToken = jwt.sign(
-      { id: req.user.id, username: req.user.username, portalAccess: true },
+      { id: req.user.id, username: req.user.username, role: 'admin', portalAccess: true },
       getJwtSecret(),
       { expiresIn: '60m' }
     );

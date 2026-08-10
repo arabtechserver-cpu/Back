@@ -14,6 +14,9 @@ const authMiddleware = (req, res, next) => {
     }
 
     const decoded = jwt.verify(token, getJwtSecret());
+    if (decoded.role !== 'admin') {
+      return res.status(403).json({ message: 'Administrator access is required.' });
+    }
     req.user = decoded;
     next();
   } catch (error) {

@@ -11,6 +11,7 @@ const wa = require('../whatsapp');
 const submittingOrders = new Set();
 
 const { callDhruApi, stripHtml, getDhruErrorMessage, extractCustomFields, normalizeCustomField, parseDhruServices } = require('../services/dhruClient');
+const { placeDynamicOrder } = require('../services/dynamicClient');
 
 // 1. Get Settings (Admin Protected or Public fallback)
 router.get('/settings', async (req, res) => {
@@ -1344,7 +1345,19 @@ async function autoSubmitUnlockerOrder(orderId) {
 
     let responseData = null;
 
-    if (targetServiceType === 'server' || targetServiceType === 'remote') {
+    if (provider.provider_type === 'dynamic') {
+      try {
+        console.log(`[Auto Place Order #${orderId}] Trying placeDynamicOrder`);
+        const result = await placeDynamicOrder(provider, { api_service_id: targetApiServiceId }, {
+          link: trimmedPlayerId,
+          quantity: order.quantity || 1,
+          customFields: customFields
+        });
+        responseData = { SUCCESS: [{ REFERENCEID: result.order_id }] };
+      } catch (err) {
+        responseData = { ERROR: err.message };
+      }
+    } else if (targetServiceType === 'server' || targetServiceType === 'remote') {
       // ── Server Order (primary) ─────────────────────────────────────────────
       const serverFields = Object.keys(customFields).length > 0 ? customFields : (trimmedPlayerId ? { PlayerID: trimmedPlayerId } : {});
       const serverCustom = buildCustomField(serverFields);

@@ -3,6 +3,7 @@ const router = express.Router();
 const { runQuery, allQuery, getQuery } = require('../db');
 const authMiddleware = require('../middleware/auth');
 const { callDhruApi, parseDhruServices } = require('../services/dhruClient');
+const { fetchDynamicServices } = require('../services/dynamicClient');
 
 // Get all API Providers (Admin Protected)
 router.get('/', authMiddleware, async (req, res) => {
@@ -17,7 +18,7 @@ router.get('/', authMiddleware, async (req, res) => {
 
 // Add new API Provider (Admin Protected)
 router.post('/', authMiddleware, async (req, res) => {
-  const { name, api_url, username, api_key } = req.body;
+  const { name, api_url, username, api_key, provider_type, mapping_rules } = req.body;
   if (!name || !api_url || !api_key) {
     return res.status(400).json({ message: 'الاسم، الرابط، ومفتاح API مطلوبين.' });
   }
@@ -28,8 +29,8 @@ router.post('/', authMiddleware, async (req, res) => {
     }
 
     const result = await runQuery(
-      'INSERT INTO api_providers (name, api_url, username, api_key) VALUES (?, ?, ?, ?) RETURNING id',
-      [name.trim(), api_url.trim(), username ? username.trim() : '', api_key.trim()]
+      'INSERT INTO api_providers (name, api_url, username, api_key, provider_type, mapping_rules) VALUES (?, ?, ?, ?, ?, ?) RETURNING id',
+      [name.trim(), api_url.trim(), username ? username.trim() : '', api_key.trim(), provider_type || 'dhru', mapping_rules || null]
     );
     // runQuery returns the first row for INSERT ... RETURNING id in db.js patchedRunQuery
     const newId = result ? (result.id || result.lastID) : null; 
@@ -43,20 +44,22 @@ router.post('/', authMiddleware, async (req, res) => {
 // Update API Provider (Admin Protected)
 router.put('/:id', authMiddleware, async (req, res) => {
   const { id } = req.params;
-  const { name, api_url, username, api_key, is_active } = req.body;
+  const { name, api_url, username, api_key, is_active, provider_type, mapping_rules } = req.body;
 
   try {
     const provider = await getQuery('SELECT * FROM api_providers WHERE id = ?', [id]);
     if (!provider) return res.status(404).json({ message: 'المزود غير موجود.' });
 
     await runQuery(
-      'UPDATE api_providers SET name = ?, api_url = ?, username = ?, api_key = ?, is_active = ? WHERE id = ?',
+      'UPDATE api_providers SET name = ?, api_url = ?, username = ?, api_key = ?, is_active = ?, provider_type = ?, mapping_rules = ? WHERE id = ?',
       [
         name ? name.trim() : provider.name,
         api_url ? api_url.trim() : provider.api_url,
         username !== undefined ? username.trim() : provider.username,
         api_key ? api_key.trim() : provider.api_key,
         is_active !== undefined ? is_active : provider.is_active,
+        provider_type || provider.provider_type,
+        mapping_rules !== undefined ? mapping_rules : provider.mapping_rules,
         id
       ]
     );
@@ -142,17 +145,23 @@ async function performProviderSync(providerId, customRate, customMarkup, customS
   const shouldGroup = customShouldGroup !== undefined ? customShouldGroup : (groupRow ? groupRow.value === 'true' : true);
 
   console.log(`[Smart Sync] Fetching fresh services list from provider ${provider.name}...`);
-  const [imeiRes, serverRes, remoteRes] = await Promise.all([
-    callDhruApi(provider.api_url, provider.username, provider.api_key, 'imeiservicelist').catch(e => ({ ERROR: e.message })),
-    callDhruApi(provider.api_url, provider.username, provider.api_key, 'serverservicelist').catch(e => ({ ERROR: e.message })),
-    callDhruApi(provider.api_url, provider.username, provider.api_key, 'remoteservicelist').catch(e => ({ ERROR: e.message }))
-  ]);
+  
+  let allServices = [];
+  if (provider.provider_type === 'dynamic') {
+    allServices = await fetchDynamicServices(provider);
+  } else {
+    const [imeiRes, serverRes, remoteRes] = await Promise.all([
+      callDhruApi(provider.api_url, provider.username, provider.api_key, 'imeiservicelist').catch(e => ({ ERROR: e.message })),
+      callDhruApi(provider.api_url, provider.username, provider.api_key, 'serverservicelist').catch(e => ({ ERROR: e.message })),
+      callDhruApi(provider.api_url, provider.username, provider.api_key, 'remoteservicelist').catch(e => ({ ERROR: e.message }))
+    ]);
 
-  const allServices = [
-    ...parseDhruServices(imeiRes, 'imei'),
-    ...parseDhruServices(serverRes, 'server'),
-    ...parseDhruServices(remoteRes, 'remote')
-  ];
+    allServices = [
+      ...parseDhruServices(imeiRes, 'imei'),
+      ...parseDhruServices(serverRes, 'server'),
+      ...parseDhruServices(remoteRes, 'remote')
+    ];
+  }
 
   if (allServices.length === 0) {
     throw new Error('تعذر جلب الخدمات من المزود، تأكد من الاتصال أو المفاتيح.');
@@ -208,14 +217,23 @@ async function performProviderSync(providerId, customRate, customMarkup, customS
         }
       }
 
-      if (combinedFields.length === 0) {
+      const hasMainIdReplacement = groupServices.some(s => s.customFields && s.customFields.some(cf => cf.fieldtype === 'serviceimei'));
+
+      if (!hasMainIdReplacement) {
         const dominantTypeEarly = Object.entries(
           groupServices.reduce((acc, s) => { const t = s.serviceType || 'imei'; acc[t] = (acc[t] || 0) + 1; return acc; }, {})
         ).sort((a, b) => b[1] - a[1])[0]?.[0] || 'imei';
         if (dominantTypeEarly === 'imei') {
-          combinedFields.push({ id: 'imei', name: 'imei', label: 'IMEI / SN / ECID', placeholder: 'أدخل رقم IMEI أو الرقم التسلسلي (SN) أو ECID', type: 'text', required: true });
+          combinedFields.unshift({ id: 'imei', name: 'imei', label: 'IMEI / SN / ECID', placeholder: 'أدخل رقم IMEI أو الرقم التسلسلي (SN) أو ECID', type: 'text', required: true });
         } else {
-          combinedFields.push({ id: 'player_id', name: 'player_id', label: 'معرّف الجهاز / ID', placeholder: 'أدخل معرّف الجهاز بدقة هنا', type: 'text', required: true });
+          combinedFields.unshift({ id: 'player_id', name: 'player_id', label: 'ملاحظات / ID (Notes)', placeholder: 'أدخل المعرّف أو الملاحظات المطلوبة بدقة', type: 'text', required: true });
+        }
+      } else {
+        const dominantTypeEarly = Object.entries(
+          groupServices.reduce((acc, s) => { const t = s.serviceType || 'imei'; acc[t] = (acc[t] || 0) + 1; return acc; }, {})
+        ).sort((a, b) => b[1] - a[1])[0]?.[0] || 'imei';
+        if (dominantTypeEarly !== 'imei') {
+          combinedFields.push({ id: 'player_id', name: 'player_id', label: 'ملاحظات إضافية (Notes)', placeholder: 'أدخل أي ملاحظات إن وجدت', type: 'textarea', required: false });
         }
       }
 
@@ -331,11 +349,16 @@ async function performProviderSync(providerId, customRate, customMarkup, customS
           });
         });
       }
-      if (serviceFields.length === 0) {
+      const hasMainIdReplacement = s.customFields && s.customFields.some(cf => cf.fieldtype === 'serviceimei');
+      if (!hasMainIdReplacement) {
         if ((s.serviceType || 'imei') === 'imei') {
-          serviceFields.push({ id: 'imei', name: 'imei', label: 'IMEI / SN / ECID', placeholder: 'أدخل رقم IMEI أو الرقم التسلسلي (SN) أو ECID', type: 'text', required: true });
+          serviceFields.unshift({ id: 'imei', name: 'imei', label: 'IMEI / SN / ECID', placeholder: 'أدخل رقم IMEI أو الرقم التسلسلي (SN) أو ECID', type: 'text', required: true });
         } else {
-          serviceFields.push({ id: 'player_id', name: 'player_id', label: 'معرّف الجهاز / ID', placeholder: 'أدخل معرّف الجهاز بدقة هنا', type: 'text', required: true });
+          serviceFields.unshift({ id: 'player_id', name: 'player_id', label: 'ملاحظات / ID (Notes)', placeholder: 'أدخل المعرّف أو الملاحظات المطلوبة بدقة', type: 'text', required: true });
+        }
+      } else {
+        if ((s.serviceType || 'imei') !== 'imei') {
+          serviceFields.push({ id: 'player_id', name: 'player_id', label: 'ملاحظات إضافية (Notes)', placeholder: 'أدخل أي ملاحظات إن وجدت', type: 'textarea', required: false });
         }
       }
 
@@ -409,17 +432,22 @@ router.post('/:id/fetch-services', authMiddleware, async (req, res) => {
     const provider = await getQuery('SELECT * FROM api_providers WHERE id = ?', [id]);
     if (!provider) return res.status(404).json({ message: 'المزود غير موجود.' });
 
-    const [imeiRes, serverRes, remoteRes] = await Promise.all([
-      callDhruApi(provider.api_url, provider.username, provider.api_key, 'imeiservicelist').catch(e => ({ ERROR: e.message })),
-      callDhruApi(provider.api_url, provider.username, provider.api_key, 'serverservicelist').catch(e => ({ ERROR: e.message })),
-      callDhruApi(provider.api_url, provider.username, provider.api_key, 'remoteservicelist').catch(e => ({ ERROR: e.message }))
-    ]);
+    let services = [];
+    if (provider.provider_type === 'dynamic') {
+      services = await fetchDynamicServices(provider);
+    } else {
+      const [imeiRes, serverRes, remoteRes] = await Promise.all([
+        callDhruApi(provider.api_url, provider.username, provider.api_key, 'imeiservicelist').catch(e => ({ ERROR: e.message })),
+        callDhruApi(provider.api_url, provider.username, provider.api_key, 'serverservicelist').catch(e => ({ ERROR: e.message })),
+        callDhruApi(provider.api_url, provider.username, provider.api_key, 'remoteservicelist').catch(e => ({ ERROR: e.message }))
+      ]);
 
-    const services = [
-      ...parseDhruServices(imeiRes, 'imei'),
-      ...parseDhruServices(serverRes, 'server'),
-      ...parseDhruServices(remoteRes, 'remote')
-    ];
+      services = [
+        ...parseDhruServices(imeiRes, 'imei'),
+        ...parseDhruServices(serverRes, 'server'),
+        ...parseDhruServices(remoteRes, 'remote')
+      ];
+    }
 
     if (services.length === 0) {
       return res.status(400).json({ message: 'لم يتم العثور على أي خدمات أو فشل الاتصال بالمزود.' });

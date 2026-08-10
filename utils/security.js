@@ -5,6 +5,10 @@ function getJwtSecret() {
   if (secret) {
     return secret;
   }
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('JWT_SECRET must be configured in production.');
+  }
+
   return DEFAULT_DEV_JWT_SECRET;
 }
 
@@ -42,19 +46,15 @@ function isOriginAllowed(origin, allowedOrigins) {
     if (hostname === 'arab-tech1.online' || hostname.endsWith('.arab-tech1.online')) {
       return true;
     }
-    // Dynamically allow duckdns domains used for deployment
-    if (hostname === 'spider-store-api.duckdns.org' || hostname.endsWith('.duckdns.org')) {
-      return true;
-    }
   } catch (e) {
     // Ignore invalid URLs, fall back to checking prefix
   }
 
-  if (origin.startsWith('http://localhost:') || 
+  if (process.env.NODE_ENV !== 'production' && (origin.startsWith('http://localhost:') || 
       origin.startsWith('http://127.0.0.1:') || 
       origin.startsWith('http://192.168.') || 
       origin.startsWith('http://10.') || 
-      origin.startsWith('http://172.')) {
+      origin.startsWith('http://172.'))) {
     return true;
   }
   return false;

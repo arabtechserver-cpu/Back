@@ -11,7 +11,7 @@ require('dotenv').config();
 const poolConfig = process.env.DATABASE_URL
   ? {
     connectionString: process.env.DATABASE_URL,
-    max: 75,
+    max: Number(process.env.PGPOOL_MAX) || 20,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 2000,
     ssl: process.env.PGSSLMODE === 'require' || process.env.DATABASE_URL.includes('sslmode=require') || process.env.PGSSL === 'true'
@@ -100,43 +100,98 @@ const dbInitialized = new Promise((resolve) => {
   dbInitializedResolve = resolve;
 });
 
+let cachedDb = null;
+let lastDbMtime = 0;
+
 function readDb() {
   if (!fs.existsSync(dbPath)) {
-    writeDb(defaultJsonDb);
-    return { ...defaultJsonDb };
+    if (!cachedDb) {
+      cachedDb = ensureDefaultSettings({ ...defaultJsonDb });
+      writeDb(cachedDb);
+    }
+    return cachedDb;
   }
 
   try {
+    const stats = fs.statSync(dbPath);
+    if (cachedDb && stats.mtimeMs === lastDbMtime) {
+      return cachedDb;
+    }
+    
     const data = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
-    return ensureDefaultSettings(data);
+    cachedDb = ensureDefaultSettings(data);
+    lastDbMtime = stats.mtimeMs;
+    return cachedDb;
   } catch (err) {
     console.error('Failed to read JSON fallback database:', err.message);
     const backupPath = `${dbPath}.corrupt-${Date.now()}`;
     try {
-      fs.copyFileSync(dbPath, backupPath);
+      if (fs.existsSync(dbPath)) fs.copyFileSync(dbPath, backupPath);
       console.warn('Backed up corrupted JSON database to:', backupPath);
     } catch (copyErr) {
       console.warn('Could not back up corrupted JSON database:', copyErr.message);
     }
-    writeDb(defaultJsonDb);
-    return { ...defaultJsonDb };
+    if (!cachedDb) {
+      cachedDb = ensureDefaultSettings({ ...defaultJsonDb });
+      writeDb(cachedDb);
+    }
+    return cachedDb;
   }
 }
 
+let isWriting = false;
+let writePending = false;
+
 function writeDb(data) {
+  cachedDb = data;
   const finalData = ensureDefaultSettings({ ...data });
+  
+  if (isWriting) {
+    writePending = true;
+    return;
+  }
+  
+  isWriting = true;
+  writePending = false;
+  
   const tmpPath = `${dbPath}.tmp`;
-  fs.writeFileSync(tmpPath, JSON.stringify(finalData, null, 2));
-  try {
-      fs.renameSync(tmpPath, dbPath);
-    } catch (err) {
-      if (err.code === 'EPERM') {
-        fs.copyFileSync(tmpPath, dbPath);
-        fs.unlinkSync(tmpPath);
-      } else {
-        throw err;
-      }
+  fs.writeFile(tmpPath, JSON.stringify(finalData, null, 2), (err) => {
+    if (err) {
+      console.error('Error writing temp db:', err);
+      isWriting = false;
+      if (writePending) writeDb(cachedDb);
+      return;
     }
+    
+    fs.rename(tmpPath, dbPath, (err) => {
+      if (err) {
+        if (err.code === 'EPERM') {
+          fs.copyFile(tmpPath, dbPath, (err) => {
+            if (!err) fs.unlink(tmpPath, () => {});
+            finishWrite();
+          });
+        } else {
+          console.error('Error renaming temp db:', err);
+          finishWrite();
+        }
+      } else {
+        finishWrite();
+      }
+    });
+  });
+  
+  function finishWrite() {
+    try {
+      if (fs.existsSync(dbPath)) {
+        const stats = fs.statSync(dbPath);
+        lastDbMtime = stats.mtimeMs;
+      }
+    } catch(e) {}
+    isWriting = false;
+    if (writePending) {
+      writeDb(cachedDb);
+    }
+  }
 }
 
 function executeJsonRunQuery(sql, params = []) {
@@ -655,6 +710,8 @@ async function createTables() {
       balance           NUMERIC(12,2) DEFAULT 0,
       currency          VARCHAR(20) DEFAULT 'USD',
       is_active         BOOLEAN DEFAULT true,
+      provider_type     VARCHAR(50) DEFAULT 'dhru',
+      mapping_rules     TEXT DEFAULT NULL,
       created_at        TIMESTAMPTZ DEFAULT NOW()
     );
 
@@ -744,6 +801,8 @@ async function createTables() {
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS is_api_order BOOLEAN DEFAULT false;
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS api_reseller_id INT REFERENCES customers(id) ON DELETE SET NULL;
       ALTER TABLE banners ADD COLUMN IF NOT EXISTS link TEXT DEFAULT '';
+      ALTER TABLE api_providers ADD COLUMN IF NOT EXISTS provider_type VARCHAR(50) DEFAULT 'dhru';
+      ALTER TABLE api_providers ADD COLUMN IF NOT EXISTS mapping_rules TEXT DEFAULT NULL;
     `);
 
     // Migration: rename old fields_title labels and fix default currency
@@ -871,9 +930,9 @@ async function seedData() {
   // Seed settings in PostgreSQL
   const existingSettings = await allQuery('SELECT * FROM settings');
   if (existingSettings.length === 0) {
-    await patchedRunQuery("INSERT INTO settings (key, value) VALUES ('site_name', 'عرب تك سيرفر')");
-    await patchedRunQuery("INSERT INTO settings (key, value) VALUES ('site_logo', '/logo.jpg')");
-    await patchedRunQuery("INSERT INTO settings (key, value) VALUES ('site_favicon', '/favicon.png')");
+    await patchedRunQuery("INSERT INTO settings (key, value) VALUES (?, ?)", ['site_name', 'عرب تك سيرفر']);
+    await patchedRunQuery("INSERT INTO settings (key, value) VALUES (?, ?)", ['site_logo', '/logo.jpg']);
+    await patchedRunQuery("INSERT INTO settings (key, value) VALUES (?, ?)", ['site_favicon', '/favicon.png']);
     console.log('Default settings seeded in PostgreSQL');
   }
 
@@ -1189,30 +1248,30 @@ async function seedData() {
     // Force base_currency to USD
     const exists = await getQuery("SELECT * FROM settings WHERE key = 'base_currency'");
     if (!exists) {
-      await patchedRunQuery("INSERT INTO settings (key, value) VALUES ('base_currency', 'USD')");
+      await patchedRunQuery("INSERT INTO settings (key, value) VALUES (?, ?)", ['base_currency', 'USD']);
     } else {
-      await patchedRunQuery("UPDATE settings SET value = 'USD' WHERE key = 'base_currency'");
+      await patchedRunQuery("UPDATE settings SET value = ? WHERE key = ?", ['USD', 'base_currency']);
     }
 
     // Force currencies list to ["USD"]
     const currRow = await getQuery("SELECT * FROM settings WHERE key = 'currencies'");
     if (!currRow) {
-      await patchedRunQuery("INSERT INTO settings (key, value) VALUES ('currencies', ?)", [JSON.stringify(["USD"])]);
+      await patchedRunQuery("INSERT INTO settings (key, value) VALUES (?, ?)", ['currencies', JSON.stringify(["USD"])]);
     } else {
-      await patchedRunQuery("UPDATE settings SET value = ? WHERE key = 'currencies'", [JSON.stringify(["USD"])]);
+      await patchedRunQuery("UPDATE settings SET value = ? WHERE key = ?", [JSON.stringify(["USD"]), 'currencies']);
     }
 
     // Force exchange rates to {"USD":1}
     const ratesRow = await getQuery("SELECT * FROM settings WHERE key = 'exchange_rates'");
     if (!ratesRow) {
-      await patchedRunQuery("INSERT INTO settings (key, value) VALUES ('exchange_rates', ?)", [JSON.stringify({ "USD": 1 })]);
+      await patchedRunQuery("INSERT INTO settings (key, value) VALUES (?, ?)", ['exchange_rates', JSON.stringify({ "USD": 1 })]);
     } else {
-      await patchedRunQuery("UPDATE settings SET value = ? WHERE key = 'exchange_rates'", [JSON.stringify({ "USD": 1 })]);
+      await patchedRunQuery("UPDATE settings SET value = ? WHERE key = ?", [JSON.stringify({ "USD": 1 }), 'exchange_rates']);
     }
 
     // Fix categories and wallet currency
-    await patchedRunQuery("UPDATE categories SET currency = 'USD'");
-    await patchedRunQuery("UPDATE wallet_requests SET currency = 'USD'");
+    await patchedRunQuery("UPDATE categories SET currency = ?", ['USD']);
+    await patchedRunQuery("UPDATE wallet_requests SET currency = ?", ['USD']);
 
     // Migrate customer balances from USDT to USD
     const allCustomers = await allQuery("SELECT id, balances FROM customers");
