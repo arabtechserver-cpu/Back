@@ -120,12 +120,6 @@ app.use(compression());
 
 const apiProviderRoutes = require('./routes/apiProviderRoutes');
 
-
-// Enable gzip/brotli compression for all responses
-app.use(compression());
-
-const apiProviderRoutes = require('./routes/apiProviderRoutes');
-
 // Prevent sensitive responses from being cached by browsers or proxies
 app.use(['/api/auth', '/api/customer', '/api/orders', '/api/wallet', '/api/whatsapp', '/api/whatsapp-portal', '/api/otp'], (req, res, next) => {
   res.setHeader('Cache-Control', 'no-store, max-age=0');
