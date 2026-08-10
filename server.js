@@ -120,21 +120,29 @@ app.use(compression());
 
 const apiProviderRoutes = require('./routes/apiProviderRoutes');
 
+
+// Enable gzip/brotli compression for all responses
+app.use(compression());
+
+const apiProviderRoutes = require('./routes/apiProviderRoutes');
+
 // Prevent sensitive responses from being cached by browsers or proxies
 app.use(['/api/auth', '/api/customer', '/api/orders', '/api/wallet', '/api/whatsapp', '/api/whatsapp-portal', '/api/otp'], (req, res, next) => {
   res.setHeader('Cache-Control', 'no-store, max-age=0');
   next();
 });
 
-// Serve static assets with aggressive caching (30 days)
+// Serve static assets with aggressive caching (1 year)
 const path = require('path');
 app.use('/uploads', express.static(path.join(__dirname, 'uploads'), {
-  maxAge: '30d',
+  maxAge: '365d',
   etag: true,
   lastModified: true,
   setHeaders: (res, filePath) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Timing-Allow-Origin', '*');
     if (/\.(png|jpe?g|gif|webp|svg|ico)$/i.test(filePath)) {
-      res.setHeader('Cache-Control', 'public, max-age=2592000, immutable');
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
     }
   }
 }));
