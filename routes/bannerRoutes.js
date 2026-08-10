@@ -5,11 +5,12 @@ const authMiddleware = require('../middleware/auth');
 const deleteOtpAuth = require('../middleware/deleteOtpAuth');
 const { saveImage } = require('../utils/imageSaver');
 
-// Get all banners (Public)
+// Get all banners (Public - with caching)
 router.get('/', async (req, res) => {
   try {
+    res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
     const banners = await allQuery('SELECT id, title, highlight, description AS desc, badge, color, icon, link FROM banners ORDER BY id ASC');
-    res.json(banners);
+    res.json(banners || []);
   } catch (error) {
     console.error('Fetch banners error:', error);
     res.status(500).json({ message: 'حدث خطأ أثناء جلب شرائح البانر.' });
