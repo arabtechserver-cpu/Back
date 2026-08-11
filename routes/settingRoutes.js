@@ -161,10 +161,7 @@ router.get('/', async (req, res) => {
 });
 
 // ── Update settings (Admin) ──────────────────────────────────────────────────
-router.put('/update', adminMiddleware, upload.fields([
-  { name: 'site_logo', maxCount: 1 },
-  { name: 'site_favicon', maxCount: 1 }
-]), async (req, res) => {
+router.put('/', authMiddleware, async (req, res) => {
   try {
     const { 
       site_name, 
