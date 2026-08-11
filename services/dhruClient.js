@@ -225,8 +225,8 @@ function parseDhruServices(data, serviceType = 'imei') {
       price: getServicePrice(s),
       time: s.TIME || '',
       customFields: extractCustomFields(s).map(normalizeCustomField).filter(Boolean),
-      min_quantity: parseInt(s.MIN || s.min || s.QNT_MIN || s.qnt_min || s.MIN_QNT || s.min_qnt || s.QNT || 1) || 1,
-      max_quantity: parseInt(s.MAX || s.max || s.QNT_MAX || s.qnt_max || s.MAX_QNT || s.max_qnt || 0) || 0,
+      min_quantity: parseInt(s.MIN || s.min || s.Min || s.QNT_MIN || s.qnt_min || s.Qnt_Min || s.MIN_QNT || s.min_qnt || s.Min_Qnt || s.QNT || s.qnt || s.Qnt || 1) || 1,
+      max_quantity: parseInt(s.MAX || s.max || s.Max || s.QNT_MAX || s.qnt_max || s.Qnt_Max || s.MAX_QNT || s.max_qnt || s.Max_Qnt || 0) || 0,
       requires_quantity: s.QNT === "1" || s.QNT === "Y" || s.QNT === 1 || s.qnt === "1" || s.qnt === "Y" || s.qnt === 1,
       requires_imei: requiresImei,
       serviceType: serviceType || 'imei'
