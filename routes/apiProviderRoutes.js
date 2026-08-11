@@ -33,7 +33,7 @@ router.post('/', authMiddleware, async (req, res) => {
       [name.trim(), api_url.trim(), username ? username.trim() : '', api_key.trim(), provider_type || 'dhru', mapping_rules || null]
     );
     // runQuery returns the first row for INSERT ... RETURNING id in db.js patchedRunQuery
-    const newId = result ? (result.id || result.lastID) : null; 
+    const newId = result ? (result.id || result.lastID) : null;
     res.status(201).json({ message: 'تم إضافة مزود الـ API بنجاح.', id: newId });
   } catch (error) {
     console.error('Add API provider error:', error);
@@ -139,13 +139,13 @@ async function performProviderSync(providerId, customRate, customMarkup, customS
   const rateRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_exchange_rate'");
   const markupRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_markup_percent'");
   const groupRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_group_as_packages'");
-  
+
   const rate = customRate !== undefined ? parseFloat(customRate) : (rateRow ? parseFloat(rateRow.value) : 50);
   const markup = customMarkup !== undefined ? parseFloat(customMarkup) : (markupRow ? parseFloat(markupRow.value) : 10);
   const shouldGroup = customShouldGroup !== undefined ? customShouldGroup : (groupRow ? groupRow.value === 'true' : true);
 
   console.log(`[Smart Sync] Fetching fresh services list from provider ${provider.name}...`);
-  
+
   let allServices = [];
   if (provider.provider_type === 'dynamic') {
     allServices = await fetchDynamicServices(provider);
@@ -194,7 +194,7 @@ async function performProviderSync(providerId, customRate, customMarkup, customS
       const cleanGroupName = groupName || 'عام';
       const combinedFields = [];
       const addedFieldNames = new Set();
-      
+
       for (const s of groupServices) {
         if (s.customFields && Array.isArray(s.customFields)) {
           for (const cf of s.customFields) {
@@ -217,6 +217,12 @@ async function performProviderSync(providerId, customRate, customMarkup, customS
         }
       }
 
+      if (combinedFields.length === 0) {
+        const needsImei = groupServices.some(s => s.requires_imei !== false && (s.serviceType || 'imei').toLowerCase() === 'imei');
+        if (needsImei) {
+          combinedFields.unshift({ id: 'imei', name: 'imei', label: 'IMEI / SN / ECID', placeholder: 'أدخل رقم IMEI أو الرقم التسلسلي (SN) أو ECID', type: 'text', required: true });
+        }
+      }
       let cat = await getQuery('SELECT id FROM categories WHERE name = ?', [cleanGroupName]);
       let categoryId;
       if (!cat) {
@@ -276,12 +282,12 @@ async function performProviderSync(providerId, customRate, customMarkup, customS
       const minPrice = mergedPackages.length > 0 ? Math.min(...mergedPackages.map(p => p.price)) : 0;
       const packagesJson = JSON.stringify(mergedPackages);
       const fieldsJson = JSON.stringify(combinedFields);
-      
+
       const typeCounts = groupServices.reduce((acc, s) => { const t = s.serviceType || 'imei'; acc[t] = (acc[t] || 0) + 1; return acc; }, {});
       const dominantType = Object.entries(typeCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || 'imei';
 
       let existingSvc = await getQuery("SELECT id FROM services WHERE name = ? AND api_provider_id = ? AND api_service_id = 'grouped'", [cleanGroupName, provider.id]);
-      
+
       if (!existingSvc) {
         await runQuery(
           "INSERT INTO services (category_id, name, description, price, image, packages, fields, price_type, price_per_thousand, fields_title, api_service_id, api_source, api_provider_id, api_price, min_quantity, max_quantity, api_service_type, api_delivery_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -330,7 +336,11 @@ async function performProviderSync(providerId, customRate, customMarkup, customS
         });
       }
 
-
+      if (serviceFields.length === 0) {
+        if (s.requires_imei !== false && (s.serviceType || 'imei').toLowerCase() === 'imei') {
+          serviceFields.unshift({ id: 'imei', name: 'imei', label: 'IMEI / SN / ECID', placeholder: 'أدخل رقم IMEI أو الرقم التسلسلي (SN) أو ECID', type: 'text', required: true });
+        }
+      }
       let multiplier = 1;
       if (apiCurrency === 'EGP') multiplier = 1 / rate;
 
@@ -342,10 +352,10 @@ async function performProviderSync(providerId, customRate, customMarkup, customS
       const minQty = s.min_quantity || 1;
       const maxQty = s.max_quantity || 0;
       const isDynamic = (maxQty > 1 && maxQty !== minQty) || (minQty > 1 && maxQty === 0) || s.requires_quantity;
-      
+
       const priceType = isDynamic ? 'dynamic' : 'fixed';
       const pricePerThousand = isDynamic ? localPrice * 1000 : 0;
-      
+
       const packagesJson = isDynamic ? '[]' : JSON.stringify([{ id: 1, name: "تفعيل فوري تلقائي", price: localPrice, usd_price: localPrice, api_service_id: s.id.toString(), api_service_type: svcType, status: "Available", discount: 0 }]);
       const fieldsJson = JSON.stringify(serviceFields);
 
@@ -374,7 +384,7 @@ async function performProviderSync(providerId, customRate, customMarkup, customS
 router.post('/:id/sync', authMiddleware, async (req, res) => {
   const { id } = req.params;
   const { exchange_rate, markup_percent, group_as_packages } = req.body;
-  
+
   // We can still save these generically or update them globally as user prefers
   if (exchange_rate) {
     const exists = await getQuery("SELECT * FROM settings WHERE key = 'amrr_exchange_rate'");
@@ -484,7 +494,7 @@ router.post('/:id/import-services', authMiddleware, async (req, res) => {
         const cleanGroupName = groupName;
         const combinedFields = [];
         const addedFieldNames = new Set();
-        
+
         for (const s of groupServices) {
           if (s.customFields && Array.isArray(s.customFields)) {
             for (const cf of s.customFields) {
@@ -508,7 +518,12 @@ router.post('/:id/import-services', authMiddleware, async (req, res) => {
         }
 
 
-
+        if (combinedFields.length === 0) {
+          const needsImei = groupServices.some(s => s.requires_imei !== false && (s.serviceType || 'imei').toLowerCase() === 'imei');
+          if (needsImei) {
+            combinedFields.push({ id: 'imei', name: 'imei', label: 'IMEI / SN / ECID', placeholder: 'أدخل رقم IMEI أو الرقم التسلسلي (SN) أو ECID', type: 'text', required: true });
+          }
+        }
         let cat = await getQuery('SELECT id FROM categories WHERE name = ?', [cleanGroupName]);
         let categoryId;
         if (!cat) {
@@ -534,8 +549,8 @@ router.post('/:id/import-services', authMiddleware, async (req, res) => {
           let localPrice = parseFloat((apiPriceUsd * multiplier * (1 + markup / 100)).toFixed(2));
           let discount = 0;
           if (s.custom_discount !== null && s.custom_discount !== undefined) {
-             discount = parseFloat(s.custom_discount);
-             localPrice = parseFloat((apiPriceUsd * multiplier * (1 + markup / 100)) - discount).toFixed(2);
+            discount = parseFloat(s.custom_discount);
+            localPrice = parseFloat((apiPriceUsd * multiplier * (1 + markup / 100)) - discount).toFixed(2);
           }
 
           const cleanPkgName = s.name || 'تفعيل فوري تلقائي';
@@ -578,7 +593,7 @@ router.post('/:id/import-services', authMiddleware, async (req, res) => {
         const dominantType = Object.entries(typeCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || 'imei';
 
         let existingSvc = await getQuery("SELECT id FROM services WHERE name = ? AND api_provider_id = ? AND api_service_id = 'grouped'", [cleanGroupName, provider.id]);
-        
+
         if (!existingSvc) {
           const minPrice = mergedPackages.length > 0 ? Math.min(...mergedPackages.map(p => p.price)) : 0;
           await runQuery(
@@ -589,16 +604,16 @@ router.post('/:id/import-services', authMiddleware, async (req, res) => {
         } else {
           const existingSvcRow = await getQuery("SELECT packages FROM services WHERE id = ?", [existingSvc.id]);
           let existingPackages = [];
-          try { existingPackages = JSON.parse(existingSvcRow.packages); } catch(e){}
+          try { existingPackages = JSON.parse(existingSvcRow.packages); } catch (e) { }
 
           mergedPackages.forEach(newPkg => {
-             const existIdx = existingPackages.findIndex(ep => ep.api_service_id === newPkg.api_service_id);
-             if (existIdx > -1) {
-               existingPackages[existIdx] = { ...existingPackages[existIdx], ...newPkg, id: existingPackages[existIdx].id };
-             } else {
-               const nextId = existingPackages.length > 0 ? Math.max(...existingPackages.map(p => p.id)) + 1 : 1;
-               existingPackages.push({ ...newPkg, id: nextId });
-             }
+            const existIdx = existingPackages.findIndex(ep => ep.api_service_id === newPkg.api_service_id);
+            if (existIdx > -1) {
+              existingPackages[existIdx] = { ...existingPackages[existIdx], ...newPkg, id: existingPackages[existIdx].id };
+            } else {
+              const nextId = existingPackages.length > 0 ? Math.max(...existingPackages.map(p => p.id)) + 1 : 1;
+              existingPackages.push({ ...newPkg, id: nextId });
+            }
           });
 
           const newMinPrice = existingPackages.length > 0 ? Math.min(...existingPackages.map(p => p.price)) : 0;
@@ -660,12 +675,12 @@ router.post('/:id/import-services', authMiddleware, async (req, res) => {
         if (s.custom_price !== null && s.custom_price !== undefined) {
           apiPriceUsd = parseFloat(s.custom_price);
         }
-        
+
         let localPrice = parseFloat((apiPriceUsd * multiplier * (1 + markup / 100)).toFixed(2));
         let discount = 0;
         if (s.custom_discount !== null && s.custom_discount !== undefined) {
-           discount = parseFloat(s.custom_discount);
-           localPrice = parseFloat((apiPriceUsd * multiplier * (1 + markup / 100)) - discount).toFixed(2);
+          discount = parseFloat(s.custom_discount);
+          localPrice = parseFloat((apiPriceUsd * multiplier * (1 + markup / 100)) - discount).toFixed(2);
         }
 
         const cleanServiceName = s.name || 'تفعيل فوري تلقائي';
@@ -673,10 +688,10 @@ router.post('/:id/import-services', authMiddleware, async (req, res) => {
         const minQty = s.min_quantity || 1;
         const maxQty = s.max_quantity || 0;
         const isDynamic = (maxQty > 1 && maxQty !== minQty) || (minQty > 1 && maxQty === 0) || s.requires_quantity;
-        
+
         const priceType = isDynamic ? 'dynamic' : 'fixed';
         const pricePerThousand = isDynamic ? localPrice * 1000 : 0;
-        
+
         const packagesJson = isDynamic ? '[]' : JSON.stringify([{ id: 1, name: "تفعيل فوري تلقائي", price: localPrice, usd_price: localPrice, api_service_id: s.id.toString(), api_service_type: svcType, status: "Available", discount: discount }]);
         const fieldsJson = JSON.stringify(serviceFields);
 
