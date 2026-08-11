@@ -9,10 +9,20 @@ function parseSetting(value, fallback) {
   if (!value) return fallback;
   try {
     return JSON.parse(value);
-  } catch {
-    return fallback;
-  }
 }
+}
+
+// ── Auto-convert existing images to WebP ─────────────────────────────────────
+router.post('/auto-convert-images', authMiddleware, async (req, res) => {
+  try {
+    const { runMigration } = require('../convert_images');
+    const result = await runMigration();
+    res.json({ message: 'تم فحص وتحويل الصور بنجاح.', details: result });
+  } catch (err) {
+    console.error('Image conversion error:', err);
+    res.status(500).json({ message: 'حدث خطأ أثناء تحويل الصور.' });
+  }
+});
 
 // Private settings are intentionally separated from the public storefront response.
 router.get('/admin', authMiddleware, async (req, res) => {

@@ -157,10 +157,7 @@ async function runMigration() {
     }
   });
   console.log('Migration finished!');
-  process.exit(0);
+  return { success: true, count: mappedCount };
 }
 
-runMigration().catch(err => {
-  console.error(err);
-  process.exit(1);
-});
+module.exports = { runMigration };

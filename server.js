@@ -201,6 +201,20 @@ app.get('/api/health', (req, res) => {
 const server = app.listen(PORT, HOST, () => {
   console.log(`Backend server running on ${HOST}:${PORT}`);
   
+  // Automatically trigger WebP conversion for any existing legacy images
+  try {
+    const { runMigration } = require('./convert_images');
+    runMigration().then(res => {
+      if (res && res.count > 0) {
+        console.log(`[Auto-Convert] Successfully converted ${res.count} images to WebP on startup.`);
+      }
+    }).catch(err => {
+      console.error('[Auto-Convert] Error during background image conversion:', err.message);
+    });
+  } catch (e) {
+    console.error('[Auto-Convert] Failed to start image conversion:', e.message);
+  }
+
   // ── Telegram bot migration: ensure telegram_chat_id column exists ──────────
   (async () => {
     try {
