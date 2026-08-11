@@ -1290,19 +1290,30 @@ async function autoSubmitUnlockerOrder(orderId) {
     let targetApiServiceId = service.api_service_id;
     // Default service type from the service row, may be overridden by package
     let targetServiceType = service.api_service_type || 'imei';
+    let targetApiQuantity = order.quantity ? parseInt(order.quantity) : 1;
 
     if (order.package_name) {
       try {
         const pkgs = typeof service.packages === 'string' ? JSON.parse(service.packages) : (service.packages || []);
-        const matchingPkg = pkgs.find(p => String(p.name).trim().toLowerCase() === String(order.package_name).trim().toLowerCase());
-        if (matchingPkg && matchingPkg.api_service_id) {
-          targetApiServiceId = matchingPkg.api_service_id;
+        let matchingPkg = pkgs.find(p => String(p.name).trim().toLowerCase() === String(order.package_name).trim().toLowerCase());
+        
+        if (!matchingPkg) {
+          matchingPkg = pkgs.find(p => String(p.name).trim().toLowerCase().includes(String(order.package_name).trim().toLowerCase()) || String(order.package_name).trim().toLowerCase().includes(String(p.name).trim().toLowerCase()));
+        }
+
+        if (matchingPkg) {
+          if (matchingPkg.api_service_id) targetApiServiceId = matchingPkg.api_service_id;
           if (matchingPkg.api_service_type) targetServiceType = matchingPkg.api_service_type;
-        } else {
-          const partialPkg = pkgs.find(p => String(p.name).trim().toLowerCase().includes(String(order.package_name).trim().toLowerCase()) || String(order.package_name).trim().toLowerCase().includes(String(p.name).trim().toLowerCase()));
-          if (partialPkg && partialPkg.api_service_id) {
-            targetApiServiceId = partialPkg.api_service_id;
-            if (partialPkg.api_service_type) targetServiceType = partialPkg.api_service_type;
+          
+          // If the package is fixed (doesn't require user quantity), use the min_quantity defined by the provider
+          if (!matchingPkg.requires_quantity && matchingPkg.min_quantity) {
+             const minQ = parseInt(matchingPkg.min_quantity);
+             if (minQ > 0) {
+               // If user ordered multiple of this fixed package, multiply the quantity if the API allows it,
+               // but usually for fixed Dhru packages (min=max), it's just minQ. 
+               // For safety against 'Wrong Qnt range', we'll just send min_quantity.
+               targetApiQuantity = minQ * (order.quantity ? parseInt(order.quantity) : 1);
+             }
           }
         }
       } catch (e) {
@@ -1365,7 +1376,7 @@ async function autoSubmitUnlockerOrder(orderId) {
         console.log(`[Auto Place Order #${orderId}] Trying placeDynamicOrder`);
         const result = await placeDynamicOrder(provider, { api_service_id: targetApiServiceId }, {
           link: trimmedPlayerId,
-          quantity: order.quantity || 1,
+          quantity: targetApiQuantity,
           customFields: customFields
         });
         responseData = { SUCCESS: [{ REFERENCEID: result.order_id }] };
@@ -1378,11 +1389,11 @@ async function autoSubmitUnlockerOrder(orderId) {
       const serverCustom = buildCustomField(serverFields);
       const serverPayload = {
         ID: targetApiServiceId,
-        QNT: order.quantity || 1,
+        QNT: targetApiQuantity,
         REFERENCE: order.id.toString(),
         ...(serverCustom ? { CUSTOMFIELD: serverCustom } : {})
       };
-      console.log(`[Auto Place Order #${orderId}] Trying placeserverorder | QNT=${order.quantity || 1}`);
+      console.log(`[Auto Place Order #${orderId}] Trying placeserverorder | QNT=${targetApiQuantity}`);
       responseData = await callDhruApi(apiUrl, apiUser, apiKey, 'placeserverorder', serverPayload).catch(e => ({ ERROR: e.message }));
       
       if (responseData.ERROR) {
@@ -1420,7 +1431,7 @@ async function autoSubmitUnlockerOrder(orderId) {
         console.warn(`[Auto Place Order #${orderId}] placeimeiorder failed (${getDhruErrorMessage(firstError)}), trying placeserverorder as fallback...`);
         const serverFields = Object.keys(customFields).length > 0 ? customFields : (trimmedPlayerId ? { PlayerID: trimmedPlayerId } : {});
         const serverCustom = buildCustomField(serverFields);
-        const serverPayload = { ID: targetApiServiceId, QNT: order.quantity || 1, REFERENCE: order.id.toString(), ...(serverCustom ? { CUSTOMFIELD: serverCustom } : {}) };
+        const serverPayload = { ID: targetApiServiceId, QNT: targetApiQuantity, REFERENCE: order.id.toString(), ...(serverCustom ? { CUSTOMFIELD: serverCustom } : {}) };
         responseData = await callDhruApi(apiUrl, apiUser, apiKey, 'placeserverorder', serverPayload).catch(e => ({ ERROR: e.message }));
         
         if (responseData.ERROR && (getDhruErrorMessage(responseData).includes("Command Not Found") || getDhruErrorMessage(responseData).includes("Action Not Found"))) {
