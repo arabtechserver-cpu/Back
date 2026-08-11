@@ -636,9 +636,22 @@ router.post('/wipe-and-sync-all', authMiddleware, async (req, res) => {
   const { exchange_rate, markup_percent, group_as_packages } = req.body;
   
   // Save settings globally to allow background auto-sync to use them
-  if (exchange_rate) await runQuery("INSERT INTO settings (key, value) VALUES ('amrr_exchange_rate', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [exchange_rate]);
-  if (markup_percent) await runQuery("INSERT INTO settings (key, value) VALUES ('amrr_markup_percent', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [markup_percent]);
-  if (group_as_packages !== undefined) await runQuery("INSERT INTO settings (key, value) VALUES ('amrr_group_as_packages', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [group_as_packages ? 'true' : 'false']);
+  if (exchange_rate) {
+    const exists = await getQuery("SELECT * FROM settings WHERE key = 'amrr_exchange_rate'");
+    if (exists) await runQuery("UPDATE settings SET value = ? WHERE key = 'amrr_exchange_rate'", [exchange_rate]);
+    else await runQuery("INSERT INTO settings (key, value) VALUES ('amrr_exchange_rate', ?)", [exchange_rate]);
+  }
+  if (markup_percent) {
+    const exists = await getQuery("SELECT * FROM settings WHERE key = 'amrr_markup_percent'");
+    if (exists) await runQuery("UPDATE settings SET value = ? WHERE key = 'amrr_markup_percent'", [markup_percent]);
+    else await runQuery("INSERT INTO settings (key, value) VALUES ('amrr_markup_percent', ?)", [markup_percent]);
+  }
+  if (group_as_packages !== undefined) {
+    const val = group_as_packages ? 'true' : 'false';
+    const exists = await getQuery("SELECT * FROM settings WHERE key = 'amrr_group_as_packages'");
+    if (exists) await runQuery("UPDATE settings SET value = ? WHERE key = 'amrr_group_as_packages'", [val]);
+    else await runQuery("INSERT INTO settings (key, value) VALUES ('amrr_group_as_packages', ?)", [val]);
+  }
 
   try {
     const result = await performSmartSync(exchange_rate, markup_percent, group_as_packages);
