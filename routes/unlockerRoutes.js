@@ -847,6 +847,14 @@ router.post('/import-services', authMiddleware, async (req, res) => {
             });
           }
 
+          if (packageFields.length === 0) {
+            const nameLower = (s.name || '').toLowerCase();
+            const imeiKeywords = ['frp', 'icloud', 'bypass', 'remove', 'unlock', 'passcode', 'ramdisk', 'clean', 'lost', 'check', 'mac', 'network', 'imei', 'sn', 'ecid', 'serial'];
+            const likelyNeedsImei = imeiKeywords.some(kw => nameLower.includes(kw));
+            if (likelyNeedsImei && s.requires_imei !== false && (s.serviceType || 'imei').toLowerCase() === 'imei') {
+              packageFields.push({ id: 'imei', name: 'imei', label: 'IMEI / SN / ECID', placeholder: 'أدخل رقم IMEI أو الرقم التسلسلي (SN) أو ECID', type: 'text', required: true });
+            }
+          }
 
           const pkgData = {
             id: pkgIndex >= 0 ? mergedPackages[pkgIndex].id : (mergedPackages.length + 1),
@@ -926,9 +934,14 @@ router.post('/import-services', authMiddleware, async (req, res) => {
           }
         }
         
-
-
-
+        if (serviceFields.length === 0) {
+          const nameLower = (s.name || '').toLowerCase();
+          const imeiKeywords = ['frp', 'icloud', 'bypass', 'remove', 'unlock', 'passcode', 'ramdisk', 'clean', 'lost', 'check', 'mac', 'network', 'imei', 'sn', 'ecid', 'serial'];
+          const likelyNeedsImei = imeiKeywords.some(kw => nameLower.includes(kw));
+          if (likelyNeedsImei && s.requires_imei !== false && (s.serviceType || 'imei').toLowerCase() === 'imei') {
+            serviceFields.push({ id: 'imei', name: 'imei', label: 'IMEI / SN / ECID', placeholder: 'أدخل رقم IMEI أو الرقم التسلسلي (SN) أو ECID', type: 'text', required: true });
+          }
+        }
         
         const fieldsJson = JSON.stringify(serviceFields);
         const cleanServiceName = s.name.replace(/(amrr\s*-?\s*unlocker|amrr|ameer)/gi, '').replace(/\s+/g, ' ').trim() || 'تفعيل فوري تلقائي';

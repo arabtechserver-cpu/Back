@@ -217,6 +217,17 @@ async function performProviderSync(providerId, customRate, customMarkup, customS
         }
       }
 
+      if (combinedFields.length === 0) {
+        const needsImei = groupServices.some(s => {
+          const nameLower = (s.name || '').toLowerCase();
+          const imeiKeywords = ['frp', 'icloud', 'bypass', 'remove', 'unlock', 'passcode', 'ramdisk', 'clean', 'lost', 'check', 'mac', 'network', 'imei', 'sn', 'ecid', 'serial'];
+          const likelyNeedsImei = imeiKeywords.some(kw => nameLower.includes(kw));
+          return likelyNeedsImei && s.requires_imei !== false && (s.serviceType || 'imei').toLowerCase() === 'imei';
+        });
+        if (needsImei) {
+          combinedFields.unshift({ id: 'imei', name: 'imei', label: 'IMEI / SN / ECID', placeholder: 'أدخل رقم IMEI أو الرقم التسلسلي (SN) أو ECID', type: 'text', required: true });
+        }
+      }
 
       let cat = await getQuery('SELECT id FROM categories WHERE name = ?', [cleanGroupName]);
       let categoryId;
@@ -331,6 +342,17 @@ async function performProviderSync(providerId, customRate, customMarkup, customS
         });
       }
 
+
+
+      if (serviceFields.length === 0) {
+        const nameLower = (s.name || '').toLowerCase();
+        const imeiKeywords = ['frp', 'icloud', 'bypass', 'remove', 'unlock', 'passcode', 'ramdisk', 'clean', 'lost', 'check', 'mac', 'network', 'imei', 'sn', 'ecid', 'serial'];
+        const likelyNeedsImei = imeiKeywords.some(kw => nameLower.includes(kw));
+        
+        if (likelyNeedsImei && s.requires_imei !== false && (s.serviceType || 'imei').toLowerCase() === 'imei') {
+          serviceFields.unshift({ id: 'imei', name: 'imei', label: 'IMEI / SN / ECID', placeholder: 'أدخل رقم IMEI أو الرقم التسلسلي (SN) أو ECID', type: 'text', required: true });
+        }
+      }
 
       let multiplier = 1;
       if (apiCurrency === 'EGP') multiplier = 1 / rate;
@@ -509,6 +531,19 @@ router.post('/:id/import-services', authMiddleware, async (req, res) => {
         }
 
 
+
+
+        if (combinedFields.length === 0) {
+          const needsImei = groupServices.some(s => {
+            const nameLower = (s.name || '').toLowerCase();
+            const imeiKeywords = ['frp', 'icloud', 'bypass', 'remove', 'unlock', 'passcode', 'ramdisk', 'clean', 'lost', 'check', 'mac', 'network', 'imei', 'sn', 'ecid', 'serial'];
+            const likelyNeedsImei = imeiKeywords.some(kw => nameLower.includes(kw));
+            return likelyNeedsImei && s.requires_imei !== false && (s.serviceType || 'imei').toLowerCase() === 'imei';
+          });
+          if (needsImei) {
+            combinedFields.push({ id: 'imei', name: 'imei', label: 'IMEI / SN / ECID', placeholder: 'أدخل رقم IMEI أو الرقم التسلسلي (SN) أو ECID', type: 'text', required: true });
+          }
+        }
 
         let cat = await getQuery('SELECT id FROM categories WHERE name = ?', [cleanGroupName]);
         let categoryId;
