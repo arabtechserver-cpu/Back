@@ -846,12 +846,9 @@ router.post('/import-services', authMiddleware, async (req, res) => {
               });
             });
           } else {
-            // Inject IMEI or player_id fallback if no custom fields from API
-            const svcType = (s.serviceType || 'imei').toLowerCase();
-            if (svcType === 'imei') {
+            // Inject IMEI fallback if required by API and no custom fields exist
+            if (s.requires_imei !== false && (s.serviceType || 'imei').toLowerCase() === 'imei') {
               packageFields.push({ id: 'imei', name: 'imei', label: 'IMEI / SN / ECID', placeholder: 'أدخل رقم IMEI أو الرقم التسلسلي (SN) أو ECID', type: 'text', required: true });
-            } else {
-              packageFields.push({ id: 'player_id', name: 'player_id', label: 'معرّف الجهاز / ID', placeholder: 'أدخل معرّف الجهاز بدقة هنا', type: 'text', required: true });
             }
           }
 
@@ -932,13 +929,10 @@ router.post('/import-services', authMiddleware, async (req, res) => {
             });
           }
         }
-        // Inject IMEI or player_id fallback if no custom fields from API
+        // Inject IMEI fallback if required by API and no custom fields exist
         if (serviceFields.length === 0) {
-          const svcType = (s.serviceType || 'imei').toLowerCase();
-          if (svcType === 'imei') {
+          if (s.requires_imei !== false && (s.serviceType || 'imei').toLowerCase() === 'imei') {
             serviceFields.push({ id: 'imei', name: 'imei', label: 'IMEI / SN / ECID', placeholder: 'أدخل رقم IMEI أو الرقم التسلسلي (SN) أو ECID', type: 'text', required: true });
-          } else {
-            serviceFields.push({ id: 'player_id', name: 'player_id', label: 'معرّف الجهاز / ID', placeholder: 'أدخل معرّف الجهاز بدقة هنا', type: 'text', required: true });
           }
         }
         

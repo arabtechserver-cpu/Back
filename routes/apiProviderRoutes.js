@@ -220,20 +220,9 @@ async function performProviderSync(providerId, customRate, customMarkup, customS
       const hasMainIdReplacement = groupServices.some(s => s.customFields && s.customFields.some(cf => cf.fieldtype === 'serviceimei'));
 
       if (!hasMainIdReplacement) {
-        const dominantTypeEarly = Object.entries(
-          groupServices.reduce((acc, s) => { const t = s.serviceType || 'imei'; acc[t] = (acc[t] || 0) + 1; return acc; }, {})
-        ).sort((a, b) => b[1] - a[1])[0]?.[0] || 'imei';
-        if (dominantTypeEarly === 'imei') {
+        const needsImei = groupServices.some(s => s.requires_imei !== false && (s.serviceType || 'imei').toLowerCase() === 'imei');
+        if (needsImei) {
           combinedFields.unshift({ id: 'imei', name: 'imei', label: 'IMEI / SN / ECID', placeholder: 'أدخل رقم IMEI أو الرقم التسلسلي (SN) أو ECID', type: 'text', required: true });
-        } else {
-          combinedFields.unshift({ id: 'player_id', name: 'player_id', label: 'ملاحظات / ID (Notes)', placeholder: 'أدخل المعرّف أو الملاحظات المطلوبة بدقة', type: 'text', required: true });
-        }
-      } else {
-        const dominantTypeEarly = Object.entries(
-          groupServices.reduce((acc, s) => { const t = s.serviceType || 'imei'; acc[t] = (acc[t] || 0) + 1; return acc; }, {})
-        ).sort((a, b) => b[1] - a[1])[0]?.[0] || 'imei';
-        if (dominantTypeEarly !== 'imei') {
-          combinedFields.push({ id: 'player_id', name: 'player_id', label: 'ملاحظات إضافية (Notes)', placeholder: 'أدخل أي ملاحظات إن وجدت', type: 'textarea', required: false });
         }
       }
 
@@ -351,14 +340,8 @@ async function performProviderSync(providerId, customRate, customMarkup, customS
       }
       const hasMainIdReplacement = s.customFields && s.customFields.some(cf => cf.fieldtype === 'serviceimei');
       if (!hasMainIdReplacement) {
-        if ((s.serviceType || 'imei') === 'imei') {
+        if (s.requires_imei !== false && (s.serviceType || 'imei').toLowerCase() === 'imei') {
           serviceFields.unshift({ id: 'imei', name: 'imei', label: 'IMEI / SN / ECID', placeholder: 'أدخل رقم IMEI أو الرقم التسلسلي (SN) أو ECID', type: 'text', required: true });
-        } else {
-          serviceFields.unshift({ id: 'player_id', name: 'player_id', label: 'ملاحظات / ID (Notes)', placeholder: 'أدخل المعرّف أو الملاحظات المطلوبة بدقة', type: 'text', required: true });
-        }
-      } else {
-        if ((s.serviceType || 'imei') !== 'imei') {
-          serviceFields.push({ id: 'player_id', name: 'player_id', label: 'ملاحظات إضافية (Notes)', placeholder: 'أدخل أي ملاحظات إن وجدت', type: 'textarea', required: false });
         }
       }
 
@@ -539,13 +522,9 @@ router.post('/:id/import-services', authMiddleware, async (req, res) => {
         }
 
         if (combinedFields.length === 0) {
-          const dominantTypeEarly = Object.entries(
-            groupServices.reduce((acc, s) => { const t = s.serviceType || 'imei'; acc[t] = (acc[t] || 0) + 1; return acc; }, {})
-          ).sort((a, b) => b[1] - a[1])[0]?.[0] || 'imei';
-          if (dominantTypeEarly === 'imei') {
+          const needsImei = groupServices.some(s => s.requires_imei !== false && (s.serviceType || 'imei').toLowerCase() === 'imei');
+          if (needsImei) {
             combinedFields.push({ id: 'imei', name: 'imei', label: 'IMEI / SN / ECID', placeholder: 'أدخل رقم IMEI أو الرقم التسلسلي (SN) أو ECID', type: 'text', required: true });
-          } else {
-            combinedFields.push({ id: 'player_id', name: 'player_id', label: 'معرّف الجهاز / ID', placeholder: 'أدخل معرّف الجهاز بدقة هنا', type: 'text', required: true });
           }
         }
 
