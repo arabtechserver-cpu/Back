@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { allQuery, getQuery, runQuery } = require('../db');
 const authMiddleware = require('../middleware/auth');
+const customerAuth = require('../middleware/customerAuth');
 const paypal = require('../services/paypalService');
 
 router.get('/', authMiddleware, async (req, res) => {
@@ -109,7 +110,7 @@ router.put('/:id', authMiddleware, async (req, res) => {
  * POST /api/wallet/paypal/create-order
  * Creates a PayPal order and returns the approval URL
  */
-router.post('/paypal/create-order', authMiddleware, async (req, res) => {
+router.post('/paypal/create-order', customerAuth, async (req, res) => {
   try {
     const { amount } = req.body;
     const parsedAmount = parseFloat(amount);
@@ -141,7 +142,7 @@ router.post('/paypal/create-order', authMiddleware, async (req, res) => {
  * POST /api/wallet/paypal/capture-order
  * Captures an approved PayPal order and credits the customer's wallet
  */
-router.post('/paypal/capture-order', authMiddleware, async (req, res) => {
+router.post('/paypal/capture-order', customerAuth, async (req, res) => {
   try {
     const { orderId } = req.body;
     const customerId = req.user?.id || req.user?.customer_id;
