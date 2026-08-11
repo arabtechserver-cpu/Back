@@ -1,6 +1,7 @@
 const telegram = require('./telegramService');
 const emailService = require('./emailService');
 const { getQuery } = require('../db');
+const whatsapp = require('../whatsapp');
 
 /**
  * Unified notification helper to alert customers on Telegram and Gmail

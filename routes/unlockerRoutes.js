@@ -1162,7 +1162,21 @@ async function checkAndUpdateOrder(orderId) {
   }
 
   const statusVal = remoteOrder.STATUS || remoteOrder.status || remoteOrder.State || remoteOrder.state || '';
-  const unlockCode = remoteOrder.CODE || remoteOrder.code || remoteOrder.result || remoteOrder.RESULT || remoteOrder.UNLOCKCODE || remoteOrder.unlockcode || '';
+  let unlockCode = remoteOrder.CODE || remoteOrder.code || remoteOrder.result || remoteOrder.RESULT || remoteOrder.UNLOCKCODE || remoteOrder.unlockcode || '';
+  
+  if (!unlockCode) {
+    const materials = [];
+    const ignoreKeys = ['status', 'id', 'orderid', 'reference', 'action', 'message'];
+    for (const [k, v] of Object.entries(remoteOrder)) {
+      const key = k.toLowerCase();
+      if (!ignoreKeys.includes(key) && v && typeof v === 'string') {
+        if (key.includes('email') || key.includes('pass') || key.includes('user') || key.includes('pin') || key.includes('voucher') || key.includes('card') || key.includes('serial') || key.includes('data') || key.includes('key') || key.includes('token') || key.includes('license')) {
+           materials.push(`${k}: ${v}`);
+        }
+      }
+    }
+    if (materials.length > 0) unlockCode = materials.join('\n');
+  }
   const statusStr = String(statusVal).toLowerCase().trim();
 
   console.log(`[Check Order #${orderId}] Raw provider response:`, JSON.stringify(remoteOrder));
@@ -1184,11 +1198,9 @@ async function checkAndUpdateOrder(orderId) {
     || (unlockCode && unlockCode.trim() !== ''); // If we have a code, the order is done
   
   if (isCompleted) {
-    const updateFields = unlockCode
-      ? "UPDATE orders SET status = 'completed', api_status = 'Completed', code = ? WHERE id = ?"
-      : "UPDATE orders SET status = 'completed', api_status = 'Completed' WHERE id = ?";
-    const updateParams = unlockCode ? [unlockCode, orderId] : [orderId];
-    await runQuery(updateFields, updateParams);
+    const finalCode = unlockCode || 'تم التنفيذ (مباشر)';
+    const updateFields = "UPDATE orders SET status = 'completed', api_status = 'Completed', code = ? WHERE id = ?";
+    await runQuery(updateFields, [finalCode, orderId]);
 
     // Notify customer!
     try {
@@ -1282,12 +1294,15 @@ async function autoSubmitUnlockerOrder(orderId) {
     if (order.package_name) {
       try {
         const pkgs = typeof service.packages === 'string' ? JSON.parse(service.packages) : (service.packages || []);
-        const matchingPkg = pkgs.find(p => p.name === order.package_name);
+        const matchingPkg = pkgs.find(p => String(p.name).trim().toLowerCase() === String(order.package_name).trim().toLowerCase());
         if (matchingPkg && matchingPkg.api_service_id) {
           targetApiServiceId = matchingPkg.api_service_id;
-          // Use package-level service type if available
-          if (matchingPkg.api_service_type) {
-            targetServiceType = matchingPkg.api_service_type;
+          if (matchingPkg.api_service_type) targetServiceType = matchingPkg.api_service_type;
+        } else {
+          const partialPkg = pkgs.find(p => String(p.name).trim().toLowerCase().includes(String(order.package_name).trim().toLowerCase()) || String(order.package_name).trim().toLowerCase().includes(String(p.name).trim().toLowerCase()));
+          if (partialPkg && partialPkg.api_service_id) {
+            targetApiServiceId = partialPkg.api_service_id;
+            if (partialPkg.api_service_type) targetServiceType = partialPkg.api_service_type;
           }
         }
       } catch (e) {
@@ -1498,7 +1513,7 @@ setInterval(async () => {
   } catch (err) {
     console.error('[Auto Poll Global Error]:', err.message);
   }
-}, 120000); // every 2 minutes
+}, 30000); // every 30 seconds
 
 // ── Cancel Order from External Provider ─────────────────────────────────────
 router.post('/cancel-order/:id', authMiddleware, async (req, res) => {

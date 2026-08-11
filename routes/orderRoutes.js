@@ -192,13 +192,24 @@ router.post('/', async (req, res) => {
       // Decode and save the Base64 image
       const matches = receipt_image.match(/^data:image\/([A-Za-z+]+);base64,(.+)$/);
       if (matches && matches.length === 3) {
-        const ext = matches[1] === 'jpeg' ? 'jpg' : matches[1];
+        const imageType = matches[1];
         const dataBuffer = Buffer.from(matches[2], 'base64');
-        const filename = `receipt_${Date.now()}_${Math.floor(Math.random() * 10000)}.${ext}`;
+        const filename = `receipt_${Date.now()}_${Math.floor(Math.random() * 10000)}.webp`;
         const fullPath = path.join(receiptsDir, filename);
 
-        fs.writeFileSync(fullPath, dataBuffer);
-        savedReceiptPath = `/uploads/receipts/${filename}`;
+        try {
+          const sharp = require('sharp');
+          await sharp(dataBuffer).webp({ quality: 80 }).toFile(fullPath);
+          savedReceiptPath = `/uploads/receipts/${filename}`;
+        } catch (err) {
+          console.error('Failed to convert receipt to WebP:', err);
+          const ext = imageType === 'jpeg' ? 'jpg' : imageType;
+          const fallbackFilename = `receipt_${Date.now()}_${Math.floor(Math.random() * 10000)}.${ext}`;
+          const fallbackPath = path.join(receiptsDir, fallbackFilename);
+          const fs = require('fs');
+          fs.writeFileSync(fallbackPath, dataBuffer);
+          savedReceiptPath = `/uploads/receipts/${fallbackFilename}`;
+        }
       }
     }
 

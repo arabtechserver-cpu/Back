@@ -109,12 +109,12 @@ router.post('/', authMiddleware, async (req, res) => {
   const finalName = name.trim();
 
   try {
-    const savedImagePath = saveImage(image);
+    const savedImagePath = await saveImage(image);
     const finalImage = savedImagePath || 'default';
     
     let finalCoverImage = '';
     if (cover_image) {
-      finalCoverImage = saveImage(cover_image) || '';
+      finalCoverImage = await saveImage(cover_image) || '';
     }
     
     const parsedFields = safeParseJson(fields);
@@ -194,11 +194,11 @@ router.put('/:id', authMiddleware, async (req, res) => {
   const finalName = name.trim();
 
   try {
-    const finalImage = saveImage(image);
+    const finalImage = await saveImage(image);
     
     let finalCoverImage;
     if (cover_image !== undefined) {
-      finalCoverImage = saveImage(cover_image) || '';
+      finalCoverImage = await saveImage(cover_image) || '';
     }
     
     const parsedFields = safeParseJson(fields);

@@ -26,7 +26,7 @@ router.post('/', authMiddleware, async (req, res) => {
   }
 
   try {
-    const savedImagePath = saveImage(icon);
+    const savedImagePath = await saveImage(icon);
     const finalIcon = savedImagePath || '⚡';
     const result = await runQuery(
       'INSERT INTO banners (title, highlight, description, badge, color, icon, link) VALUES (?, ?, ?, ?, ?, ?, ?)',
@@ -59,7 +59,7 @@ router.put('/:id', authMiddleware, async (req, res) => {
   }
 
   try {
-    const finalIcon = saveImage(icon);
+    const finalIcon = await saveImage(icon);
     await runQuery(
       'UPDATE banners SET title = ?, highlight = ?, description = ?, badge = ?, color = ?, icon = ?, link = ? WHERE id = ?',
       [title, highlight, desc, badge, color, finalIcon, link || '', id]

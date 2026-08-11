@@ -490,7 +490,7 @@ router.post('/', authMiddleware, async (req, res) => {
   const finalName = name.trim();
 
   try {
-    const savedImagePath = saveImage(image);
+    const savedImagePath = await saveImage(image);
     const finalImage = savedImagePath || 'default';
     const packagesStr = typeof packages === 'string' ? packages : JSON.stringify(packages || []);
     const bundleServicesStr = typeof bundle_services === 'string' ? bundle_services : JSON.stringify(bundle_services || []);
@@ -617,7 +617,7 @@ router.put('/:id', authMiddleware, async (req, res) => {
   const finalName = name.trim();
 
   try {
-    const finalImage = saveImage(image);
+    const finalImage = await saveImage(image);
     const packagesStr = typeof packages === 'string' ? packages : JSON.stringify(packages || []);
     const bundleServicesStr = typeof bundle_services === 'string' ? bundle_services : JSON.stringify(bundle_services || []);
     
