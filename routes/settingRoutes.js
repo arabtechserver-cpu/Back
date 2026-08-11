@@ -157,6 +157,45 @@ router.get('/', async (req, res) => {
   } catch (error) {
     console.error('Fetch settings error:', error);
     res.status(500).json({ message: 'حدث خطأ أثناء جلب الإعدادات.' });
+  }
+});
+
+// ── Update settings (Admin) ──────────────────────────────────────────────────
+router.put('/update', adminMiddleware, upload.fields([
+  { name: 'site_logo', maxCount: 1 },
+  { name: 'site_favicon', maxCount: 1 }
+]), async (req, res) => {
+  try {
+    const { 
+      site_name, 
+      announcement_text, 
+      payment_methods, 
+      supported_currencies, 
+      exchange_rates,
+      base_currency,
+      hide_wallet_payment,
+      whatsapp_numbers,
+      whatsapp_portal_password,
+      email_user,
+      email_pass,
+      home_stats,
+      featured_sections,
+      global_markup_percent
+    } = req.body;
+
+    if (site_name) {
+      const existing = await allQuery('SELECT * FROM settings WHERE key = ?', ['site_name']);
+      if (existing.length === 0) {
+        await runQuery('INSERT INTO settings (key, value) VALUES (?, ?)', ['site_name', site_name]);
+      } else {
+        await runQuery('UPDATE settings SET value = ? WHERE key = ?', [site_name, 'site_name']);
+      }
+    }
+
+    if (base_currency) {
+      const existing = await allQuery('SELECT * FROM settings WHERE key = ?', ['base_currency']);
+      if (existing.length === 0) {
+        await runQuery('INSERT INTO settings (key, value) VALUES (?, ?)', ['base_currency', base_currency]);
       } else {
         await runQuery('UPDATE settings SET value = ? WHERE key = ?', [base_currency, 'base_currency']);
       }
