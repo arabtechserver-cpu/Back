@@ -98,7 +98,7 @@ async function runMigration() {
   }
 
   // 2. Update services
-  const services = await allQuery('SELECT id, image FROM services WHERE image IS NOT NULL AND image != "default"');
+  const services = await allQuery("SELECT id, image FROM services WHERE image IS NOT NULL AND image != 'default'");
   for (const s of services) {
     if (mappings[s.image]) {
       await runQuery('UPDATE services SET image = ? WHERE id = ?', [mappings[s.image], s.id]);
