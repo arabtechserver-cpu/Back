@@ -557,6 +557,7 @@ async function createTables() {
       fields_title VARCHAR(255) DEFAULT 'بيانات الخدمة',
       parent_id INT REFERENCES categories(id) ON DELETE SET NULL DEFAULT NULL,
       show_in_menu BOOLEAN DEFAULT false,
+      menu_service_type VARCHAR(20) DEFAULT '',
       linked_categories TEXT DEFAULT '[]',
       is_featured BOOLEAN DEFAULT false,
       cover_image TEXT DEFAULT ''
@@ -566,6 +567,7 @@ async function createTables() {
     ALTER TABLE categories ADD COLUMN IF NOT EXISTS is_featured BOOLEAN DEFAULT false;
     ALTER TABLE categories ADD COLUMN IF NOT EXISTS cover_image TEXT DEFAULT '';
     ALTER TABLE categories ADD COLUMN IF NOT EXISTS sort_order INT DEFAULT 0;
+    ALTER TABLE categories ADD COLUMN IF NOT EXISTS menu_service_type VARCHAR(20) DEFAULT '';
 
     CREATE TABLE IF NOT EXISTS services (
       id          SERIAL PRIMARY KEY,

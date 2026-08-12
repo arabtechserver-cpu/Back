@@ -291,6 +291,25 @@ router.put('/:id/menu-visibility', authMiddleware, async (req, res) => {
   }
 });
 
+// Assign a category to one of the fixed services menu groups (Admin Protected)
+router.put('/:id/service-menu-type', authMiddleware, async (req, res) => {
+  const { id } = req.params;
+  const serviceType = String(req.body?.service_type || '').trim().toLowerCase();
+  const allowedTypes = ['', 'imei', 'server', 'remote'];
+
+  if (!allowedTypes.includes(serviceType)) {
+    return res.status(400).json({ message: 'نوع قائمة الخدمات غير صحيح.' });
+  }
+
+  try {
+    await runQuery('UPDATE categories SET menu_service_type = ? WHERE id = ?', [serviceType, id]);
+    res.json({ message: 'تم ربط القسم بقائمة الخدمات بنجاح.', id, menu_service_type: serviceType });
+  } catch (error) {
+    console.error('Update category service menu type error:', error);
+    res.status(500).json({ message: 'حدث خطأ أثناء ربط القسم بقائمة الخدمات.' });
+  }
+});
+
 // Merge categories (Admin Protected)
 router.post('/merge', authMiddleware, deleteOtpAuth, async (req, res) => {
   const { sourceIds, targetId } = req.body;
