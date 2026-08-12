@@ -132,11 +132,40 @@ async function writeBackupSnapshot(reason = 'scheduled') {
     tables: {},
   };
 
+  let fileWritten = false;
+
   if (mode.fallbackMode) {
     const dbPath = path.join(__dirname, '..', 'database.json');
     if (fs.existsSync(dbPath)) {
-      snapshot.source = 'database.json';
-      snapshot.tables = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
+      // Stream the backup to avoid Out-Of-Memory (OOM) errors for large databases
+      await new Promise((resolve, reject) => {
+        const writeStream = fs.createWriteStream(backupPath);
+        writeStream.on('error', reject);
+        
+        const prefix = JSON.stringify({
+          created_at: snapshot.created_at,
+          reason: snapshot.reason,
+          fallbackMode: snapshot.fallbackMode,
+          source: 'database.json'
+        }, null, 2).slice(0, -2); // Remove the closing `\n}`
+        
+        writeStream.write(prefix + ',\n  "tables": ');
+        
+        const readStream = fs.createReadStream(dbPath, { encoding: 'utf8' });
+        readStream.on('error', reject);
+        
+        readStream.pipe(writeStream, { end: false });
+        
+        readStream.on('end', () => {
+          writeStream.write('\n}\n');
+          writeStream.end();
+        });
+        
+        writeStream.on('finish', () => {
+          fileWritten = true;
+          resolve();
+        });
+      });
     } else {
       snapshot.source = 'database.json';
       snapshot.tables = {};
@@ -154,7 +183,9 @@ async function writeBackupSnapshot(reason = 'scheduled') {
     }
   }
 
-  fs.writeFileSync(backupPath, JSON.stringify(snapshot, null, 2));
+  if (!fileWritten) {
+    fs.writeFileSync(backupPath, JSON.stringify(snapshot, null, 2));
+  }
 
   // Prune old backups (keep only latest 5)
   try {

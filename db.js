@@ -1595,6 +1595,8 @@ module.exports = {
   allQuery,
   getQuery,
   seedData,
+  readDb,
+  writeDb,
   getDatabaseMode: () => ({ fallbackMode }),
   onDatabaseAlert: (handler) => dbEvents.on('database-alert', handler),
   onDatabaseModeChange: (handler) => dbEvents.on('database-mode-change', handler),

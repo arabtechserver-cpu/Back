@@ -516,14 +516,15 @@ router.post('/:id/import-services', authMiddleware, async (req, res) => {
               if (!addedFieldNames.has(fieldId) && !addedFieldNames.has(fieldLabel)) {
                 addedFieldNames.add(fieldId);
                 addedFieldNames.add(fieldLabel);
+                const isDropdown = cf.fieldtype === 'select' || cf.fieldtype === 'dropdown';
                 combinedFields.push({
                   id: fieldId,
                   name: fieldId,
                   label: cf.fieldname,
                   placeholder: cf.description || `أدخل ${cf.fieldname}`,
-                  type: cf.fieldtype === 'select' ? 'select' : (cf.fieldtype === 'textarea' ? 'textarea' : 'text'),
+                  type: isDropdown ? 'select' : (cf.fieldtype === 'textarea' ? 'textarea' : 'text'),
                   options: cf.fieldoptions ? cf.fieldoptions.split(',').map(o => o.trim()) : [],
-                  required: cf.required === 'on'
+                  required: cf.required === 'on' || cf.required === '1' || cf.required === true
                 });
               }
             }
@@ -533,15 +534,16 @@ router.post('/:id/import-services', authMiddleware, async (req, res) => {
 
 
 
-        if (combinedFields.length === 0) {
-          const needsImei = groupServices.some(s => {
-            const nameLower = (s.name || '').toLowerCase();
-            const imeiKeywords = ['frp', 'icloud', 'bypass', 'remove', 'unlock', 'passcode', 'ramdisk', 'clean', 'lost', 'check', 'mac', 'network', 'imei', 'sn', 'ecid', 'serial'];
-            const likelyNeedsImei = imeiKeywords.some(kw => nameLower.includes(kw));
-            return likelyNeedsImei && s.requires_imei !== false && (s.serviceType || 'imei').toLowerCase() === 'imei';
-          });
-          if (needsImei) {
-            combinedFields.push({ id: 'imei', name: 'imei', label: 'IMEI / SN / ECID', placeholder: 'أدخل رقم IMEI أو الرقم التسلسلي (SN) أو ECID', type: 'text', required: true });
+        const needsImei = groupServices.some(s => {
+          const nameLower = (s.name || '').toLowerCase();
+          const imeiKeywords = ['frp', 'icloud', 'bypass', 'remove', 'unlock', 'passcode', 'ramdisk', 'clean', 'lost', 'check', 'mac', 'network', 'imei', 'sn', 'ecid', 'serial'];
+          const likelyNeedsImei = imeiKeywords.some(kw => nameLower.includes(kw));
+          return likelyNeedsImei && s.requires_imei !== false && (s.serviceType || 'imei').toLowerCase() === 'imei';
+        });
+        if (needsImei) {
+          const hasImei = combinedFields.some(f => f.id === 'imei' || (f.label && f.label.toLowerCase().includes('imei')) || (f.name && f.name.toLowerCase().includes('imei')));
+          if (!hasImei) {
+            combinedFields.unshift({ id: 'imei', name: 'imei', label: 'IMEI', placeholder: 'أدخل رقم IMEI', type: 'text', required: true });
           }
         }
 
@@ -578,17 +580,26 @@ router.post('/:id/import-services', authMiddleware, async (req, res) => {
           const isDynamicPkg = (s.max_quantity > 1 && s.max_quantity !== s.min_quantity) || (s.min_quantity > 1 && s.max_quantity === 0) || s.requires_quantity;
 
           const packageFields = [];
+          if (s.requires_imei !== false && (s.serviceType || 'imei').toLowerCase() === 'imei') {
+            const hasCustomImei = s.customFields && s.customFields.some(cf => (cf.fieldname || '').toLowerCase().includes('imei'));
+            if (!hasCustomImei) {
+              packageFields.push({ id: 'imei', name: 'imei', label: 'IMEI', placeholder: 'أدخل رقم IMEI', type: 'text', required: true });
+            }
+          } else if (s.serviceType === 'server') {
+             // For server services, maybe player_id or username is needed, but we rely on custom fields if any.
+          }
           if (s.customFields && s.customFields.length > 0) {
             s.customFields.forEach(cf => {
               const fieldId = `custom_${cf.field_id || cf.fieldname}`;
+              const isDropdown = cf.fieldtype === 'select' || cf.fieldtype === 'dropdown';
               packageFields.push({
                 id: fieldId,
                 name: fieldId,
                 label: cf.fieldname,
                 placeholder: cf.description || `أدخل ${cf.fieldname}`,
-                type: cf.fieldtype === 'select' ? 'select' : (cf.fieldtype === 'textarea' ? 'textarea' : 'text'),
+                type: isDropdown ? 'select' : (cf.fieldtype === 'textarea' ? 'textarea' : 'text'),
                 options: cf.fieldoptions ? cf.fieldoptions.split(',').map(o => o.trim()) : [],
-                required: cf.required === 'on'
+                required: cf.required === 'on' || cf.required === '1' || cf.required === true
               });
             });
           }
@@ -605,6 +616,7 @@ router.post('/:id/import-services', authMiddleware, async (req, res) => {
             min_quantity: s.min_quantity || 1,
             max_quantity: s.max_quantity || 0,
             requires_quantity: isDynamicPkg,
+            api_delivery_time: s.time || '',
             fields: packageFields
           });
         });
@@ -670,23 +682,21 @@ router.post('/:id/import-services', authMiddleware, async (req, res) => {
         if (s.customFields && Array.isArray(s.customFields)) {
           s.customFields.forEach(cf => {
             const fieldId = `custom_${cf.field_id || cf.fieldname}`;
+            const isDropdown = cf.fieldtype === 'select' || cf.fieldtype === 'dropdown';
             serviceFields.push({
               id: fieldId,
               name: fieldId,
               label: cf.fieldname,
               placeholder: cf.description || `أدخل ${cf.fieldname}`,
-              type: cf.fieldtype === 'select' ? 'select' : (cf.fieldtype === 'textarea' ? 'textarea' : 'text'),
+              type: isDropdown ? 'select' : (cf.fieldtype === 'textarea' ? 'textarea' : 'text'),
               options: cf.fieldoptions ? cf.fieldoptions.split(',').map(o => o.trim()) : [],
-              required: cf.required === 'on'
+              required: cf.required === 'on' || cf.required === '1' || cf.required === true
             });
           });
         }
-        if (serviceFields.length === 0) {
-          if ((s.serviceType || 'imei') === 'imei') {
-            serviceFields.push({ id: 'imei', name: 'imei', label: 'IMEI / SN / ECID', placeholder: 'أدخل رقم IMEI أو الرقم التسلسلي (SN) أو ECID', type: 'text', required: true });
-          } else {
-            serviceFields.push({ id: 'player_id', name: 'player_id', label: 'معرّف الجهاز / ID', placeholder: 'أدخل معرّف الجهاز بدقة هنا', type: 'text', required: true });
-          }
+        if ((s.serviceType || 'imei') === 'imei' && s.requires_imei !== false) {
+           const hasImei = serviceFields.some(f => f.id === 'imei' || (f.label && f.label.toLowerCase().includes('imei')) || (f.name && f.name.toLowerCase().includes('imei')));
+           if (!hasImei) serviceFields.unshift({ id: 'imei', name: 'imei', label: 'IMEI', placeholder: 'أدخل رقم IMEI', type: 'text', required: true });
         }
 
         let multiplier = 1;

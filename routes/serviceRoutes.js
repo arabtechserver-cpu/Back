@@ -581,7 +581,8 @@ router.patch('/bulk/fields-by-category', authMiddleware, async (req, res) => {
       const path = require('path');
       const dbPath = path.join(__dirname, '../database.json');
       if (fs.existsSync(dbPath)) {
-        const db = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
+        const { readDb, writeDb } = require('../db');
+            const db = readDb();
         let count = 0;
         db.services = (db.services || []).map(s => {
           if (Number(s.category_id) === Number(category_id)) {
@@ -590,7 +591,7 @@ router.patch('/bulk/fields-by-category', authMiddleware, async (req, res) => {
           }
           return s;
         });
-        fs.writeFileSync(dbPath, JSON.stringify(db, null, 2), 'utf8');
+        writeDb(db);
         return res.json({ message: `تم تحديث ${count} خدمة بنجاح.`, count, fields: cleanedFields });
       }
     } else {
@@ -672,9 +673,10 @@ router.delete('/all/clear', authMiddleware, deleteOtpAuth, async (req, res) => {
       const dbPath = path.join(__dirname, '../database.json');
       if (fs.existsSync(dbPath)) {
         try {
-          const db = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
+          const { readDb, writeDb } = require('../db');
+            const db = readDb();
           db.services = [];
-          fs.writeFileSync(dbPath, JSON.stringify(db, null, 2), 'utf8');
+          writeDb(db);
         } catch (err) {
           console.error('JSON bulk delete services error:', err);
         }
@@ -714,14 +716,15 @@ router.patch('/:id/popular', authMiddleware, async (req, res) => {
       const path = require('path');
       const dbPath = path.join(__dirname, '../database.json');
       if (fs.existsSync(dbPath)) {
-        const db = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
+        const { readDb, writeDb } = require('../db');
+            const db = readDb();
         db.services = (db.services || []).map(s => {
           if (Number(s.id) === Number(id)) {
             return { ...s, is_popular: popularFlag };
           }
           return s;
         });
-        fs.writeFileSync(dbPath, JSON.stringify(db, null, 2), 'utf8');
+        writeDb(db);
       }
     } else {
       await runQuery('UPDATE services SET is_popular = ? WHERE id = ?', [popularFlag, id]);

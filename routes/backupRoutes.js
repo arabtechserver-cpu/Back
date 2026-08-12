@@ -78,7 +78,8 @@ router.post('/create', authMiddleware, async (req, res) => {
     if (mode.fallbackMode) {
       const dbPath = path.join(__dirname, '..', 'database.json');
       if (fs.existsSync(dbPath)) {
-        const dbData = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
+        const { readDb } = require('../db');
+        const dbData = readDb();
         tableNames.forEach(table => {
           tables[table] = dbData[table] || [];
         });

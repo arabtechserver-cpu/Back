@@ -7,7 +7,14 @@ const paypal = require('../services/paypalService');
 
 router.get('/', authMiddleware, async (req, res) => {
   try {
-    const requests = await allQuery('SELECT * FROM wallet_requests ORDER BY id DESC');
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
+    const requests = await allQuery(`
+      SELECT id, customer_id, customer_username, amount, currency, sender_phone,
+             notes, status, admin_note, created_at, processed_at
+      FROM wallet_requests
+      ORDER BY id DESC
+      LIMIT ?
+    `, [limit]);
     res.json(requests);
   } catch (error) {
     console.error('Fetch wallet requests error:', error);
@@ -17,7 +24,14 @@ router.get('/', authMiddleware, async (req, res) => {
 
 router.get('/transactions', authMiddleware, async (req, res) => {
   try {
-    const transactions = await allQuery('SELECT * FROM wallet_transactions ORDER BY id DESC');
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
+    const transactions = await allQuery(`
+      SELECT id, customer_id, customer_username, type, amount, balance_before,
+             balance_after, reference_type, reference_id, description, created_at
+      FROM wallet_transactions
+      ORDER BY id DESC
+      LIMIT ?
+    `, [limit]);
     res.json(transactions);
   } catch (error) {
     console.error('Fetch wallet transactions error:', error);

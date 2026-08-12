@@ -231,7 +231,8 @@ router.put('/:id', authMiddleware, async (req, res) => {
         const dbPath = path.join(__dirname, '../database.json');
         if (fs.existsSync(dbPath)) {
           try {
-            const db = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
+            const { readDb, writeDb } = require('../db');
+            const db = readDb();
             if (db.services) {
               db.services = db.services.map(s => {
                 if (Number(s.category_id) === Number(id)) {
@@ -243,7 +244,7 @@ router.put('/:id', authMiddleware, async (req, res) => {
                 }
                 return s;
               });
-              fs.writeFileSync(dbPath, JSON.stringify(db, null, 2), 'utf8');
+              writeDb(db);
             }
           } catch (err) {
             console.error('JSON bulk update services error:', err);
@@ -310,7 +311,8 @@ router.post('/merge', authMiddleware, deleteOtpAuth, async (req, res) => {
       const dbPath = path.join(__dirname, '../database.json');
       if (fs.existsSync(dbPath)) {
         try {
-          const db = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
+          const { readDb, writeDb } = require('../db');
+            const db = readDb();
           if (db.categories) {
             const targetCat = db.categories.find(c => Number(c.id) === Number(targetId));
             if (targetCat) {
@@ -319,7 +321,7 @@ router.post('/merge', authMiddleware, deleteOtpAuth, async (req, res) => {
               targetCat.linked_categories = JSON.stringify(newLinked);
             }
           }
-          fs.writeFileSync(dbPath, JSON.stringify(db, null, 2), 'utf8');
+          writeDb(db);
         } catch (err) {
           console.error('JSON bulk merge categories error:', err);
         }
@@ -352,9 +354,10 @@ router.delete('/all/clear', authMiddleware, deleteOtpAuth, async (req, res) => {
       const dbPath = path.join(__dirname, '../database.json');
       if (fs.existsSync(dbPath)) {
         try {
-          const db = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
+          const { readDb, writeDb } = require('../db');
+            const db = readDb();
           db.categories = [];
-          fs.writeFileSync(dbPath, JSON.stringify(db, null, 2), 'utf8');
+          writeDb(db);
         } catch (err) {
           console.error('JSON bulk delete categories error:', err);
         }
@@ -380,7 +383,8 @@ router.delete('/:id', authMiddleware, deleteOtpAuth, async (req, res) => {
       const dbPath = path.join(__dirname, '../database.json');
       if (fs.existsSync(dbPath)) {
         try {
-          const db = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
+          const { readDb, writeDb } = require('../db');
+            const db = readDb();
           if (db.categories) {
             db.categories = db.categories.map(c => {
               if (Number(c.parent_id) === Number(id)) {
@@ -388,7 +392,7 @@ router.delete('/:id', authMiddleware, deleteOtpAuth, async (req, res) => {
               }
               return c;
             });
-            fs.writeFileSync(dbPath, JSON.stringify(db, null, 2), 'utf8');
+            writeDb(db);
           }
         } catch (err) {
           console.error('JSON update child categories error:', err);

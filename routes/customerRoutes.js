@@ -571,7 +571,14 @@ router.get('/me', customerAuth, async (req, res) => {
 // Customer wallet requests
 router.get('/wallet-requests', customerAuth, async (req, res) => {
   try {
-    const requests = await allQuery('SELECT * FROM wallet_requests WHERE customer_id = ? ORDER BY id DESC', [req.customer.id]);
+    const requests = await allQuery(
+      `SELECT id, amount, currency, sender_phone, notes, status, admin_note, created_at, processed_at
+       FROM wallet_requests
+       WHERE customer_id = ?
+       ORDER BY id DESC
+       LIMIT 50`,
+      [req.customer.id]
+    );
     return res.json(requests);
   } catch (error) {
     console.error('Fetch customer wallet requests error:', error);
@@ -659,9 +666,29 @@ router.post('/wallet-requests', customerAuth, async (req, res) => {
 // Admin: list all customers with safe fields only
 router.get('/admin/customers', authMiddleware, async (req, res) => {
   try {
-    const customers = (await allQuery('SELECT * FROM customers ORDER BY id DESC')) || [];
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 200, 1), 1000);
+    const customers = (await allQuery(`
+      SELECT id, username, email, phone, balance, balances,
+             CASE WHEN password IS NULL OR password = '' THEN 0 ELSE 1 END as has_password,
+             is_vip,
+             last_order_at, api_key, api_enabled, api_markup,
+             api_blocked_services, api_allowed_ips
+      FROM customers
+      ORDER BY id DESC
+      LIMIT ?
+    `, [limit])) || [];
     // Get order counts per customer for level computation
-    const orders = (await allQuery('SELECT customer_id, COUNT(*) as order_count, MAX(created_at) as last_order FROM orders WHERE customer_id IS NOT NULL GROUP BY customer_id')) || [];
+    const customerIds = customers.map((customer) => customer.id).filter(Boolean);
+    const placeholders = customerIds.map(() => '?').join(',');
+    const orders = customerIds.length
+      ? (await allQuery(
+        `SELECT customer_id, COUNT(*) as order_count, MAX(created_at) as last_order
+         FROM orders
+         WHERE customer_id IN (${placeholders})
+         GROUP BY customer_id`,
+        customerIds
+      )) || []
+      : [];
     const orderMap = {};
     if (Array.isArray(orders)) {
       for (const o of orders) {
@@ -686,7 +713,7 @@ router.get('/admin/customers', authMiddleware, async (req, res) => {
         phone: customer.phone || '',
         balance: Number(customer.balance || 0),
         balances: customer.balances ? (typeof customer.balances === 'string' ? JSON.parse(customer.balances) : customer.balances) : {},
-        has_password: Boolean(customer.password),
+        has_password: Boolean(customer.has_password),
         password_masked: '********',
         customer_level: computedLevel,
         is_vip: customer.is_vip === true || customer.is_vip === 'true' || customer.is_vip === 1,
@@ -848,7 +875,8 @@ router.delete('/admin/:id', authMiddleware, deleteOtpAuth, async (req, res) => {
       const dbPath = path.join(__dirname, '../database.json');
       if (fs.existsSync(dbPath)) {
         try {
-          const db = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
+          const { readDb, writeDb } = require('../db');
+            const db = readDb();
           
           // Delete customer from customers array
           if (db.customers) {
@@ -875,7 +903,7 @@ router.delete('/admin/:id', authMiddleware, deleteOtpAuth, async (req, res) => {
             db.wallet_requests = db.wallet_requests.filter(r => Number(r.customer_id) !== Number(id));
           }
           
-          fs.writeFileSync(dbPath, JSON.stringify(db, null, 2), 'utf8');
+          writeDb(db);
         } catch (err) {
           console.error('JSON customer delete error:', err);
         }

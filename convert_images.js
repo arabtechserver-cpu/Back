@@ -81,6 +81,10 @@ async function runMigration() {
         const pms = JSON.parse(row.value);
         if (Array.isArray(pms)) {
           pms.forEach(pm => {
+            if (pm.logo && mappings[pm.logo]) {
+              pm.logo = mappings[pm.logo];
+              changed = true;
+            }
             if (pm.image && mappings[pm.image]) {
               pm.image = mappings[pm.image];
               changed = true;

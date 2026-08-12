@@ -14,6 +14,40 @@ function parseSetting(value, fallback) {
   }
 }
 
+function stripInlinePaymentLogos(paymentMethods) {
+  if (!Array.isArray(paymentMethods)) return [];
+
+  return paymentMethods.map((method) => {
+    if (!method || typeof method !== 'object') return method;
+
+    const logo = typeof method.logo === 'string' ? method.logo : '';
+    if (!logo.startsWith('data:image')) return method;
+
+    return {
+      ...method,
+      logo: ''
+    };
+  });
+}
+
+async function normalizePaymentMethodImages(paymentMethods) {
+  if (!Array.isArray(paymentMethods)) return paymentMethods;
+
+  return Promise.all(paymentMethods.map(async (method) => {
+    if (!method || typeof method !== 'object') return method;
+
+    const nextMethod = { ...method };
+    if (typeof nextMethod.logo === 'string' && nextMethod.logo.startsWith('data:image')) {
+      nextMethod.logo = await saveImage(nextMethod.logo);
+    }
+    if (typeof nextMethod.image === 'string' && nextMethod.image.startsWith('data:image')) {
+      nextMethod.image = await saveImage(nextMethod.image);
+    }
+
+    return nextMethod;
+  }));
+}
+
 // ── Auto-convert existing images to WebP ─────────────────────────────────────
 router.post('/auto-convert-images', authMiddleware, async (req, res) => {
   try {
@@ -152,7 +186,7 @@ router.get('/', async (req, res) => {
       site_name: settings.site_name || 'عرب تك سيرفر',
       site_logo: settings.site_logo || '/logo.jpg',
       site_favicon: settings.site_favicon || '/favicon.png',
-      payment_methods: paymentMethods,
+      payment_methods: stripInlinePaymentLogos(paymentMethods),
       supported_currencies: supportedCurrencies,
       exchange_rates: exchangeRates,
       base_currency: settings.base_currency || 'USD',
@@ -177,6 +211,8 @@ router.put('/', authMiddleware, async (req, res) => {
   try {
     const { 
       site_name, 
+      site_logo,
+      site_favicon,
       announcement_text, 
       payment_methods, 
       supported_currencies, 
@@ -198,6 +234,26 @@ router.put('/', authMiddleware, async (req, res) => {
         await runQuery('INSERT INTO settings (key, value) VALUES (?, ?)', ['site_name', site_name]);
       } else {
         await runQuery('UPDATE settings SET value = ? WHERE key = ?', [site_name, 'site_name']);
+      }
+    }
+
+    if (site_logo !== undefined) {
+      const logoValue = await saveImage(site_logo);
+      const existing = await allQuery('SELECT * FROM settings WHERE key = ?', ['site_logo']);
+      if (existing.length === 0) {
+        await runQuery('INSERT INTO settings (key, value) VALUES (?, ?)', ['site_logo', logoValue || '/logo.jpg']);
+      } else {
+        await runQuery('UPDATE settings SET value = ? WHERE key = ?', [logoValue || '/logo.jpg', 'site_logo']);
+      }
+    }
+
+    if (site_favicon !== undefined) {
+      const faviconValue = await saveImage(site_favicon);
+      const existing = await allQuery('SELECT * FROM settings WHERE key = ?', ['site_favicon']);
+      if (existing.length === 0) {
+        await runQuery('INSERT INTO settings (key, value) VALUES (?, ?)', ['site_favicon', faviconValue || '/favicon.png']);
+      } else {
+        await runQuery('UPDATE settings SET value = ? WHERE key = ?', [faviconValue || '/favicon.png', 'site_favicon']);
       }
     }
 
@@ -307,6 +363,20 @@ router.put('/', authMiddleware, async (req, res) => {
     }
 
     res.json({ message: 'تم تحديث الإعدادات بنجاح.' });
+    if (payment_methods !== undefined) {
+      const normalizedPaymentMethods = typeof payment_methods === 'string'
+        ? payment_methods
+        : await normalizePaymentMethodImages(payment_methods);
+      const methodsStr = typeof normalizedPaymentMethods === 'string'
+        ? normalizedPaymentMethods
+        : JSON.stringify(normalizedPaymentMethods);
+      const existing = await allQuery('SELECT * FROM settings WHERE key = ?', ['payment_methods']);
+      if (existing.length === 0) {
+        await runQuery('INSERT INTO settings (key, value) VALUES (?, ?)', ['payment_methods', methodsStr]);
+      } else {
+        await runQuery('UPDATE settings SET value = ? WHERE key = ?', [methodsStr, 'payment_methods']);
+      }
+    }
   } catch (error) {
     console.error('Update settings error:', error);
     res.status(500).json({ message: 'حدث خطأ أثناء تحديث الإعدادات.' });
