@@ -437,7 +437,7 @@ router.get('/', authMiddleware, async (req, res) => {
         o.id, o.service_id, o.service_name, o.category_name, o.player_id, o.phone,
         o.package_name, o.package_price, o.customer_id, o.payment_method, o.sender_phone,
         o.transfer_to, o.quantity, o.receipt_image, o.transfer_amount, o.download_link,
-        o.download_link_title, o.status, o.code, o.created_at, o.processed_at,
+        o.download_link_title, o.status, o.code, o.created_at, NULL AS processed_at,
         o.api_source, o.api_order_id, o.api_status, o.custom_fields,
         o.is_api_order, o.api_reseller_id, s.api_provider_id
       FROM orders o
