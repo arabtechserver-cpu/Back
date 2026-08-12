@@ -155,28 +155,49 @@ function isRequiredField(value) {
   return ['1', 'true', 'yes', 'on', 'required'].includes(String(value ?? '').trim().toLowerCase());
 }
 
+function inferCustomFieldsFromName(service) {
+  const name = String(service?.SERVICENAME || service?.name || '').toLowerCase();
+  if (name.includes('username') && name.includes('password')) {
+    return [
+      { fieldname: 'Username', fieldtype: 'text', required: 'on', description: '' },
+      { fieldname: 'Password', fieldtype: 'password', required: 'on', description: '' }
+    ];
+  }
+  if (name.includes('email') && name.includes('password')) {
+    return [
+      { fieldname: 'Email', fieldtype: 'email', required: 'on', description: '' },
+      { fieldname: 'Password', fieldtype: 'password', required: 'on', description: '' }
+    ];
+  }
+  if (name.includes('username')) {
+    return [{ fieldname: 'Username', fieldtype: 'text', required: 'on', description: '' }];
+  }
+  return [];
+}
+
 // Helper: extract customFields from all possible Dhru Fusion / Omar-server field formats
 function extractCustomFields(service) {
   const s = service || {};
   const nestedRequires = s.Requires || s.REQUIRES || {};
-  let raw =
-    s['Requires.Custom'] ??
-    s['REQUIRES.CUSTOM'] ??
-    nestedRequires.Custom ??
-    nestedRequires.CUSTOM ??
-    nestedRequires.custom ??
-    s.CUSTOM ??
-    s.Custom ??
-    s.custom ??
-    s.RequiresCustom ??
-    s.CUSTOMFIELD ??
-    s.CUSTOMFIELDS ??
-    s.customfields ??
-    s.CustomFields ??
-    s.FIELDS ??
-    s.Fields ??
-    s.FIELD ??
-    null;
+  const candidates = [
+    s['Requires.Custom'],
+    s['REQUIRES.CUSTOM'],
+    nestedRequires.Custom,
+    nestedRequires.CUSTOM,
+    nestedRequires.custom,
+    s.CUSTOM,
+    s.Custom,
+    s.custom,
+    s.RequiresCustom,
+    s.CUSTOMFIELD,
+    s.CUSTOMFIELDS,
+    s.customfields,
+    s.CustomFields,
+    s.FIELDS,
+    s.Fields,
+    s.FIELD
+  ];
+  let raw = candidates.find(value => value !== null && value !== undefined && !(typeof value === 'string' && !value.trim())) ?? null;
 
   if (raw === null || raw === undefined || raw === '') {
     const fieldKey = Object.keys(s).find(key => {
@@ -299,7 +320,11 @@ function parseDhruServices(data, serviceType = 'imei') {
       category: category,
       price: getServicePrice(s),
       time: s.TIME || '',
-      customFields: extractCustomFields(s).map(normalizeCustomField).filter(Boolean),
+      customFields: (() => {
+        const extractedFields = extractCustomFields(s).map(normalizeCustomField).filter(Boolean);
+        const sourceFields = extractedFields.length > 0 ? extractedFields : inferCustomFieldsFromName(s);
+        return sourceFields.map(normalizeCustomField).filter(Boolean);
+      })(),
       min_quantity: parseInt(s.MIN || s.min || s.Min || s.QNT_MIN || s.qnt_min || s.Qnt_Min || s.MIN_QNT || s.min_qnt || s.Min_Qnt || s.QNT || s.qnt || s.Qnt || 1) || 1,
       max_quantity: parseInt(s.MAX || s.max || s.Max || s.QNT_MAX || s.qnt_max || s.Qnt_Max || s.MAX_QNT || s.max_qnt || s.Max_Qnt || 0) || 0,
       requires_quantity: s.QNT === "1" || s.QNT === "Y" || s.QNT === 1 || s.qnt === "1" || s.qnt === "Y" || s.qnt === 1,
@@ -355,6 +380,7 @@ module.exports = {
   normalizeFieldType,
   normalizeFieldOptions,
   isRequiredField,
+  inferCustomFieldsFromName,
   buildStoredCustomField,
   parseDhruServices
 };
