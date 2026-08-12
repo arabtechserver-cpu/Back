@@ -277,12 +277,39 @@ router.get('/menu', async (req, res) => {
       SELECT s.id, s.name, s.category_id, s.image, s.price, s.is_popular, c.name as category_name
       FROM services s 
       LEFT JOIN categories c ON s.category_id = c.id 
+      WHERE s.show_in_menu = true
       ORDER BY s.id ASC
     `) || [];
     res.json(services);
   } catch (error) {
     console.error('Fetch menu services error:', error);
     res.status(500).json({ message: 'حدث خطأ أثناء جلب خدمات القائمة.' });
+  }
+});
+
+// Update service visibility in the public menu without changing the service itself.
+router.put('/:id/menu-visibility', authMiddleware, async (req, res) => {
+  const { id } = req.params;
+  const { show_in_menu } = req.body;
+
+  if (typeof show_in_menu !== 'boolean') {
+    return res.status(400).json({ message: 'show_in_menu must be a boolean.' });
+  }
+
+  try {
+    const result = await runQuery(
+      'UPDATE services SET show_in_menu = ? WHERE id = ?',
+      [show_in_menu, id]
+    );
+
+    if (!result || result.changes === 0) {
+      return res.status(404).json({ message: 'Service not found.' });
+    }
+
+    res.json({ message: 'Service menu visibility updated.', id, show_in_menu });
+  } catch (error) {
+    console.error('Update service menu visibility error:', error);
+    res.status(500).json({ message: 'Failed to update service menu visibility.' });
   }
 });
 

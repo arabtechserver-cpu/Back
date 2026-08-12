@@ -38,6 +38,7 @@ const backupRoutes = require('./routes/backupRoutes');
 const membershipRoutes = require('./routes/membershipRoutes');
 const telegramRoutes = require('./routes/telegramRoutes');
 const reviewRoutes = require('./routes/reviewRoutes');
+const exchangeRateRoutes = require('./routes/exchangeRateRoutes');
 const telegram = require('./utils/telegramService');
 const { startDatabaseBackupScheduler } = require('./utils/databaseBackup');
 const { startAutoSyncScheduler } = require('./utils/autoSync');
@@ -182,6 +183,7 @@ app.use('/api/api-providers', apiProviderRoutes);
 app.use('/api/backups', backupRoutes);
 app.use('/api/memberships', membershipRoutes);
 app.use('/api/reviews', reviewRoutes);
+app.use('/api/exchange-rates', exchangeRateRoutes);
 
 // Health check endpoint
 app.get('/', (req, res) => {

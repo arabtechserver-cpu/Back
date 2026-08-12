@@ -14,6 +14,15 @@ function parseSetting(value, fallback) {
   }
 }
 
+async function upsertSetting(key, value) {
+  const existing = await allQuery('SELECT * FROM settings WHERE key = ?', [key]);
+  if (existing.length === 0) {
+    await runQuery('INSERT INTO settings (key, value) VALUES (?, ?)', [key, value]);
+  } else {
+    await runQuery('UPDATE settings SET value = ? WHERE key = ?', [value, key]);
+  }
+}
+
 function stripInlinePaymentLogos(paymentMethods) {
   if (!Array.isArray(paymentMethods)) return [];
 
@@ -84,7 +93,8 @@ router.get('/admin', authMiddleware, async (req, res) => {
       api_auto_submit: settings.api_auto_submit === undefined ? true : settings.api_auto_submit === 'true',
       announcement_text: settings.announcement_text || '',
       home_stats: settings.home_stats || '[]',
-      featured_sections: parseSetting(settings.featured_sections, [])
+      featured_sections: parseSetting(settings.featured_sections, []),
+      services_menu_placements: parseSetting(settings.services_menu_placements, { desktop: true, mobile: true, footer: true })
     });
   } catch (error) {
     console.error('Fetch private settings error:', error);
@@ -198,7 +208,8 @@ router.get('/', async (req, res) => {
         { id: 3, label: 'خدمة متوفرة', value: '100+', icon: '⚡' },
         { id: 4, label: 'دعم فني', value: '24/7', icon: '🎧' }
       ]),
-      featured_sections: featuredSections
+      featured_sections: featuredSections,
+      services_menu_placements: parseSetting(settings.services_menu_placements, { desktop: true, mobile: true, footer: true })
     });
   } catch (error) {
     console.error('Fetch settings error:', error);
@@ -219,13 +230,15 @@ router.put('/', authMiddleware, async (req, res) => {
       exchange_rates,
       base_currency,
       hide_wallet_payment,
+      api_auto_submit,
       whatsapp_numbers,
       whatsapp_portal_password,
       email_user,
       email_pass,
       home_stats,
       featured_sections,
-      global_markup_percent
+      global_markup_percent,
+      services_menu_placements
     } = req.body;
 
     if (site_name) {
@@ -258,12 +271,21 @@ router.put('/', authMiddleware, async (req, res) => {
     }
 
     if (base_currency) {
-      const existing = await allQuery('SELECT * FROM settings WHERE key = ?', ['base_currency']);
-      if (existing.length === 0) {
-        await runQuery('INSERT INTO settings (key, value) VALUES (?, ?)', ['base_currency', base_currency]);
-      } else {
-        await runQuery('UPDATE settings SET value = ? WHERE key = ?', [base_currency, 'base_currency']);
-      }
+      await upsertSetting('base_currency', base_currency);
+    }
+
+    if (supported_currencies !== undefined) {
+      const currencies = Array.isArray(supported_currencies)
+        ? supported_currencies.filter(Boolean).map((currency) => String(currency).trim().toUpperCase())
+        : parseSetting(supported_currencies, []);
+      await upsertSetting('supported_currencies', JSON.stringify(currencies));
+    }
+
+    if (exchange_rates !== undefined) {
+      const rates = typeof exchange_rates === 'string'
+        ? exchange_rates
+        : JSON.stringify(exchange_rates || {});
+      await upsertSetting('exchange_rates', rates);
     }
 
     if (hide_wallet_payment !== undefined) {
@@ -362,7 +384,38 @@ router.put('/', authMiddleware, async (req, res) => {
       }
     }
 
+    if (services_menu_placements !== undefined) {
+      const placements = typeof services_menu_placements === 'string'
+        ? services_menu_placements
+        : JSON.stringify({
+            desktop: services_menu_placements?.desktop !== false,
+            mobile: services_menu_placements?.mobile !== false,
+            footer: services_menu_placements?.footer === true
+          });
+      await upsertSetting('services_menu_placements', placements);
+    }
+
+    if (payment_methods !== undefined) {
+      const normalizedPaymentMethods = typeof payment_methods === 'string'
+        ? payment_methods
+        : await normalizePaymentMethodImages(payment_methods);
+      const methodsStr = typeof normalizedPaymentMethods === 'string'
+        ? normalizedPaymentMethods
+        : JSON.stringify(normalizedPaymentMethods);
+      await upsertSetting('payment_methods', methodsStr);
+    }
+
     res.json({ message: 'تم تحديث الإعدادات بنجاح.' });
+    if (payment_methods !== undefined) {
+      const normalizedPaymentMethods = typeof payment_methods === 'string'
+        ? payment_methods
+        : await normalizePaymentMethodImages(payment_methods);
+      const methodsStr = typeof normalizedPaymentMethods === 'string'
+        ? normalizedPaymentMethods
+        : JSON.stringify(normalizedPaymentMethods);
+      await upsertSetting('payment_methods', methodsStr);
+    }
+
     if (payment_methods !== undefined) {
       const normalizedPaymentMethods = typeof payment_methods === 'string'
         ? payment_methods
