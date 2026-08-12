@@ -280,7 +280,10 @@ function parseDhruServices(data, serviceType = 'imei') {
   };
 
   const pushService = (s, category) => {
-    let requiresImei = serviceType !== 'server';
+    const resolvedServiceType = String(
+      s.SERVICETYPE || s.SERVICE_TYPE || s.serviceType || serviceType || 'imei'
+    ).trim().toLowerCase();
+    let requiresImei = resolvedServiceType !== 'server' && resolvedServiceType !== 'remote';
     const req = s.REQUIRES || s.Requires || s;
     if (req && (req.IMEI === false || req.IMEI === 'false' || req.IMEI === '0' || req['IMEI'] === false || req['IMEI'] === 'false' || req['IMEI'] === '0')) requiresImei = false;
     if (s['REQUIRES.IMEI'] === false || s['REQUIRES.IMEI'] === 'false' || s['REQUIRES.IMEI'] === '0') requiresImei = false;
@@ -301,7 +304,7 @@ function parseDhruServices(data, serviceType = 'imei') {
       max_quantity: parseInt(s.MAX || s.max || s.Max || s.QNT_MAX || s.qnt_max || s.Qnt_Max || s.MAX_QNT || s.max_qnt || s.Max_Qnt || 0) || 0,
       requires_quantity: s.QNT === "1" || s.QNT === "Y" || s.QNT === 1 || s.qnt === "1" || s.qnt === "Y" || s.qnt === 1,
       requires_imei: requiresImei,
-      serviceType: serviceType || 'imei'
+      serviceType: resolvedServiceType
     });
   };
 
