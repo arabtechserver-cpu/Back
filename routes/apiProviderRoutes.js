@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { runQuery, allQuery, getQuery } = require('../db');
 const authMiddleware = require('../middleware/auth');
-const { callDhruApi, parseDhruServices } = require('../services/dhruClient');
+const { callDhruApi, parseDhruServices, buildStoredCustomField } = require('../services/dhruClient');
 const { fetchDynamicServices } = require('../services/dynamicClient');
 
 // Get all API Providers (Admin Protected)
@@ -198,20 +198,13 @@ async function performProviderSync(providerId, customRate, customMarkup, customS
       for (const s of groupServices) {
         if (s.customFields && Array.isArray(s.customFields)) {
           for (const cf of s.customFields) {
-            const fieldId = `custom_${cf.field_id || cf.fieldname}`;
-            const fieldLabel = String(cf.fieldname || '').toLowerCase().trim();
-            if (!addedFieldNames.has(fieldId) && !addedFieldNames.has(fieldLabel)) {
-              addedFieldNames.add(fieldId);
+            const storedField = buildStoredCustomField(cf);
+            if (!storedField) continue;
+            const fieldLabel = String(storedField.api_name || '').toLowerCase().trim();
+            if (!addedFieldNames.has(storedField.id) && !addedFieldNames.has(fieldLabel)) {
+              addedFieldNames.add(storedField.id);
               addedFieldNames.add(fieldLabel);
-              combinedFields.push({
-                id: fieldId,
-                name: fieldId,
-                label: cf.fieldname,
-                placeholder: cf.description || `أدخل ${cf.fieldname}`,
-                type: cf.fieldtype === 'select' ? 'select' : (cf.fieldtype === 'textarea' ? 'textarea' : 'text'),
-                options: cf.fieldoptions ? cf.fieldoptions.split(',').map(o => o.trim()) : [],
-                required: cf.required === 'on'
-              });
+              combinedFields.push(storedField);
             }
           }
         }
@@ -256,16 +249,8 @@ async function performProviderSync(providerId, customRate, customMarkup, customS
         const packageFields = [];
         if (s.customFields && s.customFields.length > 0) {
           s.customFields.forEach(cf => {
-            const fieldId = `custom_${cf.field_id || cf.fieldname}`;
-            packageFields.push({
-              id: fieldId,
-              name: fieldId,
-              label: cf.fieldname,
-              placeholder: cf.description || `أدخل ${cf.fieldname}`,
-              type: cf.fieldtype === 'select' ? 'select' : (cf.fieldtype === 'textarea' ? 'textarea' : 'text'),
-              options: cf.fieldoptions ? cf.fieldoptions.split(',').map(o => o.trim()) : [],
-              required: cf.required === 'on'
-            });
+            const storedField = buildStoredCustomField(cf);
+            if (storedField) packageFields.push(storedField);
           });
         }
 
@@ -329,16 +314,8 @@ async function performProviderSync(providerId, customRate, customMarkup, customS
       const serviceFields = [];
       if (s.customFields && Array.isArray(s.customFields)) {
         s.customFields.forEach(cf => {
-          const fieldId = `custom_${cf.field_id || cf.fieldname}`;
-          serviceFields.push({
-            id: fieldId,
-            name: fieldId,
-            label: cf.fieldname,
-            placeholder: cf.description || `أدخل ${cf.fieldname}`,
-            type: cf.fieldtype === 'select' ? 'select' : (cf.fieldtype === 'textarea' ? 'textarea' : 'text'),
-            options: cf.fieldoptions ? cf.fieldoptions.split(',').map(o => o.trim()) : [],
-            required: cf.required === 'on'
-          });
+          const storedField = buildStoredCustomField(cf);
+          if (storedField) serviceFields.push(storedField);
         });
       }
 
@@ -369,7 +346,7 @@ async function performProviderSync(providerId, customRate, customMarkup, customS
       const priceType = isDynamic ? 'dynamic' : 'fixed';
       const pricePerThousand = isDynamic ? localPrice * 1000 : 0;
 
-      const packagesJson = isDynamic ? '[]' : JSON.stringify([{ id: 1, name: "تفعيل فوري تلقائي", price: localPrice, usd_price: localPrice, api_service_id: s.id.toString(), api_service_type: svcType, status: "Available", discount: 0 }]);
+      const packagesJson = isDynamic ? '[]' : JSON.stringify([{ id: 1, name: "تفعيل فوري تلقائي", price: localPrice, usd_price: localPrice, api_service_id: s.id.toString(), api_service_type: svcType, status: "Available", discount: 0, fields: serviceFields }]);
       const fieldsJson = JSON.stringify(serviceFields);
 
       let existingSvc = await getQuery("SELECT id FROM services WHERE api_service_id = ? AND api_provider_id = ?", [s.id.toString(), provider.id]);
@@ -511,21 +488,13 @@ router.post('/:id/import-services', authMiddleware, async (req, res) => {
         for (const s of groupServices) {
           if (s.customFields && Array.isArray(s.customFields)) {
             for (const cf of s.customFields) {
-              const fieldId = `custom_${cf.field_id || cf.fieldname}`;
-              const fieldLabel = String(cf.fieldname || '').toLowerCase().trim();
-              if (!addedFieldNames.has(fieldId) && !addedFieldNames.has(fieldLabel)) {
-                addedFieldNames.add(fieldId);
+              const storedField = buildStoredCustomField(cf);
+              if (!storedField) continue;
+              const fieldLabel = String(storedField.api_name || '').toLowerCase().trim();
+              if (!addedFieldNames.has(storedField.id) && !addedFieldNames.has(fieldLabel)) {
+                addedFieldNames.add(storedField.id);
                 addedFieldNames.add(fieldLabel);
-                const isDropdown = cf.fieldtype === 'select' || cf.fieldtype === 'dropdown';
-                combinedFields.push({
-                  id: fieldId,
-                  name: fieldId,
-                  label: cf.fieldname,
-                  placeholder: cf.description || `أدخل ${cf.fieldname}`,
-                  type: isDropdown ? 'select' : (cf.fieldtype === 'textarea' ? 'textarea' : 'text'),
-                  options: cf.fieldoptions ? cf.fieldoptions.split(',').map(o => o.trim()) : [],
-                  required: cf.required === 'on' || cf.required === '1' || cf.required === true
-                });
+                combinedFields.push(storedField);
               }
             }
           }
@@ -590,17 +559,8 @@ router.post('/:id/import-services', authMiddleware, async (req, res) => {
           }
           if (s.customFields && s.customFields.length > 0) {
             s.customFields.forEach(cf => {
-              const fieldId = `custom_${cf.field_id || cf.fieldname}`;
-              const isDropdown = cf.fieldtype === 'select' || cf.fieldtype === 'dropdown';
-              packageFields.push({
-                id: fieldId,
-                name: fieldId,
-                label: cf.fieldname,
-                placeholder: cf.description || `أدخل ${cf.fieldname}`,
-                type: isDropdown ? 'select' : (cf.fieldtype === 'textarea' ? 'textarea' : 'text'),
-                options: cf.fieldoptions ? cf.fieldoptions.split(',').map(o => o.trim()) : [],
-                required: cf.required === 'on' || cf.required === '1' || cf.required === true
-              });
+              const storedField = buildStoredCustomField(cf);
+              if (storedField) packageFields.push(storedField);
             });
           }
 
@@ -681,17 +641,8 @@ router.post('/:id/import-services', authMiddleware, async (req, res) => {
         const serviceFields = [];
         if (s.customFields && Array.isArray(s.customFields)) {
           s.customFields.forEach(cf => {
-            const fieldId = `custom_${cf.field_id || cf.fieldname}`;
-            const isDropdown = cf.fieldtype === 'select' || cf.fieldtype === 'dropdown';
-            serviceFields.push({
-              id: fieldId,
-              name: fieldId,
-              label: cf.fieldname,
-              placeholder: cf.description || `أدخل ${cf.fieldname}`,
-              type: isDropdown ? 'select' : (cf.fieldtype === 'textarea' ? 'textarea' : 'text'),
-              options: cf.fieldoptions ? cf.fieldoptions.split(',').map(o => o.trim()) : [],
-              required: cf.required === 'on' || cf.required === '1' || cf.required === true
-            });
+            const storedField = buildStoredCustomField(cf);
+            if (storedField) serviceFields.push(storedField);
           });
         }
         if ((s.serviceType || 'imei') === 'imei' && s.requires_imei !== false) {
@@ -723,7 +674,7 @@ router.post('/:id/import-services', authMiddleware, async (req, res) => {
         const priceType = isDynamic ? 'dynamic' : 'fixed';
         const pricePerThousand = isDynamic ? localPrice * 1000 : 0;
 
-        const packagesJson = isDynamic ? '[]' : JSON.stringify([{ id: 1, name: "تفعيل فوري تلقائي", price: localPrice, usd_price: localPrice, api_service_id: s.id.toString(), api_service_type: svcType, status: "Available", discount: discount }]);
+        const packagesJson = isDynamic ? '[]' : JSON.stringify([{ id: 1, name: "تفعيل فوري تلقائي", price: localPrice, usd_price: localPrice, api_service_id: s.id.toString(), api_service_type: svcType, status: "Available", discount: discount, fields: serviceFields }]);
         const fieldsJson = JSON.stringify(serviceFields);
 
         let existingSvc = await getQuery("SELECT id FROM services WHERE api_service_id = ? AND api_provider_id = ?", [s.id.toString(), provider.id]);

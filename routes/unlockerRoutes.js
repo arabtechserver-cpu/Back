@@ -10,7 +10,7 @@ const wa = require('../whatsapp');
 // before either one writes the error back, causing duplicate provider calls.
 const submittingOrders = new Set();
 
-const { callDhruApi, stripHtml, getDhruErrorMessage, extractCustomFields, normalizeCustomField, parseDhruServices } = require('../services/dhruClient');
+const { callDhruApi, stripHtml, getDhruErrorMessage, extractCustomFields, normalizeCustomField, parseDhruServices, buildStoredCustomField } = require('../services/dhruClient');
 const { placeDynamicOrder } = require('../services/dynamicClient');
 
 // 1. Get Settings (Admin Protected or Public fallback)
@@ -427,20 +427,13 @@ async function performSmartSync(customRate, customMarkup, customShouldGroup) {
       for (const s of groupServices) {
         if (s.customFields && Array.isArray(s.customFields)) {
           for (const cf of s.customFields) {
-            const fieldId = `custom_${cf.field_id || cf.fieldname}`;
-            const fieldLabel = String(cf.fieldname || '').toLowerCase().trim();
-            if (!addedFieldNames.has(fieldId) && !addedFieldNames.has(fieldLabel)) {
-              addedFieldNames.add(fieldId);
+            const storedField = buildStoredCustomField(cf);
+            if (!storedField) continue;
+            const fieldLabel = String(storedField.api_name || '').toLowerCase().trim();
+            if (!addedFieldNames.has(storedField.id) && !addedFieldNames.has(fieldLabel)) {
+              addedFieldNames.add(storedField.id);
               addedFieldNames.add(fieldLabel);
-              combinedFields.push({
-                id: fieldId,
-                name: fieldId,
-                label: cf.fieldname,
-                placeholder: cf.description || `أدخل ${cf.fieldname}`,
-                type: cf.fieldtype === 'select' ? 'select' : (cf.fieldtype === 'textarea' ? 'textarea' : 'text'),
-                options: cf.fieldoptions ? cf.fieldoptions.split(',').map(o => o.trim()) : [],
-                required: cf.required === 'on'
-              });
+              combinedFields.push(storedField);
             }
           }
         }
@@ -493,16 +486,8 @@ async function performSmartSync(customRate, customMarkup, customShouldGroup) {
         // Removed fallback player_id injection for packages
         if (hasCustom) {
           s.customFields.forEach(cf => {
-            const fieldId = `custom_${cf.field_id || cf.fieldname}`;
-            packageFields.push({
-              id: fieldId,
-              name: fieldId,
-              label: cf.fieldname,
-              placeholder: cf.description || `أدخل ${cf.fieldname}`,
-              type: cf.fieldtype === 'select' ? 'select' : (cf.fieldtype === 'textarea' ? 'textarea' : 'text'),
-              options: cf.fieldoptions ? cf.fieldoptions.split(',').map(o => o.trim()) : [],
-              required: cf.required === 'on'
-            });
+            const storedField = buildStoredCustomField(cf);
+            if (storedField) packageFields.push(storedField);
           });
         }
 
@@ -570,16 +555,8 @@ async function performSmartSync(customRate, customMarkup, customShouldGroup) {
       const serviceFields = [];
       if (s.customFields && Array.isArray(s.customFields)) {
         s.customFields.forEach(cf => {
-          const fieldId = `custom_${cf.field_id || cf.fieldname}`;
-          serviceFields.push({
-            id: fieldId,
-            name: fieldId,
-            label: cf.fieldname,
-            placeholder: cf.description || `أدخل ${cf.fieldname}`,
-            type: cf.fieldtype === 'select' ? 'select' : (cf.fieldtype === 'textarea' ? 'textarea' : 'text'),
-            options: cf.fieldoptions ? cf.fieldoptions.split(',').map(o => o.trim()) : [],
-            required: cf.required === 'on'
-          });
+          const storedField = buildStoredCustomField(cf);
+          if (storedField) serviceFields.push(storedField);
         });
       }
       // If no custom fields and service is IMEI type, inject IMEI field as fallback
@@ -607,7 +584,7 @@ async function performSmartSync(customRate, customMarkup, customShouldGroup) {
       const priceType = isDynamic ? 'dynamic' : 'fixed';
       const pricePerThousand = isDynamic ? localPrice * 1000 : 0;
       
-      const packagesJson = isDynamic ? '[]' : JSON.stringify([{ id: 1, name: "تفعيل فوري تلقائي", price: localPrice, usd_price: localPrice, api_service_id: s.id.toString(), api_service_type: svcType, status: "Available", discount: 0 }]);
+      const packagesJson = isDynamic ? '[]' : JSON.stringify([{ id: 1, name: "تفعيل فوري تلقائي", price: localPrice, usd_price: localPrice, api_service_id: s.id.toString(), api_service_type: svcType, status: "Available", discount: 0, fields: serviceFields }]);
       const fieldsJson = JSON.stringify(serviceFields);
 
       let existingSvc = await getQuery("SELECT id FROM services WHERE api_service_id = ? AND api_source = 'amrr-unlocker'", [s.id.toString()]);
@@ -764,20 +741,13 @@ router.post('/import-services', authMiddleware, async (req, res) => {
         for (const s of groupServices) {
           if (s.customFields && Array.isArray(s.customFields)) {
             for (const cf of s.customFields) {
-              const fieldId = `custom_${cf.field_id || cf.fieldname}`;
-              const fieldLabel = String(cf.fieldname || '').toLowerCase().trim();
-              if (!addedFieldNames.has(fieldId) && !addedFieldNames.has(fieldLabel)) {
-                addedFieldNames.add(fieldId);
+              const storedField = buildStoredCustomField(cf);
+              if (!storedField) continue;
+              const fieldLabel = String(storedField.api_name || '').toLowerCase().trim();
+              if (!addedFieldNames.has(storedField.id) && !addedFieldNames.has(fieldLabel)) {
+                addedFieldNames.add(storedField.id);
                 addedFieldNames.add(fieldLabel);
-                combinedFields.push({
-                  id: fieldId,
-                  name: fieldId,
-                  label: cf.fieldname,
-                  placeholder: cf.description || `أدخل ${cf.fieldname}`,
-                  type: cf.fieldtype === 'select' ? 'select' : (cf.fieldtype === 'textarea' ? 'textarea' : 'text'),
-                  options: cf.fieldoptions ? cf.fieldoptions.split(',').map(o => o.trim()) : [],
-                  required: cf.required === 'on'
-                });
+                combinedFields.push(storedField);
               }
             }
           }
@@ -834,16 +804,8 @@ router.post('/import-services', authMiddleware, async (req, res) => {
 
           if (hasCustom) {
             s.customFields.forEach(cf => {
-              const fieldId = `custom_${cf.field_id || cf.fieldname}`;
-              packageFields.push({
-                id: fieldId,
-                name: fieldId,
-                label: cf.fieldname,
-                placeholder: cf.description || `أدخل ${cf.fieldname}`,
-                type: cf.fieldtype === 'select' ? 'select' : (cf.fieldtype === 'textarea' ? 'textarea' : 'text'),
-                options: cf.fieldoptions ? cf.fieldoptions.split(',').map(o => o.trim()) : [],
-                required: cf.required === 'on'
-              });
+              const storedField = buildStoredCustomField(cf);
+              if (storedField) packageFields.push(storedField);
             });
           }
 
@@ -916,21 +878,15 @@ router.post('/import-services', authMiddleware, async (req, res) => {
         if (hasCustom) {
           const seen = new Set();
           for (const cf of s.customFields) {
-            const fieldId = `custom_${cf.field_id || cf.fieldname}`;
-            const fieldLabel = String(cf.fieldname || '').toLowerCase().trim();
+            const storedField = buildStoredCustomField(cf);
+            if (!storedField) continue;
+            const fieldId = storedField.id;
+            const fieldLabel = String(storedField.api_name || '').toLowerCase().trim();
             if (seen.has(fieldId) || seen.has(fieldLabel)) continue;
             
             seen.add(fieldId);
             seen.add(fieldLabel);
-
-            serviceFields.push({
-              id: fieldId,
-              label: cf.fieldname,
-              placeholder: cf.description || `أدخل ${cf.fieldname}`,
-              type: cf.fieldtype === 'select' ? 'select' : (cf.fieldtype === 'textarea' ? 'textarea' : 'text'),
-              options: cf.fieldoptions ? cf.fieldoptions.split(',').map(o => o.trim()) : [],
-              required: cf.required === 'on'
-            });
+            serviceFields.push(storedField);
           }
         }
         
@@ -998,7 +954,8 @@ router.post('/import-services', authMiddleware, async (req, res) => {
             discount: discount,
             min_quantity: s.min_quantity,
             max_quantity: s.max_quantity,
-            requires_quantity: s.requires_quantity
+            requires_quantity: s.requires_quantity,
+            fields: serviceFields
           }
         ]);
         
@@ -1296,7 +1253,7 @@ async function autoSubmitUnlockerOrder(orderId) {
     // allowing admin force-retries. The auto-trigger path (order approval)
     // should still skip to avoid hammering the provider on duplicate events.
     
-    const service = await getQuery("SELECT api_service_id, api_source, api_service_type, packages, api_provider_id FROM services WHERE id = ?", [order.service_id]);
+    const service = await getQuery("SELECT api_service_id, api_source, api_service_type, packages, fields, api_provider_id FROM services WHERE id = ?", [order.service_id]);
     if (!service) {
       throw new Error('الخدمة غير موجودة.');
     }
@@ -1350,6 +1307,40 @@ async function autoSubmitUnlockerOrder(orderId) {
     
     const trimmedPlayerId = (order.player_id || '').trim();
 
+    const parseStoredFields = (value) => {
+      if (Array.isArray(value)) return value;
+      if (typeof value !== 'string' || !value.trim()) return [];
+      try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch (e) {
+        return [];
+      }
+    };
+
+    const storedServiceFields = parseStoredFields(service.fields);
+    let selectedPackageFields = [];
+    try {
+      const storedPackages = typeof service.packages === 'string' ? JSON.parse(service.packages) : (service.packages || []);
+      const selectedPackage = storedPackages.find(pkg =>
+        String(pkg.name || '').trim().toLowerCase() === String(order.package_name || '').trim().toLowerCase()
+      ) || storedPackages.find(pkg =>
+        String(pkg.name || '').trim().toLowerCase().includes(String(order.package_name || '').trim().toLowerCase())
+      );
+      selectedPackageFields = parseStoredFields(selectedPackage?.fields);
+    } catch (e) {
+      selectedPackageFields = [];
+    }
+
+    const providerFieldNames = new Map();
+    for (const field of (selectedPackageFields.length > 0 ? selectedPackageFields : storedServiceFields)) {
+      const apiName = String(field.api_name || field.label || field.field_id || field.name || '').trim();
+      if (!apiName) continue;
+      for (const key of [field.id, field.name, field.field_id]) {
+        if (key) providerFieldNames.set(String(key).toLowerCase(), apiName);
+      }
+    }
+
     // Build custom fields object from order.custom_fields
     // IMPORTANT: Exclude standard fields (player_id, phone) — they are sent as IMEI/QNT directly.
     // Use the field_id (stripped of 'custom_' prefix) as the API key, since that is what
@@ -1361,10 +1352,13 @@ async function autoSubmitUnlockerOrder(orderId) {
         const parsed = typeof order.custom_fields === 'string' ? JSON.parse(order.custom_fields) : order.custom_fields;
         for (const [k, v] of Object.entries(parsed)) {
           const rawKey = k.startsWith('custom_') ? k.replace('custom_', '') : k;
+          const providerKey = providerFieldNames.get(String(k).toLowerCase())
+            || providerFieldNames.get(String(rawKey).toLowerCase())
+            || rawKey;
           // Skip standard/system fields and empty values
-          if (SKIP_FIELDS.has(rawKey.toLowerCase()) || SKIP_FIELDS.has(k.toLowerCase())) continue;
+          if (SKIP_FIELDS.has(rawKey.toLowerCase()) || SKIP_FIELDS.has(k.toLowerCase()) || SKIP_FIELDS.has(providerKey.toLowerCase())) continue;
           if (v === null || v === undefined || String(v).trim() === '') continue;
-          customFields[rawKey] = String(v).trim();
+          customFields[providerKey] = String(v).trim();
         }
       } catch (e) {
         console.warn('[Auto Place Order] Failed to parse custom fields:', e.message);

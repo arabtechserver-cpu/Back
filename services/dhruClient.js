@@ -119,34 +119,74 @@ function getDhruErrorMessage(responseData) {
   return stripHtml(JSON.stringify(responseData.ERROR));
 }
 
+function normalizeFieldType(value) {
+  const type = String(value || 'text').trim().toLowerCase();
+  if (['select', 'dropdown', 'selectbox', 'choice'].includes(type)) return 'select';
+  if (['textarea', 'multiline', 'longtext'].includes(type)) return 'textarea';
+  if (['number', 'numeric', 'integer'].includes(type)) return 'number';
+  if (type === 'email') return 'email';
+  if (['password', 'pass'].includes(type)) return 'password';
+  return 'text';
+}
+
+function normalizeFieldOptions(value) {
+  if (Array.isArray(value)) {
+    return value.map(option => String(option ?? '').trim()).filter(Boolean);
+  }
+  if (value && typeof value === 'object') {
+    return Object.values(value).map(option => String(option ?? '').trim()).filter(Boolean);
+  }
+  if (typeof value !== 'string') return [];
+
+  const trimmed = value.trim();
+  if (!trimmed) return [];
+  if (trimmed.startsWith('[')) {
+    try {
+      return normalizeFieldOptions(JSON.parse(trimmed));
+    } catch (e) {
+      // Keep the provider's plain text option format as a fallback.
+    }
+  }
+  return trimmed.split(/[,\n|]+/).map(option => option.trim()).filter(Boolean);
+}
+
+function isRequiredField(value) {
+  if (value === true || value === 1) return true;
+  return ['1', 'true', 'yes', 'on', 'required'].includes(String(value ?? '').trim().toLowerCase());
+}
+
 // Helper: extract customFields from all possible Dhru Fusion / Omar-server field formats
-function extractCustomFields(s) {
+function extractCustomFields(service) {
+  const s = service || {};
+  const nestedRequires = s.Requires || s.REQUIRES || {};
   let raw =
-    s["Requires.Custom"] ||
-    s["REQUIRES.CUSTOM"] ||
-    s.CUSTOM ||
-    s.Custom ||
-    s.custom ||
-    (s.Requires && s.Requires.Custom) ||
-    (s.REQUIRES && s.REQUIRES.CUSTOM) ||
-    (s.REQUIRES && s.REQUIRES.Custom) ||
-    (s.Requires && s.Requires.CUSTOM) ||
-    s.RequiresCustom ||
-    s.CUSTOMFIELD ||
-    s.CUSTOMFIELDS ||
-    s.customfields ||
-    s.CustomFields ||
-    s.FIELDS ||
-    s.Fields ||
-    s.FIELD ||
+    s['Requires.Custom'] ??
+    s['REQUIRES.CUSTOM'] ??
+    nestedRequires.Custom ??
+    nestedRequires.CUSTOM ??
+    nestedRequires.custom ??
+    s.CUSTOM ??
+    s.Custom ??
+    s.custom ??
+    s.RequiresCustom ??
+    s.CUSTOMFIELD ??
+    s.CUSTOMFIELDS ??
+    s.customfields ??
+    s.CustomFields ??
+    s.FIELDS ??
+    s.Fields ??
+    s.FIELD ??
     null;
 
-  if (!raw) return [];
-
-  // If raw is a single object (like CUSTOM object) and not an array, wrap it in an array
-  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
-    raw = [raw];
+  if (raw === null || raw === undefined || raw === '') {
+    const fieldKey = Object.keys(s).find(key => {
+      const normalized = key.replace(/[._\s-]/g, '').toLowerCase();
+      return ['requirescustom', 'customfield', 'customfields', 'fields', 'field'].includes(normalized);
+    });
+    raw = fieldKey ? s[fieldKey] : null;
   }
+
+  if (raw === null || raw === undefined || raw === '') return [];
 
   if (typeof raw === 'string') {
     const trimmed = raw.trim();
@@ -154,28 +194,38 @@ function extractCustomFields(s) {
       try {
         raw = JSON.parse(trimmed);
       } catch (e) {
+        // Keep the comma-separated fallback below.
       }
     }
   }
 
   if (Array.isArray(raw)) {
-    return raw.filter(f => f && (f.fieldname || f.FIELDNAME || f.name || f.NAME));
+    return raw.filter(field => field && typeof field === 'object' && (
+      field.fieldname || field.FIELDNAME || field.field_name || field.name || field.NAME || field.customname
+    ));
   }
 
-  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
-    return Object.entries(raw).map(([key, val]) => ({
-      field_id: (val && (val.reqid || val.REQID || val.id || val.ID)) || key,
-      fieldname: (val && (val.FIELDNAME || val.fieldname || val.name)) || key,
-      fieldtype: (val && (val.FIELDTYPE || val.fieldtype || val.type)) || 'text',
-      required: (val && (val.REQUIRED || val.required)) || 'on',
-      description: (val && (val.DESCRIPTION || val.description || val.placeholder)) || '',
-      fieldoptions: (val && (val.FIELDOPTIONS || val.fieldoptions || val.options)) || ''
+  if (raw && typeof raw === 'object') {
+    const looksLikeField = [
+      'fieldname', 'FIELDNAME', 'field_name', 'name', 'NAME', 'customname',
+      'fieldtype', 'FIELDTYPE', 'required', 'REQUIRED'
+    ].some(key => Object.prototype.hasOwnProperty.call(raw, key));
+
+    if (looksLikeField) return [raw];
+
+    return Object.entries(raw).map(([key, value]) => ({
+      field_id: (value && (value.reqid || value.REQID || value.field_id || value.id || value.ID)) || key,
+      fieldname: (value && (value.FIELDNAME || value.fieldname || value.field_name || value.name || value.NAME)) || key,
+      fieldtype: (value && (value.FIELDTYPE || value.fieldtype || value.type)) || 'text',
+      required: (value && (value.REQUIRED ?? value.required)) ?? 'on',
+      description: (value && (value.DESCRIPTION || value.description || value.placeholder)) || '',
+      fieldoptions: (value && (value.FIELDOPTIONS ?? value.fieldoptions ?? value.options)) || ''
     }));
   }
 
   if (typeof raw === 'string') {
-    return raw.split(',').map(n => n.trim()).filter(Boolean).map(n => ({
-      fieldname: n,
+    return raw.split(',').map(name => name.trim()).filter(Boolean).map(name => ({
+      fieldname: name,
       fieldtype: 'text',
       required: 'on',
       description: ''
@@ -185,17 +235,39 @@ function extractCustomFields(s) {
   return [];
 }
 
-// Helper: normalize a single raw custom field object into our standard format
+// Helper: normalize one provider field and preserve the original API field name.
 function normalizeCustomField(cf) {
-  const name = (cf.customname || cf.fieldname || cf.FIELDNAME || cf.field_name || cf.name || cf.NAME || '').trim();
+  const field = cf || {};
+  const name = String(field.customname || field.fieldname || field.FIELDNAME || field.field_name || field.name || field.NAME || '').trim();
   if (!name) return null;
   return {
-    field_id: cf.field_id || cf.reqid || cf.REQID || cf.id || cf.ID || name,
+    field_id: String(field.field_id || field.reqid || field.REQID || field.id || field.ID || name).trim(),
     fieldname: name,
-    fieldtype: (cf.fieldtype || cf.FIELDTYPE || cf.type || 'text').toLowerCase(),
-    required: cf.required || cf.REQUIRED || 'on',
-    description: cf.description || cf.DESCRIPTION || cf.placeholder || '',
-    fieldoptions: cf.fieldoptions || cf.FIELDOPTIONS || cf.options || ''
+    fieldtype: normalizeFieldType(field.fieldtype || field.FIELDTYPE || field.type),
+    required: isRequiredField(field.required ?? field.REQUIRED ?? 'on'),
+    description: String(field.description || field.DESCRIPTION || field.placeholder || '').trim(),
+    fieldoptions: normalizeFieldOptions(field.fieldoptions ?? field.FIELDOPTIONS ?? field.options),
+    regexpr: String(field.regexpr || field.REGEXPR || '').trim(),
+    adminonly: isRequiredField(field.adminonly ?? field.ADMINONLY)
+  };
+}
+
+function buildStoredCustomField(cf) {
+  const normalized = normalizeCustomField(cf);
+  if (!normalized) return null;
+  const fieldId = normalized.field_id || normalized.fieldname;
+  return {
+    id: `custom_${fieldId}`,
+    name: `custom_${fieldId}`,
+    api_name: normalized.fieldname,
+    field_id: fieldId,
+    label: normalized.fieldname,
+    placeholder: normalized.description || `أدخل ${normalized.fieldname}`,
+    type: normalized.fieldtype,
+    options: normalized.fieldoptions,
+    required: normalized.required,
+    regexpr: normalized.regexpr,
+    adminonly: normalized.adminonly
   };
 }
 
@@ -277,5 +349,9 @@ module.exports = {
   getDhruErrorMessage,
   extractCustomFields,
   normalizeCustomField,
+  normalizeFieldType,
+  normalizeFieldOptions,
+  isRequiredField,
+  buildStoredCustomField,
   parseDhruServices
 };
