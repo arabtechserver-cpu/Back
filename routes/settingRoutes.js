@@ -84,6 +84,8 @@ router.get('/admin', authMiddleware, async (req, res) => {
       supported_currencies: parseSetting(settings.supported_currencies, ['USD', 'USDT']),
       exchange_rates: parseSetting(settings.exchange_rates, { USD: 50, USDT: 51 }),
       base_currency: settings.base_currency || 'USD',
+      home_hero_title: settings.home_hero_title || 'جميع الخدمات',
+      home_hero_subtitle: settings.home_hero_subtitle || 'اختر الخدمة التي تناسب احتياجك من بين مجموعة واسعة من الخدمات الاحترافية الموثوقة',
       hide_wallet_payment: settings.hide_wallet_payment === 'true',
       whatsapp_numbers: parseSetting(settings.whatsapp_numbers, []),
       email_user: settings.email_user || '',
@@ -106,7 +108,7 @@ router.get('/admin', authMiddleware, async (req, res) => {
 router.get('/metadata', async (req, res) => {
   try {
     const settingsList = await allQuery(
-      "SELECT key, value FROM settings WHERE key IN ('site_name', 'site_logo', 'site_favicon', 'base_currency')"
+      "SELECT key, value FROM settings WHERE key IN ('site_name', 'site_logo', 'site_favicon', 'base_currency', 'home_hero_title', 'home_hero_subtitle')"
     );
     const settings = {};
     settingsList.forEach(item => {

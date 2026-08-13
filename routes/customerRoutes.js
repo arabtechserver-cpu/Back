@@ -101,11 +101,11 @@ router.post('/check-email', async (req, res) => {
 router.post('/register', turnstileMiddleware, async (req, res) => {
   const { username, email, password, phone } = req.body;
 
-  if (!username || !email || !password || !phone) {
-    return res.status(400).json({ message: 'اسم المستخدم، البريد الإلكتروني (الجميل)، كلمة المرور، ورقم الهاتف (الواتساب) مطلوبة.' });
+  if (!email || !password || !phone) {
+    return res.status(400).json({ message: 'البريد الإلكتروني (Gmail)، كلمة المرور، ورقم الهاتف (الواتساب) مطلوبة.' });
   }
 
-  const cleanUsername = username.trim();
+  let cleanUsername = String(username || '').trim();
   const cleanEmail = email.trim().toLowerCase();
   const userPhone = phone.trim();
 
@@ -113,7 +113,7 @@ router.post('/register', turnstileMiddleware, async (req, res) => {
     return res.status(400).json({ message: 'يرجى إدخال رقم هاتف (واتساب) صالح.' });
   }
 
-  if (cleanUsername.length < 3) {
+  if (cleanUsername && cleanUsername.length < 3) {
     return res.status(400).json({ message: 'يجب أن يكون اسم المستخدم 3 أحرف على الأقل.' });
   }
 
@@ -130,6 +130,23 @@ router.post('/register', turnstileMiddleware, async (req, res) => {
   const canonicalEmail = emailValidation.canonicalEmail;
 
   try {
+    // A username is no longer a customer-facing registration requirement.
+    // Generate a stable, unique one from the Gmail address when omitted.
+    if (!cleanUsername) {
+      const emailPrefix = cleanEmail.split('@')[0]
+        .toLowerCase()
+        .replace(/[^a-z0-9_]/g, '_')
+        .replace(/_+/g, '_')
+        .replace(/^_+|_+$/g, '');
+      const baseUsername = (emailPrefix || 'customer').slice(0, 70);
+      cleanUsername = baseUsername.length >= 3 ? baseUsername : `user_${baseUsername}`;
+
+      let suffix = 1;
+      while (await getQuery('SELECT id FROM customers WHERE LOWER(username) = LOWER(?)', [cleanUsername])) {
+        cleanUsername = `${baseUsername.slice(0, 60)}_${suffix++}`;
+      }
+    }
+
     const existingUsername = await getQuery('SELECT * FROM customers WHERE LOWER(username) = LOWER(?)', [cleanUsername]);
     if (existingUsername) {
       return res.status(400).json({ message: 'اسم المستخدم هذا مسجل بالفعل.' });
@@ -160,12 +177,11 @@ router.post('/register', turnstileMiddleware, async (req, res) => {
       email: cleanEmail,
       canonicalEmail,
       password: hashedPassword,
-      passwordPlain: password,
       phone: userPhone,
       expiresAt: Date.now() + 10 * 60 * 1000
     });
 
-    console.log(`[Customer Auth OTP] Generated code [${code}] for registration of ${cleanUsername} (${cleanEmail} / ${userPhone})`);
+    console.log('[Customer Auth OTP] Registration OTP generated.');
 
     // 1. Send via Telegram if customer has linked their Telegram account
     try {
@@ -248,7 +264,7 @@ router.post('/login', turnstileMiddleware, async (req, res) => {
       expiresAt: Date.now() + 10 * 60 * 1000
     });
 
-    console.log(`[Customer Auth OTP] Generated code [${code}] for login of ${customer.username} (${customer.email} / ${customer.phone})`);
+    console.log(`[Customer Auth OTP] Login OTP generated for customer #${customer.id}.`);
 
     // 1. Send via Telegram if customer has linked their Telegram account
     try {
@@ -1030,7 +1046,7 @@ router.post('/forgot-password', turnstileMiddleware, async (req, res) => {
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
 
     await runQuery('UPDATE customers SET reset_otp = ?, reset_otp_expires = ? WHERE id = ?', [code, expiresAt, customer.id]);
-    console.log(`[Forgot Password OTP] Code [${code}] saved for customer ${customer.username} (email: ${customer.email || 'N/A'}, phone: ${customer.phone || 'N/A'})`);
+    console.log(`[Forgot Password OTP] OTP saved for customer #${customer.id}.`);
 
     // 1. Send via Telegram if customer has linked their Telegram account
     try {

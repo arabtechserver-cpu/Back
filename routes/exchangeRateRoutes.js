@@ -26,7 +26,7 @@ async function readExchangeSettings() {
 }
 
 async function upsertSetting(key, value) {
-  const existing = await allQuery('SELECT id FROM settings WHERE key = ?', [key]);
+  const existing = await allQuery('SELECT key FROM settings WHERE key = ?', [key]);
   if (existing.length === 0) {
     await runQuery('INSERT INTO settings (key, value) VALUES (?, ?)', [key, String(value)]);
   } else {

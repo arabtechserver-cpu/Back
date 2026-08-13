@@ -39,6 +39,7 @@ const membershipRoutes = require('./routes/membershipRoutes');
 const telegramRoutes = require('./routes/telegramRoutes');
 const reviewRoutes = require('./routes/reviewRoutes');
 const exchangeRateRoutes = require('./routes/exchangeRateRoutes');
+const analyticsRoutes = require('./routes/analyticsRoutes');
 const telegram = require('./utils/telegramService');
 const { startDatabaseBackupScheduler } = require('./utils/databaseBackup');
 const { startAutoSyncScheduler } = require('./utils/autoSync');
@@ -110,7 +111,7 @@ app.use(express.urlencoded({ limit: bodyLimit, extended: true }));
 
 
 // Prevent sensitive responses from being cached by browsers or proxies
-app.use(['/api/auth', '/api/customer', '/api/orders', '/api/wallet', '/api/whatsapp', '/api/whatsapp-portal', '/api/otp'], (req, res, next) => {
+app.use(['/api/auth', '/api/customer', '/api/orders', '/api/wallet', '/api/whatsapp', '/api/whatsapp-portal', '/api/otp', '/api/analytics'], (req, res, next) => {
   res.setHeader('Cache-Control', 'no-store, max-age=0');
   next();
 });
@@ -136,12 +137,13 @@ const CACHE_TTL_MS = 30 * 1000;
 const CACHE_MAX_ENTRIES = 200;
 app.use('/api', (req, res, next) => {
   if (req.method !== 'GET') {
+    if (req.path === '/analytics/events') return next();
     apiCache.clear();
     return next();
   }
   
   // Do not cache sensitive or dynamic user data routes
-  const skipPaths = ['/auth', '/customer', '/wallet', '/otp', '/orders', '/backups', '/v1', '/telegram', '/settings/admin'];
+  const skipPaths = ['/auth', '/customer', '/wallet', '/otp', '/orders', '/backups', '/v1', '/telegram', '/settings/admin', '/analytics'];
   if (skipPaths.some(p => req.path.startsWith(p))) return next();
 
   const key = req.originalUrl;
@@ -184,6 +186,7 @@ app.use('/api/backups', backupRoutes);
 app.use('/api/memberships', membershipRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/exchange-rates', exchangeRateRoutes);
+app.use('/api/analytics', analyticsRoutes);
 
 // Health check endpoint
 app.get('/', (req, res) => {

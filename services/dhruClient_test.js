@@ -398,7 +398,7 @@ function parseDhruServices(data, serviceType = 'imei') {
   return rawServices;
 }
 
-module.exports = {
+module.exports = { extractFieldsFromService, 
   callDhruApi,
   stripHtml,
   getDhruErrorMessage,

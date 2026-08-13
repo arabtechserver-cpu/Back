@@ -96,15 +96,18 @@ router.get('/recent', async (req, res) => {
     const recent = await allQuery(`
       SELECT 
         o.service_name, 
-        c.username as customer_name,
+        o.customer_id,
         o.created_at
       FROM orders o
-      LEFT JOIN customers c ON o.customer_id = c.id
       WHERE o.status != 'cancelled'
       ORDER BY o.id DESC
       LIMIT 3
     `);
-    res.json(recent || []);
+    res.json((recent || []).map((order) => ({
+      service_name: order.service_name,
+      created_at: order.created_at,
+      customer_type: order.customer_id ? 'customer' : 'guest',
+    })));
   } catch (error) {
     console.error('Recent orders error:', error);
     res.status(500).json({ message: 'حدث خطأ أثناء جلب الطلبات الأخيرة.' });
@@ -115,12 +118,16 @@ router.get('/recent', async (req, res) => {
 router.post('/', async (req, res) => {
   const { service_id, player_id, phone, package_name, package_price, payment_method, sender_phone, transfer_to, quantity, receipt_image, transfer_amount, custom_fields } = req.body;
   const orderPrice = Number(package_price);
-  const normalizedPaymentMethod = payment_method === 'transfer' ? 'transfer' : 'wallet';
+  const normalizedPaymentMethod = 'wallet';
   const normalizedSenderPhone = typeof sender_phone === 'string' ? sender_phone.trim() : '';
   const normalizedTransferTo = typeof transfer_to === 'string' ? transfer_to.trim() : '01026785879';
 
   if (!service_id || player_id === undefined || !package_name || package_price === undefined) {
     return res.status(400).json({ message: 'جميع الحقول مطلوبة لإكمال إرسال الطلب.' });
+  }
+
+  if (payment_method !== 'wallet') {
+    return res.status(400).json({ message: 'شراء الخدمات متاح من رصيد المحفظة فقط.' });
   }
 
   const finalPhone = typeof phone === 'string' ? phone.trim() : '';
@@ -152,32 +159,29 @@ router.post('/', async (req, res) => {
     let balanceBefore = null;
     let balanceAfter = null;
     const authHeader = req.headers['authorization'];
-    if (authHeader) {
-      try {
-        const token = authHeader.split(' ')[1];
-        const decoded = jwt.verify(token, getJwtSecret());
-        customerId = decoded.id;
-
-        customer = await getQuery('SELECT * FROM customers WHERE id = ?', [customerId]);
-        if (!customer) {
-          return res.status(404).json({ message: 'الحساب غير موجود.' });
-        }
-
-        if (normalizedPaymentMethod === 'wallet') {
-          balanceBefore = Number(customer.balance || 0);
-          if (balanceBefore < orderPrice) {
-            return res.status(400).json({ message: 'رصيد المحفظة غير كافٍ لإتمام هذه العملية.' });
-          }
-          balanceAfter = balanceBefore - orderPrice;
-        }
-      } catch (err) {
-        // Continue as guest if token is invalid
-      }
+    if (!authHeader) {
+      return res.status(401).json({ message: 'يجب تسجيل الدخول وشحن رصيد المحفظة قبل شراء الخدمة.' });
     }
 
-    if (normalizedPaymentMethod === 'wallet' && !customerId) {
-      return res.status(401).json({ message: 'يجب تسجيل الدخول لاستخدام المحفظة في الدفع.' });
+    try {
+      const token = authHeader.split(' ')[1];
+      const decoded = jwt.verify(token, getJwtSecret());
+      if (decoded.role !== 'customer') throw new Error('Invalid customer role');
+      customerId = decoded.id;
+    } catch (err) {
+      return res.status(403).json({ message: 'جلسة الدخول غير صالحة أو منتهية.' });
     }
+
+    customer = await getQuery('SELECT * FROM customers WHERE id = ?', [customerId]);
+    if (!customer) {
+      return res.status(404).json({ message: 'الحساب غير موجود.' });
+    }
+
+    balanceBefore = Number(customer.balance || 0);
+    if (balanceBefore < orderPrice) {
+      return res.status(400).json({ message: 'رصيد المحفظة غير كافٍ. اشحن رصيدك ثم أعد المحاولة.' });
+    }
+    balanceAfter = balanceBefore - orderPrice;
 
     // Handle receipt image saving if provided
     let savedReceiptPath = '';

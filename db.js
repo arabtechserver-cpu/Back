@@ -65,7 +65,8 @@ const defaultJsonDb = {
   ],
   customer_discounts: [],
   reviews: [],
-  api_providers: []
+  api_providers: [],
+  conversion_events: []
 };
 
 function ensureDefaultSettings(data) {
@@ -247,7 +248,7 @@ function executeJsonRunQuery(sql, params = []) {
       }
     }
 
-    if (table === 'orders' || table === 'wallet_requests' || table === 'wallet_transactions') {
+    if (table === 'orders' || table === 'wallet_requests' || table === 'wallet_transactions' || table === 'conversion_events') {
       newRow.created_at = newRow.created_at || new Date().toISOString();
     }
     if (table === 'orders') {
@@ -733,6 +734,18 @@ async function createTables() {
       data              TEXT NOT NULL,
       expires_at        BIGINT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS conversion_events (
+      id                SERIAL PRIMARY KEY,
+      event_name        VARCHAR(80) NOT NULL,
+      session_id        VARCHAR(100) DEFAULT '',
+      path              TEXT DEFAULT '',
+      metadata          TEXT DEFAULT '{}',
+      created_at        TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_conversion_events_created_at
+      ON conversion_events (created_at DESC);
   `);
 
   // Migration to add color and icon columns to existing categories table, and dynamic pricing to services/orders
