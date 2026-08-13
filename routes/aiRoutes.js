@@ -112,12 +112,12 @@ async function executeToolCall(toolCall, customerId) {
     } 
     
     if (name === 'get_latest_orders') {
-      const orders = await allQuery(\`
+      const orders = await allQuery(`
         SELECT id, service_name, status, price, created_at
         FROM orders
         WHERE customer_id = ?
         ORDER BY id DESC LIMIT 5
-      \`, [customerId]);
+      `, [customerId]);
       return { orders };
     }
 
