@@ -55,9 +55,18 @@ const SITE_CONTEXT = `
 التواصل الرسمي: واتساب https://wa.me/249123667227 و https://wa.me/16728972935 | مجتمع واتساب https://chat.whatsapp.com/DINRDwU2lVjFcGRowxT3m5 | تيليجرام https://t.me/arabtechserveronline | فيسبوك https://www.facebook.com/ARABTECHSERVEROnline | تيك توك https://tiktok.com/@arabtechsuppurt | يوتيوب https://youtube.com/@arab-tech-server | البريد arabtechserver@gmail.com.
 عرّف المستخدم بالخدمات باستخدام search_services ولا تخترع سعراً أو مدة. الرصيد والطلبات معلومات خاصة. وجّه غير المسجل إلى رابط التسجيل/الدخول.
 عند سؤال المستخدم عن أي خدمة أو باقة، استخدم search_services أولاً. إذا لم تُرجع الأداة نتيجة، قل بوضوح إن الخدمة غير موجودة حالياً ولا تقل إنها موجودة. إذا وُجدت نتيجة، اعرض الاسم والسعر والقسم والباقة والرابط المباشر كما وردت من الأداة.
+عند سؤال المستخدم عن اسمه أو حسابه أو جميع طلباته أو ما اكتمل وما يزال قيد التنفيذ، استخدم get_customer_overview واعرض البيانات الفعلية كاملة مع الحالة والتاريخ، ولا تعتمد على الذاكرة أو التخمين.
 `;
 
 const tools = [
+  {
+    type: "function",
+    function: {
+      name: "get_customer_overview",
+      description: "Get the authenticated customer's profile, wallet balance, and complete order history with statuses.",
+      parameters: { type: "object", properties: {} }
+    }
+  },
   {
     type: "function",
     function: {
@@ -114,6 +123,11 @@ async function executeToolCall(toolCall, customerId) {
   }
 
   try {
+    if (name === 'get_customer_overview') {
+      const customer = await getQuery('SELECT id, username, name, email, phone, balance FROM customers WHERE id = ?', [customerId]);
+      const orders = await allQuery(`SELECT id, service_name, status, price, created_at, completed_at, rejection_reason FROM orders WHERE customer_id = ? ORDER BY id DESC`, [customerId]);
+      return { customer: customer ? { username: customer.username, name: customer.name, email: customer.email, phone: customer.phone, balance: Number(customer.balance || 0) } : null, orders: orders || [] };
+    }
     if (name === 'get_wallet_balance') {
       const customer = await getQuery('SELECT balance FROM customers WHERE id = ?', [customerId]);
       return { balance: Number(customer?.balance || 0) };
@@ -205,9 +219,16 @@ router.post('/chat', customerAuth, async (req, res) => {
       return res.status(400).json({ message: 'Message is required' });
     }
 
+    const customer = customerId
+      ? await getQuery('SELECT id, username, name, email, phone FROM customers WHERE id = ?', [customerId])
+      : null;
+    const userContext = customer
+      ? `\nحالة المستخدم: مسجل دخول ومصادق عليه. اسم المستخدم: ${customer.username || customer.name || 'غير محدد'}. لا تطلب منه التسجيل أو تسجيل الدخول. إذا سأل عن هويته، اذكر اسم المستخدم كما هو.\n`
+      : '\nحالة المستخدم: غير مسجل. لا تعرض بيانات الرصيد أو الطلبات الخاصة.\n';
+
     // Construct messages array
     const messages = [
-      { role: 'system', content: `${SYSTEM_PROMPT}\n${SITE_CONTEXT}` }
+      { role: 'system', content: `${SYSTEM_PROMPT}\n${SITE_CONTEXT}${userContext}` }
     ];
 
     if (Array.isArray(history)) {
