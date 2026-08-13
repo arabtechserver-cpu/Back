@@ -49,6 +49,13 @@ const SYSTEM_PROMPT = `
 كن ودوداً، مختصراً، واحترافياً. استخدم التنسيق المناسب لعرض المعلومات.
 `;
 
+const SITE_CONTEXT = `
+اسم الموقع الرسمي: Arab Tech Server (ويقدم خدمات IMEI & Server Solutions وفتح الهواتف).
+الصفحات: الرئيسية https://arab-tech1.online/ | الخدمات https://arab-tech1.online/services | الطلبات https://arab-tech1.online/orders | المحفظة https://arab-tech1.online/wallet | التسجيل/الدخول https://arab-tech1.online/login | توثيق API https://arab-tech1.online/api-docs.
+التواصل الرسمي: واتساب https://wa.me/249123667227 و https://wa.me/16728972935 | مجتمع واتساب https://chat.whatsapp.com/DINRDwU2lVjFcGRowxT3m5 | تيليجرام https://t.me/arabtechserveronline | فيسبوك https://www.facebook.com/ARABTECHSERVEROnline | تيك توك https://tiktok.com/@arabtechsuppurt | يوتيوب https://youtube.com/@arab-tech-server | البريد arabtechserver@gmail.com.
+عرّف المستخدم بالخدمات باستخدام search_services ولا تخترع سعراً أو مدة. الرصيد والطلبات معلومات خاصة. وجّه غير المسجل إلى رابط التسجيل/الدخول.
+`;
+
 const tools = [
   {
     type: "function",
@@ -187,7 +194,7 @@ router.post('/chat', customerAuth, async (req, res) => {
 
     // Construct messages array
     const messages = [
-      { role: 'system', content: SYSTEM_PROMPT }
+      { role: 'system', content: `${SYSTEM_PROMPT}\n${SITE_CONTEXT}` }
     ];
 
     if (Array.isArray(history)) {
