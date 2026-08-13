@@ -132,7 +132,7 @@ async function executeToolCall(toolCall, customerId) {
       return { results };
     }
   } catch (e) {
-    console.error(\`[AI Tool] Execution error for \${name}:\`, e);
+    console.error(`[AI Tool] Execution error for ${name}:`, e);
     return { error: 'Failed to execute tool' };
   }
 
@@ -151,7 +151,7 @@ async function callOpenRouter(messages) {
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
-      'Authorization': \`Bearer \${apiKey}\`,
+      'Authorization': `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
       'HTTP-Referer': 'https://arab-tech1.online', 
       'X-Title': 'Spider Store Front'
@@ -167,7 +167,7 @@ async function callOpenRouter(messages) {
   if (!response.ok) {
     const errText = await response.text();
     console.error('[AI Route] OpenRouter API Error:', errText);
-    throw new Error(\`OpenRouter API responded with status \${response.status}\`);
+    throw new Error(`OpenRouter API responded with status ${response.status}`);
   }
 
   return await response.json();
