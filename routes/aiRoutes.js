@@ -54,6 +54,7 @@ const SITE_CONTEXT = `
 الصفحات: الرئيسية https://arab-tech1.online/ | الخدمات https://arab-tech1.online/services | الطلبات https://arab-tech1.online/orders | المحفظة https://arab-tech1.online/wallet | التسجيل/الدخول https://arab-tech1.online/login | توثيق API https://arab-tech1.online/api-docs.
 التواصل الرسمي: واتساب https://wa.me/249123667227 و https://wa.me/16728972935 | مجتمع واتساب https://chat.whatsapp.com/DINRDwU2lVjFcGRowxT3m5 | تيليجرام https://t.me/arabtechserveronline | فيسبوك https://www.facebook.com/ARABTECHSERVEROnline | تيك توك https://tiktok.com/@arabtechsuppurt | يوتيوب https://youtube.com/@arab-tech-server | البريد arabtechserver@gmail.com.
 عرّف المستخدم بالخدمات باستخدام search_services ولا تخترع سعراً أو مدة. الرصيد والطلبات معلومات خاصة. وجّه غير المسجل إلى رابط التسجيل/الدخول.
+عند سؤال المستخدم عن أي خدمة أو باقة، استخدم search_services أولاً. إذا لم تُرجع الأداة نتيجة، قل بوضوح إن الخدمة غير موجودة حالياً ولا تقل إنها موجودة. إذا وُجدت نتيجة، اعرض الاسم والسعر والقسم والباقة والرابط المباشر كما وردت من الأداة.
 `;
 
 const tools = [
@@ -131,12 +132,24 @@ async function executeToolCall(toolCall, customerId) {
     if (name === 'search_services') {
       const query = (args.query || '').toLowerCase();
       if (!query) return { results: [] };
-      
-      const results = imeiServices
-        .filter(s => s.name.toLowerCase().includes(query) || s.group.toLowerCase().includes(query))
-        .slice(0, 5); // Return top 5 to avoid token limit
-      
-      return { results };
+
+      // Search the live catalog (services, categories and packages), not only the imported IMEI snapshot.
+      const liveRows = await allQuery(`
+        SELECT s.id, s.name, s.price, s.packages, s.category_id, c.name AS category_name
+        FROM services s LEFT JOIN categories c ON c.id = s.category_id
+        WHERE LOWER(s.name) LIKE ? OR LOWER(COALESCE(s.description, '')) LIKE ? OR LOWER(COALESCE(c.name, '')) LIKE ?
+        ORDER BY s.id DESC LIMIT 20
+      `, [`%${query}%`, `%${query}%`, `%${query}%`]);
+      const results = (liveRows || []).map(s => {
+        let packages = [];
+        try { packages = typeof s.packages === 'string' ? JSON.parse(s.packages || '[]') : (s.packages || []); } catch {}
+        return { id: s.id, name: s.name, price: s.price, category: s.category_name, packages,
+          url: `https://arab-tech1.online/service/${s.id}` };
+      });
+      if (results.length) return { results };
+      const fallback = imeiServices.filter(s => s.name.toLowerCase().includes(query) || s.group.toLowerCase().includes(query)).slice(0, 5)
+        .map(s => ({ ...s, url: `https://arab-tech1.online/service/${s.id}` }));
+      return { results: fallback };
     }
   } catch (e) {
     console.error(`[AI Tool] Execution error for ${name}:`, e);
