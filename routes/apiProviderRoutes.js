@@ -218,7 +218,7 @@ async function performProviderSync(providerId, customRate, customMarkup, customS
           return likelyNeedsImei && s.requires_imei !== false && (s.serviceType || 'imei').toLowerCase() === 'imei';
         });
         if (needsImei) {
-          combinedFields.unshift({ id: 'imei', name: 'imei', label: 'IMEI / SN / ECID', placeholder: 'أدخل رقم IMEI أو الرقم التسلسلي (SN) أو ECID', type: 'text', required: true });
+          combinedFields.unshift({ id: 'imei', name: 'imei', label: 'IMEI / SN / ECID', placeholder: 'أدخل رقم IMEI أو الرقم التسلسلي (SN) أو ECID', type: 'text', required: false });
         }
       }
 
