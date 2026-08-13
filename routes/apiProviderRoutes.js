@@ -182,6 +182,18 @@ async function performProviderSync(providerId, customRate, customMarkup, customS
   let addedServicesCount = 0;
   let updatedServicesCount = 0;
 
+  // Keep valid existing fields when a provider omits Requires.Custom on a sync response.
+  const mergeFields = (current, incoming) => {
+    const parse = value => { try { return Array.isArray(value) ? value : JSON.parse(value || '[]'); } catch { return []; } };
+    const result = [];
+    const seen = new Set();
+    [...parse(current), ...parse(incoming)].forEach(field => {
+      const key = String(field?.api_name || field?.fieldname || field?.name || field?.id || '').trim().toLowerCase();
+      if (key && !seen.has(key)) { seen.add(key); result.push(field); }
+    });
+    return result;
+  };
+
   if (shouldGroup) {
     const groups = {};
     for (const s of allServices) {
@@ -233,7 +245,9 @@ async function performProviderSync(providerId, customRate, customMarkup, customS
         addedCategoriesCount++;
       } else {
         categoryId = cat.id;
-        await runQuery("UPDATE categories SET fields = ? WHERE id = ?", [JSON.stringify(combinedFields), categoryId]);
+        const existingCategory = await getQuery('SELECT fields FROM categories WHERE id = ?', [categoryId]);
+        const safeCategoryFields = mergeFields(existingCategory?.fields, combinedFields);
+        if (safeCategoryFields.length) await runQuery("UPDATE categories SET fields = ? WHERE id = ?", [JSON.stringify(safeCategoryFields), categoryId]);
       }
 
       const mergedPackages = [];
@@ -253,6 +267,8 @@ async function performProviderSync(providerId, customRate, customMarkup, customS
             if (storedField) packageFields.push(storedField);
           });
         }
+        // Group-level fields are also valid for packages when the provider omits per-service fields.
+        const effectivePackageFields = mergeFields(combinedFields, packageFields);
 
         mergedPackages.push({
           id: idx + 1,
@@ -266,7 +282,7 @@ async function performProviderSync(providerId, customRate, customMarkup, customS
           min_quantity: s.min_quantity || 1,
           max_quantity: s.max_quantity || 0,
           requires_quantity: isDynamicPkg,
-          fields: packageFields
+          fields: effectivePackageFields
         });
       });
 
@@ -309,6 +325,11 @@ async function performProviderSync(providerId, customRate, customMarkup, customS
         addedCategoriesCount++;
       } else {
         categoryId = cat.id;
+        if (s.customFields?.length) {
+          const existingCategory = await getQuery('SELECT fields FROM categories WHERE id = ?', [categoryId]);
+          const categoryFields = mergeFields(existingCategory?.fields, s.customFields.map(buildStoredCustomField).filter(Boolean));
+          if (categoryFields.length) await runQuery('UPDATE categories SET fields = ? WHERE id = ?', [JSON.stringify(categoryFields), categoryId]);
+        }
       }
 
       const serviceFields = [];
