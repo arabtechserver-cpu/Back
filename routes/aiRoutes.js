@@ -150,9 +150,9 @@ async function executeToolCall(toolCall, customerId) {
 
   try {
     if (name === 'get_customer_overview') {
-      const customer = await getQuery('SELECT id, username, name, email, phone, balance FROM customers WHERE id = ?', [customerId]);
-      const orders = await allQuery(`SELECT id, service_name, status, price, created_at, completed_at, rejection_reason FROM orders WHERE customer_id = ? ORDER BY id DESC`, [customerId]);
-      return { customer: customer ? { username: customer.username, name: customer.name, email: customer.email, phone: customer.phone, balance: Number(customer.balance || 0) } : null, orders: orders || [] };
+      const customer = await getQuery('SELECT id, username, email, phone, balance FROM customers WHERE id = ?', [customerId]);
+      const orders = await allQuery(`SELECT id, service_name, status, package_price, created_at, code, download_link FROM orders WHERE customer_id = ? ORDER BY id DESC`, [customerId]);
+      return { customer: customer ? { username: customer.username, email: customer.email, phone: customer.phone, balance: Number(customer.balance || 0) } : null, orders: orders || [] };
     }
     if (name === 'get_wallet_balance') {
       const customer = await getQuery('SELECT balance FROM customers WHERE id = ?', [customerId]);
