@@ -613,6 +613,16 @@ async function createTables() {
       download_link_title VARCHAR(255) DEFAULT ''
     );
 
+    CREATE TABLE IF NOT EXISTS complaints (
+      id SERIAL PRIMARY KEY,
+      customer_id INT REFERENCES customers(id) ON DELETE SET NULL,
+      order_id INT REFERENCES orders(id) ON DELETE SET NULL,
+      subject TEXT NOT NULL,
+      details TEXT NOT NULL,
+      status VARCHAR(30) DEFAULT 'open',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
     CREATE TABLE IF NOT EXISTS banners (
       id        SERIAL PRIMARY KEY,
       title     VARCHAR(300),

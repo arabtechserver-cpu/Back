@@ -2,8 +2,9 @@ const express = require('express');
 const router = express.Router();
 const fs = require('fs');
 const path = require('path');
-const { getQuery, allQuery } = require('../db');
+const { getQuery, allQuery, runQuery } = require('../db');
 const customerAuth = require('../middleware/customerAuth');
+const telegram = require('../utils/telegramService');
 
 // Cache IMEI services in memory for fast searching
 let imeiServices = [];
@@ -56,9 +57,20 @@ const SITE_CONTEXT = `
 عرّف المستخدم بالخدمات باستخدام search_services ولا تخترع سعراً أو مدة. الرصيد والطلبات معلومات خاصة. وجّه غير المسجل إلى رابط التسجيل/الدخول.
 عند سؤال المستخدم عن أي خدمة أو باقة، استخدم search_services أولاً. إذا لم تُرجع الأداة نتيجة، قل بوضوح إن الخدمة غير موجودة حالياً ولا تقل إنها موجودة. إذا وُجدت نتيجة، اعرض الاسم والسعر والقسم والباقة والرابط المباشر كما وردت من الأداة.
 عند سؤال المستخدم عن اسمه أو حسابه أو جميع طلباته أو ما اكتمل وما يزال قيد التنفيذ، استخدم get_customer_overview واعرض البيانات الفعلية كاملة مع الحالة والتاريخ، ولا تعتمد على الذاكرة أو التخمين.
+إذا قدم المستخدم شكوى أو مشكلة، اجمع عنواناً وتفاصيل واضحة ورقم الطلب إن ذكره، ثم استخدم submit_complaint. أعطه رقم الشكوى بعد نجاح التسجيل وأخبره أنها أُرسلت للدعم عبر تيليجرام.
 `;
 
 const tools = [
+  {
+    type: "function",
+    function: {
+      name: "submit_complaint",
+      description: "Create a complaint for the authenticated customer and notify the super admin on Telegram.",
+      parameters: { type: "object", required: ["subject", "details"], properties: {
+        subject: { type: "string" }, details: { type: "string" }, order_id: { type: "string" }
+      }}
+    }
+  },
   {
     type: "function",
     function: {
@@ -115,6 +127,19 @@ async function executeToolCall(toolCall, customerId) {
   const name = toolCall.function.name;
   let args = {};
   try {
+    if (name === 'submit_complaint') {
+      const subject = String(args.subject || '').trim();
+      const details = String(args.details || '').trim();
+      if (!subject || !details) return { error: 'Subject and details are required' };
+      const orderId = args.order_id ? Number.parseInt(args.order_id, 10) : null;
+      const result = await runQuery('INSERT INTO complaints (customer_id, order_id, subject, details) VALUES (?, ?, ?, ?) RETURNING id', [customerId, Number.isFinite(orderId) ? orderId : null, subject, details]);
+      const complaintId = result?.id || result?.lastID;
+      const customer = await getQuery('SELECT username, email, phone FROM customers WHERE id = ?', [customerId]);
+      const admins = await telegram.getAdminChatIds();
+      const text = `📣 *شكوى جديدة #${complaintId}*\n👤 العميل: ${customer?.username || customerId}\n📧 ${customer?.email || ''}\n📱 ${customer?.phone || ''}\n📦 الطلب: ${orderId || 'غير محدد'}\n📝 *${subject}*\n${details}`;
+      for (const adminId of admins) await telegram.sendMessage(String(adminId), text).catch(() => {});
+      return { success: true, complaint_id: complaintId, message: `تم تسجيل الشكوى برقم #${complaintId} وإرسالها للدعم.` };
+    }
     if (toolCall.function.arguments) {
       args = JSON.parse(toolCall.function.arguments);
     }
