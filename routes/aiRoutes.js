@@ -52,6 +52,7 @@ const SYSTEM_PROMPT = `
 
 const SITE_CONTEXT = `
 اسم الموقع الرسمي: Arab Tech Server (ويقدم خدمات IMEI & Server Solutions وفتح الهواتف).
+مصمم ومبرمج الموقع: Mina Samir — رقم التواصل: 01279301263. عند السؤال عن مصمم الموقع أو المبرمج أو المطور، اذكر هذه المعلومة كما هي.
 الصفحات: الرئيسية https://arab-tech1.online/ | الخدمات https://arab-tech1.online/services | الطلبات https://arab-tech1.online/orders | المحفظة https://arab-tech1.online/wallet | التسجيل/الدخول https://arab-tech1.online/login | توثيق API https://arab-tech1.online/api-docs.
 التواصل الرسمي: واتساب https://wa.me/249123667227 و https://wa.me/16728972935 | مجتمع واتساب https://chat.whatsapp.com/DINRDwU2lVjFcGRowxT3m5 | تيليجرام https://t.me/arabtechserveronline | فيسبوك https://www.facebook.com/ARABTECHSERVEROnline | تيك توك https://tiktok.com/@arabtechsuppurt | يوتيوب https://youtube.com/@arab-tech-server | البريد arabtechserver@gmail.com.
 عرّف المستخدم بالخدمات باستخدام search_services ولا تخترع سعراً أو مدة. الرصيد والطلبات معلومات خاصة. وجّه غير المسجل إلى رابط التسجيل/الدخول.
