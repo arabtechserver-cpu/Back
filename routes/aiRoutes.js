@@ -128,6 +128,7 @@ async function executeToolCall(toolCall, customerId) {
   const name = toolCall.function.name;
   let args = {};
   try {
+    if (toolCall.function.arguments) args = JSON.parse(toolCall.function.arguments);
     if (name === 'submit_complaint') {
       const subject = String(args.subject || '').trim();
       const details = String(args.details || '').trim();
@@ -140,9 +141,6 @@ async function executeToolCall(toolCall, customerId) {
       const text = `📣 *شكوى جديدة #${complaintId}*\n👤 العميل: ${customer?.username || customerId}\n📧 ${customer?.email || ''}\n📱 ${customer?.phone || ''}\n📦 الطلب: ${orderId || 'غير محدد'}\n📝 *${subject}*\n${details}`;
       for (const adminId of admins) await telegram.sendMessage(String(adminId), text).catch(() => {});
       return { success: true, complaint_id: complaintId, message: `تم تسجيل الشكوى برقم #${complaintId} وإرسالها للدعم.` };
-    }
-    if (toolCall.function.arguments) {
-      args = JSON.parse(toolCall.function.arguments);
     }
   } catch (e) {
     console.error('[AI Tool] Error parsing arguments:', e);
@@ -161,7 +159,7 @@ async function executeToolCall(toolCall, customerId) {
     
     if (name === 'get_latest_orders') {
       const orders = await allQuery(`
-        SELECT id, service_name, status, price, created_at
+        SELECT id, service_name, status, package_price, created_at
         FROM orders
         WHERE customer_id = ?
         ORDER BY id DESC LIMIT 5
@@ -227,7 +225,7 @@ async function callOpenRouter(messages) {
   if (!response.ok) {
     const errText = await response.text();
     console.error('[AI Route] OpenRouter API Error:', errText);
-    throw new Error(`OpenRouter API responded with status ${response.status}`);
+    throw new Error(`OpenRouter API responded with status ${response.status}: ${errText.slice(0, 300)}`);
   }
 
   return await response.json();
@@ -277,7 +275,8 @@ router.post('/chat', customerAuth, async (req, res) => {
       throw e;
     }
 
-    let responseMessage = openRouterResponse.choices[0].message;
+    let responseMessage = openRouterResponse?.choices?.[0]?.message;
+    if (!responseMessage) throw new Error('AI provider returned an empty response');
 
     // Handle tool calls if any
     if (responseMessage.tool_calls && responseMessage.tool_calls.length > 0) {
@@ -295,7 +294,8 @@ router.post('/chat', customerAuth, async (req, res) => {
 
       // 2nd API Call with tool results
       openRouterResponse = await callOpenRouter(messages);
-      responseMessage = openRouterResponse.choices[0].message;
+      responseMessage = openRouterResponse?.choices?.[0]?.message;
+      if (!responseMessage) throw new Error('AI provider returned an empty tool response');
     }
 
     // Final response to frontend
