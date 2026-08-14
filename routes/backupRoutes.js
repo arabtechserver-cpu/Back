@@ -5,7 +5,7 @@ const path = require('path');
 const authMiddleware = require('../middleware/auth');
 const deleteOtpAuth = require('../middleware/deleteOtpAuth');
 const { allQuery, getDatabaseMode, runQuery } = require('../db');
-const { sendBackupViaWhatsApp, sendBackupViaTelegram, getBackupTableNames } = require('../utils/databaseBackup');
+const { writeBackupSnapshot, sendBackupViaWhatsApp, sendBackupViaTelegram, getBackupTableNames } = require('../utils/databaseBackup');
 
 const BACKUP_ROOT = path.join(__dirname, '..', 'backups');
 const UPLOADS_DIR = path.join(__dirname, '..', 'uploads');
@@ -168,16 +168,21 @@ router.post('/send-latest-telegram', authMiddleware, async (req, res) => {
       : []
     ).sort((a, b) => b.time - a.time);
 
-    if (!files.length) return res.status(404).json({ message: 'لا توجد نسخة احتياطية محفوظة لإرسالها.' });
-
-    const latest = files[0];
-    const result = await sendBackupViaTelegram(latest.path, 'manual');
+    // Deployment storage can be ephemeral. Create a fresh unsent snapshot when no file survived a restart.
+    const latest = files[0] || null;
+    let latestPath = latest?.path;
+    let latestName = latest?.name;
+    if (!latestPath) {
+      latestPath = await writeBackupSnapshot('startup');
+      latestName = path.basename(latestPath);
+    }
+    const result = await sendBackupViaTelegram(latestPath, 'manual');
     if (!result.total) return res.status(400).json({ message: 'لا يوجد معرف أدمن تيليجرام مسجل في الإعدادات.' });
     if (!result.sent) return res.status(502).json({ message: 'تعذر إرسال النسخة إلى تيليجرام. راجع إعدادات البوت وسجلات السيرفر.' });
 
     res.json({
       message: `تم إرسال أحدث نسخة إلى ${result.sent} من ${result.total} أدمن على تيليجرام.`,
-      filename: latest.name,
+      filename: latestName,
     });
   } catch (error) {
     console.error('Send latest backup to Telegram error:', error);
