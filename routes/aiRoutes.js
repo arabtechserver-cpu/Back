@@ -246,7 +246,7 @@ router.post('/chat', customerAuth, async (req, res) => {
     }
 
     const customer = customerId
-      ? await getQuery('SELECT id, username, name, email, phone FROM customers WHERE id = ?', [customerId])
+      ? await getQuery('SELECT id, username, email, phone FROM customers WHERE id = ?', [customerId])
       : null;
     const userContext = customer
       ? `\nحالة المستخدم: مسجل دخول ومصادق عليه. اسم المستخدم: ${customer.username || customer.name || 'غير محدد'}. لا تطلب منه التسجيل أو تسجيل الدخول. إذا سأل عن هويته، اذكر اسم المستخدم كما هو.\n`
