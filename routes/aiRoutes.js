@@ -197,6 +197,45 @@ async function executeToolCall(toolCall, customerId) {
   return { error: 'Tool not found' };
 }
 
+function makeHistory(history, message, reply) {
+  const safeHistory = Array.isArray(history)
+    ? history.filter(item => item && ['user', 'assistant'].includes(item.role) && typeof item.content === 'string').slice(-20)
+    : [];
+  return [...safeHistory, { role: 'user', content: message }, { role: 'assistant', content: reply }];
+}
+
+function formatOrderStatus(status) {
+  const labels = { pending: 'قيد الانتظار', processing: 'قيد التنفيذ', completed: 'مكتمل', rejected: 'مرفوض', cancelled: 'ملغي', canceled: 'ملغي', refunded: 'تم رد الرصيد' };
+  return labels[String(status || '').toLowerCase()] || status || 'غير محدد';
+}
+
+async function buildLocalReply(message, customerId) {
+  const text = String(message || '').trim();
+  const normalized = text.toLowerCase();
+  if (/مصمم|مبرمج|مطور|مين عمل|developer|programmer|designer/.test(normalized)) return 'مصمم ومبرمج موقع Arab Tech Server هو Mina Samir، ورقم التواصل: 01279301263.';
+  if (/تواصل|واتس|واتساب|تلجرام|تيليجرام|فيسبوك|رقمكم|contact/.test(normalized)) return 'قنوات التواصل الرسمية:\n• واتساب: https://wa.me/249123667227 أو https://wa.me/16728972935\n• تيليجرام: https://t.me/arabtechserveronline\n• فيسبوك: https://www.facebook.com/ARABTECHSERVEROnline\n• البريد: arabtechserver@gmail.com';
+  if (/اسمي|اسم حسابي|مين انا|my name|username/.test(normalized)) {
+    const customer = await getQuery('SELECT username FROM customers WHERE id = ?', [customerId]);
+    return customer?.username ? `اسم حسابك هو: ${customer.username}` : 'تعذر العثور على بيانات حسابك.';
+  }
+  if (/رصيد|محفظ|balance|wallet/.test(normalized)) {
+    const customer = await getQuery('SELECT balance FROM customers WHERE id = ?', [customerId]);
+    return `رصيد محفظتك الحالي: ${Number(customer?.balance || 0).toFixed(2)} USD\nشحن المحفظة: https://arab-tech1.online/wallet`;
+  }
+  if (/طلب|طلبات|order|اتعمل|اكتمل|لسه/.test(normalized)) {
+    const rows = await allQuery(`SELECT id, service_name, package_name, package_price, status, created_at FROM orders WHERE customer_id = ? ORDER BY id DESC LIMIT 10`, [customerId]);
+    if (!rows?.length) return 'لا توجد طلبات مسجلة على حسابك حتى الآن. تصفح الخدمات: https://arab-tech1.online/services';
+    return `آخر طلباتك الفعلية:\n${rows.map(order => `• #${order.id} — ${order.service_name || 'خدمة'}${order.package_name ? ` / ${order.package_name}` : ''} — ${formatOrderStatus(order.status)} — ${Number(order.package_price || 0).toFixed(2)} USD`).join('\n')}\nكل الطلبات: https://arab-tech1.online/orders`;
+  }
+  const isGreeting = /^(مرحبا|مرحباً|اهلا|أهلا|السلام عليكم|الو|hello|hi)\s*[!.؟]*$/i.test(text);
+  if (!isGreeting) {
+    const terms = normalized.replace(/[؟?!.,،:;()[\]{}]/g, ' ').split(/\s+/).filter(word => word.length > 1 && !['هل', 'يوجد', 'عايز', 'اريد', 'خدمة', 'اشتراك', 'عندكم', 'متاح', 'موجود', 'في', 'عن', 'على', 'من', 'the', 'have', 'service'].includes(word));
+    const result = await executeToolCall({ function: { name: 'search_services', arguments: JSON.stringify({ query: terms.slice(0, 6).join(' ') || normalized }) } }, customerId);
+    if (result?.results?.length) return `وجدت هذه الخدمات المتاحة فعلياً:\n${result.results.slice(0, 5).map(service => `• ${service.name} — ${Number(service.price || service.credit || 0).toFixed(2)} USD${service.category ? ` — ${service.category}` : ''}\n  ${service.url}`).join('\n')}`;
+  }
+  return 'أهلاً بك في Arab Tech Server. أستطيع البحث في الخدمات الفعلية، وعرض رصيدك وطلباتك وحالتها. اكتب اسم الخدمة التي تريدها أو اسألني عن رصيدك أو طلباتك.\nالخدمات: https://arab-tech1.online/services';
+}
+
 // Make call to OpenRouter API
 async function callOpenRouter(messages) {
   const apiKey = process.env.OPENROUTER_API_KEY;
@@ -272,7 +311,9 @@ router.post('/chat', customerAuth, async (req, res) => {
           history: [...(history || []), { role: 'user', content: message }, { role: 'assistant', content: 'عذراً، لم يتم إعداد مفتاح API الخاص بـ OpenRouter بعد.' }]
         });
       }
-      throw e;
+      console.error('[AI Chat] Provider unavailable, using local assistant:', e.message);
+      const reply = await buildLocalReply(message, customerId);
+      return res.json({ reply, history: makeHistory(history, message, reply), fallback: true });
     }
 
     let responseMessage = openRouterResponse?.choices?.[0]?.message;
@@ -293,7 +334,13 @@ router.post('/chat', customerAuth, async (req, res) => {
       }
 
       // 2nd API Call with tool results
-      openRouterResponse = await callOpenRouter(messages);
+      try {
+        openRouterResponse = await callOpenRouter(messages);
+      } catch (e) {
+        console.error('[AI Chat] Provider failed after tool call, using local assistant:', e.message);
+        const reply = await buildLocalReply(message, customerId);
+        return res.json({ reply, history: makeHistory(history, message, reply), fallback: true });
+      }
       responseMessage = openRouterResponse?.choices?.[0]?.message;
       if (!responseMessage) throw new Error('AI provider returned an empty tool response');
     }
@@ -306,7 +353,14 @@ router.post('/chat', customerAuth, async (req, res) => {
 
   } catch (error) {
     console.error('[AI Chat] Error:', error);
-    res.status(500).json({ reply: 'حدث خطأ أثناء التواصل مع المساعد الذكي. يرجى المحاولة لاحقاً.' });
+    try {
+      const { history, message } = req.body || {};
+      const reply = await buildLocalReply(message, req.user?.id || req.user?.customer_id);
+      res.json({ reply, history: makeHistory(history, message, reply), fallback: true });
+    } catch (fallbackError) {
+      console.error('[AI Chat] Local fallback error:', fallbackError);
+      res.status(503).json({ reply: 'المساعد غير متاح مؤقتاً. تواصل معنا عبر https://t.me/arabtechserveronline' });
+    }
   }
 });
 
