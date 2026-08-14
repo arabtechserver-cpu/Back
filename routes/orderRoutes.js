@@ -443,9 +443,11 @@ router.get('/', authMiddleware, async (req, res) => {
         o.transfer_to, o.quantity, o.receipt_image, o.transfer_amount, o.download_link,
         o.download_link_title, o.status, o.code, o.created_at, NULL AS processed_at,
         o.api_source, o.api_order_id, o.api_status, o.custom_fields,
-        o.is_api_order, o.api_reseller_id, s.api_provider_id
+        o.is_api_order, o.api_reseller_id, COALESCE(o.api_provider_id, s.api_provider_id) AS api_provider_id,
+        p.name AS api_provider_name
       FROM orders o
       LEFT JOIN services s ON o.service_id = s.id
+      LEFT JOIN api_providers p ON p.id = COALESCE(o.api_provider_id, s.api_provider_id)
       ORDER BY o.id DESC
       LIMIT ?
     `, [limit])) || [];
