@@ -1543,6 +1543,24 @@ router.put('/dev-settings/allowed-ips', customerAuth, async (req, res) => {
   }
 });
 
+// Test the customer's API credentials from the documentation page (no external IP check).
+router.post('/dev-settings/test', customerAuth, async (req, res) => {
+  try {
+    const customer = await getQuery('SELECT username, api_key, api_enabled, balance FROM customers WHERE id = ?', [req.customer.id]);
+    if (!customer?.api_enabled || !customer.api_key) return res.status(403).json({ success: false, message: 'API الحساب غير مفعل.' });
+    const action = String(req.body?.action || 'accountinfo');
+    if (action === 'accountinfo') return res.json({ success: true, action, response: { SUCCESS: [{ AccountInfo: { credit: String(customer.balance || 0), currency: 'USD' } }] } });
+    if (action === 'imeiservicelist') {
+      const services = await allQuery('SELECT id, name, price FROM services WHERE show_in_menu = true ORDER BY id DESC LIMIT 20');
+      return res.json({ success: true, action, response: { SUCCESS: [{ LIST: services || [] }] } });
+    }
+    return res.status(400).json({ success: false, message: 'العملية غير مدعومة للاختبار.' });
+  } catch (error) {
+    console.error('API test error:', error);
+    res.status(500).json({ success: false, message: 'تعذر اختبار API حالياً.' });
+  }
+});
+
 // Admin: Get API Logs for a specific customer
 router.get('/admin/:id/api-logs', authMiddleware, async (req, res) => {
   try {
