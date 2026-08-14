@@ -184,7 +184,8 @@ async function getAdminChatIds() {
     const row = await getQuery("SELECT value FROM settings WHERE key = 'telegram_admin_chat_ids'");
     if (!row || !row.value) return [];
     const parsed = JSON.parse(row.value);
-    return Array.isArray(parsed) ? parsed : [parsed];
+    const ids = Array.isArray(parsed) ? parsed : [parsed];
+    return [...new Set(ids.map(id => String(id).trim()).filter(Boolean))];
   } catch { return []; }
 }
 async function isTelegramConfigured() {
