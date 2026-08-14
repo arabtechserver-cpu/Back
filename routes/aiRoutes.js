@@ -172,20 +172,21 @@ async function executeToolCall(toolCall, customerId) {
     }
 
     if (name === 'search_services') {
-      const query = (args.query || '').toLowerCase();
+      const query = String(args.query || '').toLowerCase().trim();
       if (!query) return { results: [] };
+      const searchTerms = [...new Set(query.split(/\s+/).filter(word => word.length > 1))].slice(0, 8);
 
       // Search the live catalog (services, categories and packages), not only the imported IMEI snapshot.
       const liveRows = await allQuery(`
         SELECT s.id, s.name, s.price, s.packages, s.category_id, c.name AS category_name
         FROM services s LEFT JOIN categories c ON c.id = s.category_id
-        WHERE LOWER(s.name) LIKE ? OR LOWER(COALESCE(s.description, '')) LIKE ? OR LOWER(COALESCE(s.packages, '')) LIKE ? OR LOWER(COALESCE(s.fields, '')) LIKE ? OR LOWER(COALESCE(c.name, '')) LIKE ?
+        WHERE ${searchTerms.map(() => `(LOWER(s.name) LIKE ? OR LOWER(COALESCE(s.description, '')) LIKE ? OR LOWER(COALESCE(s.packages, '')) LIKE ? OR LOWER(COALESCE(s.fields, '')) LIKE ? OR LOWER(COALESCE(c.name, '')) LIKE ?)`).join(' OR ')}
         ORDER BY s.id DESC LIMIT 8
-      `, [`%${query}%`, `%${query}%`, `%${query}%`, `%${query}%`, `%${query}%`]);
+      `, searchTerms.flatMap(term => [`%${term}%`, `%${term}%`, `%${term}%`, `%${term}%`, `%${term}%`)]);
       const results = (liveRows || []).map(s => {
         let packages = [];
         try { packages = typeof s.packages === 'string' ? JSON.parse(s.packages || '[]') : (s.packages || []); } catch {}
-        const matchingPackages = packages.filter(pkg => JSON.stringify(pkg).toLowerCase().includes(query));
+        const matchingPackages = packages.filter(pkg => searchTerms.some(term => JSON.stringify(pkg).toLowerCase().includes(term)));
         return { id: s.id, name: s.name, price: s.price, category: s.category_name, packages: matchingPackages.length ? matchingPackages : packages,
           url: `https://arab-tech1.online/service/${s.id}` };
       });
@@ -236,6 +237,10 @@ async function buildLocalReply(message, customerId) {
   if (!isGreeting) {
     const terms = normalized.replace(/[؟?!.,،:;()[\]{}]/g, ' ').split(/\s+/).filter(word => word.length > 1 && !['هل', 'يوجد', 'عايز', 'اريد', 'خدمة', 'اشتراك', 'عندكم', 'متاح', 'موجود', 'في', 'عن', 'على', 'من', 'the', 'have', 'service'].includes(word));
     const result = await executeToolCall({ function: { name: 'search_services', arguments: JSON.stringify({ query: terms.slice(0, 6).join(' ') || normalized }) } }, customerId);
+    if (!result?.results?.length && terms.length > 1) {
+      const retries = await Promise.all(terms.slice(0, 4).map(term => executeToolCall({ function: { name: 'search_services', arguments: JSON.stringify({ query: term }) } }, customerId)));
+      result.results = retries.flatMap(item => item?.results || []).filter((item, index, all) => all.findIndex(x => String(x.id) === String(item.id)) === index).slice(0, 8);
+    }
     if (result?.results?.length) return `وجدت هذه الخدمات المتاحة فعلياً:\n${result.results.slice(0, 5).map(service => `• ${service.name} — ${Number(service.price || service.credit || 0).toFixed(2)} USD${service.category ? ` — ${service.category}` : ''}\n  ${service.url}`).join('\n')}`;
   }
   return 'أهلاً بك في Arab Tech Server. أستطيع البحث في الخدمات الفعلية، وعرض رصيدك وطلباتك وحالتها. اكتب اسم الخدمة التي تريدها أو اسألني عن رصيدك أو طلباتك.\nالخدمات: https://arab-tech1.online/services';
