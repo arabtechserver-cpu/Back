@@ -127,6 +127,37 @@ const tools = [
   }
 ];
 
+const CATALOG_WORDS = /(?:خدم|خدمة|خدمات|باقه|باقة|باقات|قسم|اقسام|أقسام|سعر|اسعار|أسعار|اشتراك|اشتراكات|متاح|متوفر|موجود|عندكم|عندكو|شراء|اشتر|service|package|category|price|subscription|available|have|buy)/i;
+const CATALOG_STOP_WORDS = new Set([
+  'هل', 'في', 'فيه', 'يوجد', 'عندكم', 'عندكو', 'عايز', 'اريد', 'أريد', 'محتاج', 'ممكن',
+  'خدمة', 'خدمات', 'باقه', 'باقة', 'باقات', 'قسم', 'اقسام', 'أقسام', 'سعر', 'اسعار', 'أسعار',
+  'متاح', 'متاحة', 'موجود', 'موجودة', 'شراء', 'اشتري', 'عن', 'على', 'من', 'الى', 'إلى', 'اي', 'أي',
+  'the', 'a', 'an', 'do', 'you', 'have', 'service', 'services', 'package', 'packages', 'category', 'price', 'buy'
+]);
+
+function getCatalogQuery(message) {
+  return String(message || '')
+    .toLowerCase()
+    .replace(/[\u064b-\u065f\u0670]/g, '')
+    .replace(/[؟?!.,،:;()[\]{}"']/g, ' ')
+    .split(/\s+/)
+    .map(word => word.replace(/^ال(?=.{3,})/, ''))
+    .filter(word => word.length > 1 && !CATALOG_STOP_WORDS.has(word))
+    .slice(0, 8)
+    .join(' ');
+}
+
+function formatCatalogReply(results) {
+  const lines = results.slice(0, 6).map(service => {
+    const packages = Array.isArray(service.packages) ? service.packages.slice(0, 4) : [];
+    const packageText = packages.length
+      ? `\n${packages.map(pkg => `  - ${pkg.name || 'باقة'} — ${Number(pkg.price ?? pkg.usd_price ?? service.price ?? 0).toFixed(2)} USD`).join('\n')}`
+      : '';
+    return `• ${service.name} — ${Number(service.price || service.credit || 0).toFixed(2)} USD${service.category ? ` — قسم ${service.category}` : ''}${packageText}\n  [عرض وشراء الخدمة](${service.url})`;
+  });
+  return `وجدت هذه النتائج المتاحة في المتجر:\n${lines.join('\n')}`;
+}
+
 // Tool execution logic
 async function executeToolCall(toolCall, customerId) {
   const name = toolCall.function.name;
@@ -290,6 +321,21 @@ router.post('/chat', customerAuth, async (req, res) => {
 
     if (!message) {
       return res.status(400).json({ message: 'Message is required' });
+    }
+
+    // Product discovery must not depend on whether the language model decides to call a tool.
+    // Search the live catalog first for explicit service/package/category questions.
+    if (CATALOG_WORDS.test(String(message))) {
+      const catalogQuery = getCatalogQuery(message) || String(message).trim();
+      const catalogResult = await executeToolCall({
+        function: { name: 'search_services', arguments: JSON.stringify({ query: catalogQuery }) }
+      }, customerId);
+      if (catalogResult?.results?.length) {
+        const reply = formatCatalogReply(catalogResult.results);
+        return res.json({ reply, history: makeHistory(history, message, reply), catalog_search: true });
+      }
+      const reply = `لم أجد نتيجة مطابقة لـ «${catalogQuery}» في الخدمات أو الباقات أو الأقسام المتاحة حالياً. جرّب كتابة اسم المنتج بالإنجليزية أو جزءاً أقصر من اسمه.`;
+      return res.json({ reply, history: makeHistory(history, message, reply), catalog_search: true });
     }
 
     const customer = customerId
