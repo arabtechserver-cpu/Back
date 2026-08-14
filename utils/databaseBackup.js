@@ -82,16 +82,24 @@ async function sendBackupViaTelegram(backupPath, reason = 'scheduled') {
     const chatIds = await telegram.getAdminChatIds();
     if (!chatIds.length) {
       console.warn('[DB Backup] No Telegram admin chat IDs configured.');
-      return;
+      return { sent: 0, total: 0 };
     }
     const label = reason === 'manual' ? 'يدوية' : reason === 'scheduled' ? 'يومية تلقائية' : 'طارئة';
     const caption = `💾 نسخة احتياطية ${label}\n📅 ${new Date().toLocaleString('ar-EG')}\n✅ تشمل كل بيانات الموقع والطلبات وعلاقاتها\n⛔ لا تشمل الخدمات والأقسام`;
+    let sentCount = 0;
     for (const chatId of chatIds) {
       const sent = await telegram.sendDocument(String(chatId), backupPath, caption);
-      if (!sent) console.warn(`[DB Backup] Telegram delivery failed for admin ${chatId}.`);
+      if (sent) {
+        sentCount += 1;
+        console.log(`[DB Backup] Backup sent to Telegram admin ${chatId} successfully.`);
+      } else {
+        console.warn(`[DB Backup] Telegram delivery failed for admin ${chatId}.`);
+      }
     }
+    return { sent: sentCount, total: chatIds.length };
   } catch (error) {
     console.warn('[DB Backup] Failed to send backup via Telegram:', error.message);
+    return { sent: 0, total: 0, error: error.message };
   }
 }
 
@@ -266,17 +274,17 @@ function startDatabaseBackupScheduler() {
     });
   }
 
-  setTimeout(() => {
-    writeBackupSnapshot('startup').catch((error) => {
-      console.warn('[DB Backup] Startup backup failed:', error.message);
-    });
-  }, BACKUP_START_DELAY_MS);
-
-  setInterval(() => {
+  const runDailyBackup = () => {
     writeBackupSnapshot('scheduled').catch((error) => {
       console.warn('[DB Backup] Scheduled backup failed:', error.message);
     });
-  }, BACKUP_INTERVAL_MS);
+  };
+
+  // Send the first daily backup shortly after startup, then every 24 hours.
+  setTimeout(() => {
+    runDailyBackup();
+    setInterval(runDailyBackup, BACKUP_INTERVAL_MS);
+  }, BACKUP_START_DELAY_MS);
 
   console.log(`[DB Backup] Daily scheduler started. Interval: ${BACKUP_INTERVAL_MS}ms`);
 }

@@ -157,6 +157,34 @@ router.post('/create', authMiddleware, async (req, res) => {
   }
 });
 
+// Send the newest saved backup to all configured Telegram administrators.
+router.post('/send-latest-telegram', authMiddleware, async (req, res) => {
+  try {
+    const dirs = [BACKUP_ROOT, path.join(BACKUP_ROOT, 'database'), path.join(BACKUP_ROOT, 'fallback')];
+    const files = dirs.flatMap(dir => fs.existsSync(dir)
+      ? fs.readdirSync(dir)
+        .filter(name => name.endsWith('.json'))
+        .map(name => ({ path: path.join(dir, name), name, time: fs.statSync(path.join(dir, name)).mtimeMs }))
+      : []
+    ).sort((a, b) => b.time - a.time);
+
+    if (!files.length) return res.status(404).json({ message: 'لا توجد نسخة احتياطية محفوظة لإرسالها.' });
+
+    const latest = files[0];
+    const result = await sendBackupViaTelegram(latest.path, 'manual');
+    if (!result.total) return res.status(400).json({ message: 'لا يوجد معرف أدمن تيليجرام مسجل في الإعدادات.' });
+    if (!result.sent) return res.status(502).json({ message: 'تعذر إرسال النسخة إلى تيليجرام. راجع إعدادات البوت وسجلات السيرفر.' });
+
+    res.json({
+      message: `تم إرسال أحدث نسخة إلى ${result.sent} من ${result.total} أدمن على تيليجرام.`,
+      filename: latest.name,
+    });
+  } catch (error) {
+    console.error('Send latest backup to Telegram error:', error);
+    res.status(500).json({ message: 'حدث خطأ أثناء إرسال أحدث نسخة إلى تيليجرام.' });
+  }
+});
+
 // 3. Download a backup file
 router.get('/download/:filename', (req, res) => {
   try {
