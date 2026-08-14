@@ -129,11 +129,27 @@ const tools = [
 
 const CATALOG_WORDS = /(?:خدم|خدمة|خدمات|باقه|باقة|باقات|قسم|اقسام|أقسام|سعر|اسعار|أسعار|اشتراك|اشتراكات|متاح|متوفر|موجود|عندكم|عندكو|شراء|اشتر|service|package|category|price|subscription|available|have|buy)/i;
 const CATALOG_STOP_WORDS = new Set([
-  'هل', 'في', 'فيه', 'يوجد', 'عندكم', 'عندكو', 'عايز', 'اريد', 'أريد', 'محتاج', 'ممكن',
-  'خدمة', 'خدمات', 'باقه', 'باقة', 'باقات', 'قسم', 'اقسام', 'أقسام', 'سعر', 'اسعار', 'أسعار',
+  'هل', 'في', 'فيه', 'يوجد', 'عندكم', 'عندكو', 'عايز', 'اريد', 'أريد', 'محتاج', 'ممكن', 'طيب', 'طب',
+  'خدمة', 'خدمات', 'باقه', 'باقة', 'باقات', 'بقات', 'البقات', 'قسم', 'اقسام', 'أقسام', 'سعر', 'اسعار', 'أسعار',
   'متاح', 'متاحة', 'موجود', 'موجودة', 'شراء', 'اشتري', 'عن', 'على', 'من', 'الى', 'إلى', 'اي', 'أي',
   'the', 'a', 'an', 'do', 'you', 'have', 'service', 'services', 'package', 'packages', 'category', 'price', 'buy'
 ]);
+
+const CATALOG_ALIASES = new Map([
+  ['هونر', 'honor'], ['هونور', 'honor'],
+  ['هواوي', 'huawei'], ['شاومي', 'xiaomi'], ['شياومي', 'xiaomi'],
+  ['سامسونج', 'samsung'], ['ايفون', 'iphone'], ['آيفون', 'iphone'],
+  ['ريلمي', 'realme'], ['اوبو', 'oppo'], ['أوبو', 'oppo'],
+  ['فيفو', 'vivo'], ['انفنكس', 'infinix'], ['تكنو', 'tecno'],
+  ['ايكلاود', 'icloud'], ['آيكلاود', 'icloud']
+]);
+
+function normalizeCatalogWord(word) {
+  let normalized = word;
+  if (normalized.startsWith('و') && normalized.length > 3) normalized = normalized.slice(1);
+  normalized = normalized.replace(/^ال(?=.{3,})/, '');
+  return CATALOG_ALIASES.get(normalized) || normalized;
+}
 
 function getCatalogQuery(message) {
   return String(message || '')
@@ -141,7 +157,7 @@ function getCatalogQuery(message) {
     .replace(/[\u064b-\u065f\u0670]/g, '')
     .replace(/[؟?!.,،:;()[\]{}"']/g, ' ')
     .split(/\s+/)
-    .map(word => word.replace(/^ال(?=.{3,})/, ''))
+    .map(normalizeCatalogWord)
     .filter(word => word.length > 1 && !CATALOG_STOP_WORDS.has(word))
     .slice(0, 8)
     .join(' ');
