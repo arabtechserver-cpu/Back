@@ -50,6 +50,10 @@ const SYSTEM_PROMPT = `
 كن ودوداً، مختصراً، واحترافياً. استخدم التنسيق المناسب لعرض المعلومات.
 `;
 
+const LANGUAGE_GUIDANCE = `
+Understand Modern Standard Arabic, Egyptian Arabic, Sudanese Arabic, Gulf, Levantine and Maghrebi dialects, plus Arabizi, abbreviations, missing punctuation, typos and phonetic spelling. Infer the user's intent before answering, and ask for clarification only when the meaning is genuinely ambiguous. Reply in the same language and dialect style as the user. Normalize common spelling variants when searching services (for example اشتراك/اشتراكات, شات/تشات, جي بي تي/ChatGPT) and never claim a service is unavailable before searching the live catalog and packages.
+`;
+
 const SITE_CONTEXT = `
 اسم الموقع الرسمي: Arab Tech Server (ويقدم خدمات IMEI & Server Solutions وفتح الهواتف).
 مصمم ومبرمج الموقع: Mina Samir — رقم التواصل: 01279301263. عند السؤال عن مصمم الموقع أو المبرمج أو المطور، اذكر هذه المعلومة كما هي.
@@ -176,7 +180,7 @@ async function executeToolCall(toolCall, customerId) {
         SELECT s.id, s.name, s.price, s.packages, s.category_id, c.name AS category_name
         FROM services s LEFT JOIN categories c ON c.id = s.category_id
         WHERE LOWER(s.name) LIKE ? OR LOWER(COALESCE(s.description, '')) LIKE ? OR LOWER(COALESCE(s.packages, '')) LIKE ? OR LOWER(COALESCE(s.fields, '')) LIKE ? OR LOWER(COALESCE(c.name, '')) LIKE ?
-        ORDER BY s.id DESC LIMIT 20
+        ORDER BY s.id DESC LIMIT 8
       `, [`%${query}%`, `%${query}%`, `%${query}%`, `%${query}%`, `%${query}%`]);
       const results = (liveRows || []).map(s => {
         let packages = [];
@@ -292,7 +296,7 @@ router.post('/chat', customerAuth, async (req, res) => {
 
     // Construct messages array
     const messages = [
-      { role: 'system', content: `${SYSTEM_PROMPT}\n${SITE_CONTEXT}${userContext}` }
+      { role: 'system', content: `${SYSTEM_PROMPT}\n${LANGUAGE_GUIDANCE}\n${SITE_CONTEXT}${userContext}` }
     ];
 
     if (Array.isArray(history)) {
