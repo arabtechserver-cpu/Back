@@ -5,7 +5,7 @@ const path = require('path');
 const authMiddleware = require('../middleware/auth');
 const deleteOtpAuth = require('../middleware/deleteOtpAuth');
 const { allQuery, getDatabaseMode, runQuery } = require('../db');
-const { sendBackupViaWhatsApp } = require('../utils/databaseBackup');
+const { sendBackupViaWhatsApp, sendBackupViaTelegram, getBackupTableNames } = require('../utils/databaseBackup');
 
 const BACKUP_ROOT = path.join(__dirname, '..', 'backups');
 const UPLOADS_DIR = path.join(__dirname, '..', 'uploads');
@@ -67,13 +67,8 @@ router.post('/create', authMiddleware, async (req, res) => {
     const tables = {};
 
     // Retrieve database tables
-    const tableNames = [
-      'users', 'categories', 'services', 'orders', 
-      'customers', 'user_passkeys', 'banners', 'wallet_requests', 
-      'wallet_transactions', 'settings', 'customer_discounts',
-      'membership_tiers', 'membership_discounts', 'user_memberships',
-      'reviews', 'api_providers', 'api_logs', 'customer_otps'
-    ];
+    // Include every database table automatically except the live catalog.
+    const tableNames = await getBackupTableNames(mode);
 
     if (mode.fallbackMode) {
       const dbPath = path.join(__dirname, '..', 'database.json');
@@ -145,11 +140,14 @@ router.post('/create', authMiddleware, async (req, res) => {
 
     fs.writeFileSync(backupPath, JSON.stringify(backupSnapshot, null, 2));
     
-    // Send via WhatsApp automatically
-    await sendBackupViaWhatsApp(backupPath, 'manual');
+    // Send the backup file to administrators on both configured channels.
+    await Promise.all([
+      sendBackupViaWhatsApp(backupPath, 'manual'),
+      sendBackupViaTelegram(backupPath, 'manual'),
+    ]);
 
     res.json({
-      message: 'تم إنشاء النسخة الاحتياطية بنجاح وإرسالها عبر الواتساب.',
+      message: 'تم إنشاء النسخة الاحتياطية بنجاح وإرسالها إلى الأدمن عبر تيليجرام وواتساب.',
       filename: fileName,
       createdAt: new Date()
     });
@@ -235,18 +233,12 @@ async function restoreSnapshot(backupData) {
   }
 
   if (mode.fallbackMode) {
-    // 2a. Fallback Mode - overwrite database.json
+    // 2a. Fallback Mode - merge restored data while preserving the live catalog.
     const dbPath = path.join(__dirname, '..', 'database.json');
-    const newDb = {};
-    const tableNames = [
-      'users', 'settings', 'customers', 'api_providers', 'membership_tiers',
-      'categories', 'services', 'user_passkeys', 'banners', 'reviews',
-      'customer_discounts', 'membership_discounts', 'user_memberships',
-      'api_logs', 'customer_otps', 'wallet_requests', 'wallet_transactions',
-      'orders'
-    ];
-    tableNames.forEach(table => {
-      newDb[table] = tables[table] || [];
+    const { readDb } = require('../db');
+    const newDb = readDb();
+    Object.keys(tables).forEach(table => {
+      if (table !== 'categories' && table !== 'services') newDb[table] = tables[table] || [];
     });
     
     const tmpPath = `${dbPath}.tmp`;
@@ -265,7 +257,6 @@ async function restoreSnapshot(backupData) {
         TRUNCATE TABLE 
           customer_otps,
           api_logs,
-          api_providers,
           reviews,
           user_memberships,
           membership_discounts,
@@ -274,8 +265,6 @@ async function restoreSnapshot(backupData) {
           wallet_transactions, 
           wallet_requests, 
           orders, 
-          services, 
-          categories, 
           user_passkeys,
           customers, 
           banners, 
@@ -285,8 +274,8 @@ async function restoreSnapshot(backupData) {
       `);
 
       const tableNames = [
-        'users', 'settings', 'customers', 'api_providers', 'membership_tiers',
-        'categories', 'services', 'user_passkeys', 'banners', 'reviews',
+        'users', 'settings', 'customers', 'membership_tiers',
+        'user_passkeys', 'banners', 'reviews',
         'customer_discounts', 'membership_discounts', 'user_memberships',
         'api_logs', 'customer_otps', 'wallet_requests', 'wallet_transactions',
         'orders'

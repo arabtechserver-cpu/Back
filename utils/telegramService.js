@@ -119,6 +119,26 @@ async function sendPhoto(chatId, imageSource, caption = '', parseMode = 'Markdow
   }
 }
 
+async function sendDocument(chatId, filePath, caption = '') {
+  if (!chatId || !filePath || !fs.existsSync(filePath)) return false;
+  try {
+    const form = new FormData();
+    form.append('chat_id', String(chatId));
+    form.append('caption', caption);
+    form.append('document', fs.createReadStream(filePath), { filename: require('path').basename(filePath) });
+    const res = await axios.post(`${TG_API}/sendDocument`, form, {
+      headers: form.getHeaders(),
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity,
+      timeout: 120000,
+    });
+    return Boolean(res.data?.ok);
+  } catch (err) {
+    console.error('[Telegram] sendDocument exception:', err.response?.data || err.message);
+    return false;
+  }
+}
+
 async function answerCallbackQuery(callbackQueryId, text = '', showAlert = false) {
   return tgRequest('answerCallbackQuery', {
     callback_query_id: callbackQueryId,
@@ -656,6 +676,7 @@ module.exports = {
   sendCustomerOtp,
   sendAdminOtp,
   getAdminChatIds,
+  sendDocument,
   isTelegramConfigured,
   processUpdate,
   setWebhook,

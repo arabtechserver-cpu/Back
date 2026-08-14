@@ -69,7 +69,7 @@ ADMIN_USERNAME=admin
 ADMIN_PASSWORD=replace_with_a_strong_admin_password
 DATABASE_URL=postgres://user:password@host:port/database
 CORS_ORIGIN=https://arab-tech1.online,https://spider-store-api.duckdns.org
-DB_BACKUP_INTERVAL_MS=21600000
+DB_BACKUP_INTERVAL_MS=86400000
 DB_BACKUP_START_DELAY_MS=60000
 ```
 

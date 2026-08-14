@@ -2,16 +2,18 @@ const fs = require('fs');
 const path = require('path');
 const { allQuery, getDatabaseMode, onDatabaseAlert, onDatabaseModeChange } = require('../db');
 const wa = require('../whatsapp');
+const telegram = require('./telegramService');
 
 const BACKUP_ROOT = path.join(__dirname, '..', 'backups');
 const BACKUP_DIR = path.join(BACKUP_ROOT, 'database');
 const FALLBACK_COPY_DIR = path.join(BACKUP_ROOT, 'fallback');
-const BACKUP_INTERVAL_MS = Number(process.env.DB_BACKUP_INTERVAL_MS) || 5 * 60 * 60 * 1000; // 5 hours
+const BACKUP_INTERVAL_MS = 24 * 60 * 60 * 1000; // exactly once per day
 const BACKUP_START_DELAY_MS = Number(process.env.DB_BACKUP_START_DELAY_MS) || 60 * 1000;
 
 let schedulerStarted = false;
 let lastAlertSignature = '';
 let alertCooldownUntil = 0;
+const EXCLUDED_TABLES = new Set(['categories', 'services']);
 
 function ensureDir(dirPath) {
   fs.mkdirSync(dirPath, { recursive: true });
@@ -75,6 +77,33 @@ async function sendBackupViaWhatsApp(backupPath, reason = 'scheduled') {
   }
 }
 
+async function sendBackupViaTelegram(backupPath, reason = 'scheduled') {
+  try {
+    const chatIds = await telegram.getAdminChatIds();
+    if (!chatIds.length) {
+      console.warn('[DB Backup] No Telegram admin chat IDs configured.');
+      return;
+    }
+    const label = reason === 'manual' ? 'يدوية' : reason === 'scheduled' ? 'يومية تلقائية' : 'طارئة';
+    const caption = `💾 نسخة احتياطية ${label}\n📅 ${new Date().toLocaleString('ar-EG')}\n✅ تشمل كل بيانات الموقع والطلبات وعلاقاتها\n⛔ لا تشمل الخدمات والأقسام`;
+    for (const chatId of chatIds) {
+      const sent = await telegram.sendDocument(String(chatId), backupPath, caption);
+      if (!sent) console.warn(`[DB Backup] Telegram delivery failed for admin ${chatId}.`);
+    }
+  } catch (error) {
+    console.warn('[DB Backup] Failed to send backup via Telegram:', error.message);
+  }
+}
+
+async function getBackupTableNames(mode) {
+  if (mode.fallbackMode) {
+    const { readDb } = require('../db');
+    return Object.keys(readDb()).filter(name => !EXCLUDED_TABLES.has(name));
+  }
+  const rows = await allQuery(`SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE' ORDER BY table_name`);
+  return rows.map(row => row.table_name).filter(name => !EXCLUDED_TABLES.has(name));
+}
+
 async function sendAdminAlert(message) {
   const signature = message;
   const now = Date.now();
@@ -135,44 +164,11 @@ async function writeBackupSnapshot(reason = 'scheduled') {
   let fileWritten = false;
 
   if (mode.fallbackMode) {
-    const dbPath = path.join(__dirname, '..', 'database.json');
-    if (fs.existsSync(dbPath)) {
-      // Stream the backup to avoid Out-Of-Memory (OOM) errors for large databases
-      await new Promise((resolve, reject) => {
-        const writeStream = fs.createWriteStream(backupPath);
-        writeStream.on('error', reject);
-        
-        const prefix = JSON.stringify({
-          created_at: snapshot.created_at,
-          reason: snapshot.reason,
-          fallbackMode: snapshot.fallbackMode,
-          source: 'database.json'
-        }, null, 2).slice(0, -2); // Remove the closing `\n}`
-        
-        writeStream.write(prefix + ',\n  "tables": ');
-        
-        const readStream = fs.createReadStream(dbPath, { encoding: 'utf8' });
-        readStream.on('error', reject);
-        
-        readStream.pipe(writeStream, { end: false });
-        
-        readStream.on('end', () => {
-          writeStream.write('\n}\n');
-          writeStream.end();
-        });
-        
-        writeStream.on('finish', () => {
-          fileWritten = true;
-          resolve();
-        });
-      });
-    } else {
-      snapshot.source = 'database.json';
-      snapshot.tables = {};
-    }
+    const { readDb } = require('../db');
+    const dbData = readDb();
+    for (const table of await getBackupTableNames(mode)) snapshot.tables[table] = dbData[table] || [];
   } else {
-    const tables = ['users', 'categories', 'services', 'orders', 'customers', 'banners', 'wallet_requests', 'wallet_transactions', 'settings', 'customer_discounts', 'reviews'];
-    for (const table of tables) {
+    for (const table of await getBackupTableNames(mode)) {
       try {
         snapshot.tables[table] = table === 'settings'
           ? await allQuery('SELECT * FROM settings')
@@ -205,9 +201,12 @@ async function writeBackupSnapshot(reason = 'scheduled') {
     console.warn('[DB Backup] Failed to prune old backups:', err.message);
   }
 
-  // Send to WhatsApp if scheduled or manual
+  // Send every non-startup backup to the configured administrators.
   if (reason !== 'startup') {
-    await sendBackupViaWhatsApp(backupPath, reason);
+    await Promise.all([
+      sendBackupViaWhatsApp(backupPath, reason),
+      sendBackupViaTelegram(backupPath, reason),
+    ]);
   }
 
   return backupPath;
@@ -279,11 +278,13 @@ function startDatabaseBackupScheduler() {
     });
   }, BACKUP_INTERVAL_MS);
 
-  console.log(`[DB Backup] Scheduler started. Interval: ${BACKUP_INTERVAL_MS}ms`);
+  console.log(`[DB Backup] Daily scheduler started. Interval: ${BACKUP_INTERVAL_MS}ms`);
 }
 
 module.exports = {
   startDatabaseBackupScheduler,
   writeBackupSnapshot,
   sendBackupViaWhatsApp,
+  sendBackupViaTelegram,
+  getBackupTableNames,
 };
