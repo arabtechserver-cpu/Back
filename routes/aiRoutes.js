@@ -182,7 +182,7 @@ async function executeToolCall(toolCall, customerId) {
         FROM services s LEFT JOIN categories c ON c.id = s.category_id
         WHERE ${searchTerms.map(() => `(LOWER(s.name) LIKE ? OR LOWER(COALESCE(s.description, '')) LIKE ? OR LOWER(COALESCE(s.packages, '')) LIKE ? OR LOWER(COALESCE(s.fields, '')) LIKE ? OR LOWER(COALESCE(c.name, '')) LIKE ?)`).join(' OR ')}
         ORDER BY s.id DESC LIMIT 8
-      `, searchTerms.flatMap(term => [`%${term}%`, `%${term}%`, `%${term}%`, `%${term}%`, `%${term}%`)]);
+      `, searchTerms.flatMap(term => [`%${term}%`, `%${term}%`, `%${term}%`, `%${term}%`, `%${term}%`]));
       const results = (liveRows || []).map(s => {
         let packages = [];
         try { packages = typeof s.packages === 'string' ? JSON.parse(s.packages || '[]') : (s.packages || []); } catch {}
