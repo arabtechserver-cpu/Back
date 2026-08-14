@@ -1460,9 +1460,10 @@ router.post('/passkey/register-verify', customerAuth, async (req, res) => {
 
 const crypto = require('crypto');
 
-// Generate a random 32-character hex API key
+// Generate a 20-character hex API key, grouped with a dash every 3 characters.
 function generateApiKey() {
-  return crypto.randomBytes(16).toString('hex').toUpperCase();
+  const raw = crypto.randomBytes(10).toString('hex').toUpperCase();
+  return raw.match(/.{1,3}/g).join('-');
 }
 
 // Get Customer's API Key and settings
