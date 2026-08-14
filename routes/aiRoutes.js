@@ -175,13 +175,14 @@ async function executeToolCall(toolCall, customerId) {
       const liveRows = await allQuery(`
         SELECT s.id, s.name, s.price, s.packages, s.category_id, c.name AS category_name
         FROM services s LEFT JOIN categories c ON c.id = s.category_id
-        WHERE LOWER(s.name) LIKE ? OR LOWER(COALESCE(s.description, '')) LIKE ? OR LOWER(COALESCE(c.name, '')) LIKE ?
+        WHERE LOWER(s.name) LIKE ? OR LOWER(COALESCE(s.description, '')) LIKE ? OR LOWER(COALESCE(s.packages, '')) LIKE ? OR LOWER(COALESCE(s.fields, '')) LIKE ? OR LOWER(COALESCE(c.name, '')) LIKE ?
         ORDER BY s.id DESC LIMIT 20
-      `, [`%${query}%`, `%${query}%`, `%${query}%`]);
+      `, [`%${query}%`, `%${query}%`, `%${query}%`, `%${query}%`, `%${query}%`]);
       const results = (liveRows || []).map(s => {
         let packages = [];
         try { packages = typeof s.packages === 'string' ? JSON.parse(s.packages || '[]') : (s.packages || []); } catch {}
-        return { id: s.id, name: s.name, price: s.price, category: s.category_name, packages,
+        const matchingPackages = packages.filter(pkg => JSON.stringify(pkg).toLowerCase().includes(query));
+        return { id: s.id, name: s.name, price: s.price, category: s.category_name, packages: matchingPackages.length ? matchingPackages : packages,
           url: `https://arab-tech1.online/service/${s.id}` };
       });
       if (results.length) return { results };
