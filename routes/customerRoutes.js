@@ -1552,7 +1552,7 @@ router.post('/dev-settings/test', customerAuth, async (req, res) => {
     const action = String(req.body?.action || 'accountinfo');
     if (action === 'accountinfo') return res.json({ success: true, action, response: { SUCCESS: [{ AccountInfo: { credit: String(customer.balance || 0), currency: 'USD' } }] } });
     if (action === 'imeiservicelist') {
-      const services = await allQuery('SELECT id, name, price FROM services WHERE show_in_menu = true ORDER BY id DESC LIMIT 20');
+      const services = await allQuery('SELECT id, name, price FROM services ORDER BY id DESC LIMIT 20');
       return res.json({ success: true, action, response: { SUCCESS: [{ LIST: services || [] }] } });
     }
     return res.status(400).json({ success: false, message: 'العملية غير مدعومة للاختبار.' });

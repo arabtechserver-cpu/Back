@@ -91,7 +91,7 @@ router.post('/', verifyApiAccess, async (req, res) => {
 
   if (action === 'imeiservicelist') {
     try {
-      const services = await allQuery('SELECT * FROM services WHERE show_in_menu = true');
+      const services = await allQuery('SELECT * FROM services');
       const categories = await allQuery('SELECT * FROM categories');
       
       const blockedServices = customer.api_blocked_services ? JSON.parse(customer.api_blocked_services) : [];
