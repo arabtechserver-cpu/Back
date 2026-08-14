@@ -6,18 +6,16 @@ const { getQuery, allQuery, runQuery } = require('../db');
 async function verifyApiAccess(req, res, next) {
   try {
     const key = req.body.key || req.query.key;
-    const username = req.body.username || req.query.username;
+    const username = String(req.body.username || req.query.username || '').trim();
 
     if (!key) {
       return res.status(401).json({ SUCCESS: false, Error: 'Missing API key' });
     }
-
-    let customer;
-    if (username) {
-       customer = await getQuery('SELECT * FROM customers WHERE username = ? AND api_key = ?', [username, key]);
-    } else {
-       customer = await getQuery('SELECT * FROM customers WHERE api_key = ?', [key]);
+    if (!username) {
+      return res.status(401).json({ SUCCESS: false, Error: 'Registered username is required' });
     }
+
+    const customer = await getQuery('SELECT * FROM customers WHERE username = ? AND api_key = ?', [username, key]);
 
     if (!customer) {
       return res.status(401).json({ SUCCESS: false, Error: 'Invalid API key' });
@@ -32,13 +30,15 @@ async function verifyApiAccess(req, res, next) {
     let allowedIps = [];
     try { allowedIps = JSON.parse(allowedIpsStr); } catch(e){}
     
-    if (allowedIps.length > 0) {
-      const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-      // Strip IPv6 to IPv4 prefix if present (::ffff:)
-      const cleanIp = clientIp.replace(/^.*:/, '');
-      if (!allowedIps.includes(cleanIp) && !allowedIps.includes(clientIp)) {
-        return res.status(403).json({ SUCCESS: false, Error: 'IP address not allowed' });
-      }
+    if (allowedIps.length === 0) {
+      return res.status(403).json({ SUCCESS: false, Error: 'Add your server IP to the whitelist before using the API' });
+    }
+    const forwarded = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+    const clientIp = forwarded || req.socket.remoteAddress || '';
+    const cleanIp = clientIp.replace(/^::ffff:/, '');
+    const normalizedAllowed = allowedIps.map(ip => String(ip).trim().replace(/^::ffff:/, ''));
+    if (!normalizedAllowed.includes(cleanIp) && !normalizedAllowed.includes(clientIp)) {
+      return res.status(403).json({ SUCCESS: false, Error: `IP address not allowed: ${cleanIp}` });
     }
 
     req.apiCustomer = customer;
