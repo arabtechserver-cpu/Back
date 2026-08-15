@@ -274,6 +274,21 @@ function extractCustomFields(service) {
   
   for (const field of allFields) {
     const name = String(field.customname || field.fieldname || field.FIELDNAME || field.field_name || field.name || field.NAME || '').trim().toLowerCase();
+    
+    // Ignore internal provider fields like order code / supplier code
+    if (
+      name.includes("order_code") ||
+      name.includes("ordercode") ||
+      name.includes("order code") ||
+      name.includes("ref_code") ||
+      name.includes("refcode") ||
+      name.includes("supplier_code") ||
+      name.includes("provider_code") ||
+      name.includes("code_id")
+    ) {
+      continue;
+    }
+
     if (name && !seen.has(name)) {
       seen.add(name);
       uniqueFields.push(field);
@@ -288,6 +303,17 @@ function normalizeCustomField(cf) {
   const field = cf || {};
   const name = String(field.customname || field.fieldname || field.FIELDNAME || field.field_name || field.name || field.NAME || '').trim();
   if (!name) return null;
+
+  const lowerName = name.toLowerCase();
+  if (
+    lowerName.includes("order_code") ||
+    lowerName.includes("ordercode") ||
+    lowerName.includes("order code") ||
+    lowerName.includes("ref_code") ||
+    lowerName.includes("supplier_code")
+  ) {
+    return null;
+  }
   return {
     field_id: String(field.field_id || field.reqid || field.REQID || field.id || field.ID || name).trim(),
     fieldname: name,
