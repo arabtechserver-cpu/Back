@@ -60,11 +60,19 @@ router.get('/summary', authMiddleware, async (req, res) => {
   const cutoff = Date.now() - (days * 24 * 60 * 60 * 1000);
 
   try {
-    const rows = await allQuery('SELECT * FROM conversion_events ORDER BY id DESC LIMIT 10000');
+    const cutoffIso = new Date(cutoff).toISOString();
+    // Use a date filter in SQL. This speeds up PostgreSQL and prevents data truncation.
+    // JSON DB fallback handles this by ignoring the unrecognized condition and returning all rows,
+    // which are then filtered safely in JS below.
+    const rows = await allQuery(
+      'SELECT * FROM conversion_events WHERE created_at >= ? ORDER BY id DESC',
+      [cutoffIso]
+    );
+
     const recentRows = (rows || []).filter((row) => {
       const timestamp = new Date(row.created_at).getTime();
       return Number.isFinite(timestamp) && timestamp >= cutoff;
-    }).slice(0, 10000);
+    });
 
     const counts = Object.fromEntries([...ALLOWED_EVENTS].map((name) => [name, 0]));
     const sessions = new Set();
