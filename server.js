@@ -132,6 +132,14 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads'), {
   }
 }));
 
+// Fallback for missing upload images (prevents 404 errors in browser console)
+app.use('/uploads', (req, res) => {
+  const transparentGif = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
+  res.setHeader('Content-Type', 'image/gif');
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.status(200).end(transparentGif);
+});
+
 // ── Server-Side API Caching (Extreme Performance Boost) ──────────────
 const apiCache = new Map();
 const CACHE_TTL_MS = 30 * 1000;

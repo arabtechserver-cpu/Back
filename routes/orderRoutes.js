@@ -444,8 +444,7 @@ router.get('/', authMiddleware, async (req, res) => {
         o.download_link_title, o.status, o.code, o.created_at, NULL AS processed_at,
         o.api_source, o.api_order_id, o.api_status, o.custom_fields,
         o.is_api_order, o.api_reseller_id, COALESCE(o.api_provider_id, s.api_provider_id) AS api_provider_id,
-        p.name AS api_provider_name,
-        s.delivery_time, s.api_provider_price, s.api_service_id
+        p.name AS api_provider_name
       FROM orders o
       LEFT JOIN services s ON o.service_id = s.id
       LEFT JOIN api_providers p ON p.id = COALESCE(o.api_provider_id, s.api_provider_id)
