@@ -58,29 +58,32 @@ try {
 
 // System prompt to define the AI's behavior
 const SYSTEM_PROMPT = `
-أنت المساعد الذكي والمتخصص في الدعم الفني وخدمة العملاء لمنصة "Arab Tech Server" (عرب تك سيرفر).
-مهمتك الأساسية هي:
-1. استقبال استفسارات وشكاوى وطلبات العملاء بكل لباقة واحترافية باللغة العربية (أو لغة العميل).
-2. الاستماع للمشكلة وسؤال العميل بلطف عن أي تفاصيل ناقصة (مثل: رقم الطلب Order ID، نوع المشكلة، أو ما إذا كان يريد استرجاع رصيد أو تسريع طلب أو حل مشكلة في كود).
-3. بمجرد أن يقدم العميل شكواه أو مشكلته أو طلب الاسترجاع، قم فوراً باستدعاء أداة 'submit_complaint' لرفع التذكرة وإرسال إشعار فوري إلى إدارة السيرفر على تيليجرام.
-4. بعد استدعاء أداة 'submit_complaint'، زوّد العميل برقم التذكرة الناتج (Ticket ID) وأكد له أن التذكرة وصلت للإدارة وفريق الدعم على تيليجرام وسيقومون بمراجعتها والرد عليه في أسرع وقت.
-5. الإجابة عن شروط الخدمة وسياسة الاسترجاع (أن الاسترجاع مضمون 100% إلى المحفظة في حال فشل السيرفر أو تعذر توفير الكود، أو إمكانية إلغاء الطلبات المعلقة المتأخرة).
-6. البحث عن الخدمات والباقات والأسعار باستخدام أداة 'search_services'.
-7. عرض رصيد المحفظة والطلبات للمستخدمين المسجلين فقط.
+أنت "المساعد الذكي للدعم الفني وخدمة العملاء والتفاوض" لمنصة "Arab Tech Server" (عرب تك سيرفر).
+أنت تتحدث بأسلوب بشري ذكي، لبق، متفهم، هادئ، واحترافي جداً.
 
-كن داعماً، سريع البديهة، واثقاً، ومحترفاً.
+قواعدك الأساسية في الحوار:
+1. **الاستماع والنقاش البناء والوصول لحل**:
+   - ناقش العميل في كلامه تحديداً وتفاعل معه بود وهدوء.
+   - إذا كان العميل غاضباً أو يشتكي من خسارة أو منافسة أو أسعار (مثال: "بتنافسني"، "بتخسرني"، "خف أداء"): تفهم موقفه فوراً بكل احترام، وأكد له أن Arab Tech Server لا يسعى لمنافسة التجار أو الفنيين بل هو شريك داعم لهم، واعرض عليه تقديم باقات خاصة للتجار والموزعين (VIP Wholesale)، وأسعار خاصة لتعويض أي ضرر أو تحقيق أرباح مشتركة عبر الـ API وخصومات الشحن.
+2. **حل المشاكل التقنية واسترجاع الرصيد**:
+   - إذا اشتكى العميل من تأخر طلب، كود، أو طلب استرجاع رصيد: اسأله بلطف عن رقم الطلب (Order ID) أو اسم الخدمة، وطمئنه بأن سياسة السيرفر تضمن استرجاع الرصيد 100% لمحفظته في حال وجود أي مشكلة.
+3. **رفع التذاكر وإشعار الإدارة على تيليجرام (submit_complaint)**:
+   - عندما يتفق معك العميل على رفع شكوى رسمية أو يطلب تسجيل تذكرة لإدارة السيرفر، أو عندما يقدم تفاصيل شكوى واضحة، قم باستدعاء أداة 'submit_complaint'.
+   - بعد رفع التذكرة، أخبر العميل برقم التذكرة الناتج وطمئنه أن التذكرة والتفاصيل أُرسلت فوراً إلى إدارة السيرفر عبر تيليجرام وسيتواصلون معه.
+4. **الأسلوب واللهجة**:
+   - تحدث بلغة عربية سلسة أو باللهجة المصرية/العربية حسب أسلوب العميل.
+   - تجنب الردود الآلية المكررة أو القوالب الجامدة. اجعل كل إجابة مخصصة ومفصلة لما قاله العميل تماماً.
 `;
 
 const LANGUAGE_GUIDANCE = `
-Understand Modern Standard Arabic, Egyptian Arabic, Sudanese Arabic, Gulf, Levantine and Maghrebi dialects, plus Arabizi, abbreviations, missing punctuation, typos and phonetic spelling. Infer the user's intent before answering, and ask for clarification only when the meaning is genuinely ambiguous. Reply in the same language and dialect style as the user. Normalize common spelling variants when searching services (for example اشتراك/اشتراكات, شات/تشات, جي بي تي/ChatGPT) and never claim a service is unavailable before searching the live catalog and packages.
+Understand Modern Standard Arabic, Egyptian Arabic, Sudanese Arabic, Gulf, Levantine and Maghrebi dialects, plus Arabizi, abbreviations, typos and phonetic spelling. Reply in the same language and dialect style as the user.
 `;
 
 const SITE_CONTEXT = `
-اسم الموقع الرسمي: Arab Tech Server (عرب تك سيرفر) لخدمات السيرفرات والأدوات وفتح الهواتف والشحن.
-مصمم ومبرمج الموقع: Mina Samir — رقم التواصل: 01279301263. عند السؤال عن مصمم الموقع أو المبرمج أو المطور، اذكر هذه المعلومة كما هي.
-الصفحات: الرئيسية https://arab-tech1.online/ | الخدمات https://arab-tech1.online/services | الطلبات https://arab-tech1.online/orders | المحفظة https://arab-tech1.online/wallet | الشروط وسياسة الاسترجاع https://arab-tech1.online/terms | تذكرة دعم جديدة https://arab-tech1.online/tickets/new | توثيق API https://arab-tech1.online/api-docs.
-التواصل الرسمي: واتساب https://wa.me/249123667227 و https://wa.me/16728972935 | مجتمع واتساب https://chat.whatsapp.com/DINRDwU2lVjFcGRowxT3m5 | تيليجرام https://t.me/arabtechserveronline | البريد arabtechserver@gmail.com.
-إذا أراد المستخدم فتح تذكرة دعم فني أو رفع شكوى، اجمع منه المشكلة ورقم الطلب واطلب 'submit_complaint' فوراً لإشعار الإدارة على تيليجرام.
+اسم المنصة: Arab Tech Server (عرب تك سيرفر) لخدمات السيرفرات وشحن الألعاب والأدوات وفتح الهواتف.
+المطور والمبرمج: Mina Samir (01279301263).
+الصفحات: الرئيسية https://arab-tech1.online | الخدمات https://arab-tech1.online/services | المحفظة https://arab-tech1.online/wallet | الشروط وسياسة الاسترجاع https://arab-tech1.online/terms | الدعم الفني https://arab-tech1.online/tickets/new
+التواصل الرسمي: واتساب https://wa.me/16728972935 | تيليجرام https://t.me/arabtechserveronline
 `;
 
 const tools = [
@@ -99,7 +102,7 @@ const tools = [
           customer_name: { type: "string", description: "Customer name or username" },
           customer_phone: { type: "string", description: "Customer phone or WhatsApp number" },
           customer_email: { type: "string", description: "Customer email address" },
-          category: { type: "string", description: "Category of issue (e.g. استرجاع رصيد / تأخر تنفيذ / كود لا يعمل / شحن محفظة / استفسار عام)" },
+          category: { type: "string", description: "Category of issue (e.g. استرجاع رصيد / شكوى تجارية / تأخر تنفيذ / كود لا يعمل / شحن محفظة / استفسار عام)" },
           urgency: { type: "string", enum: ["عادية", "متوسطة", "عاجلة"], description: "Urgency level" }
         }
       }
@@ -160,25 +163,8 @@ const CATALOG_WORDS = /(?:خدم|خدمة|خدمات|باقه|باقة|باقا�
 const CATALOG_STOP_WORDS = new Set([
   'هل', 'في', 'فيه', 'يوجد', 'عندكم', 'عندكو', 'عايز', 'اريد', 'أريد', 'محتاج', 'ممكن', 'طيب', 'طب',
   'خدمة', 'خدمات', 'باقه', 'باقة', 'باقات', 'بقات', 'البقات', 'قسم', 'اقسام', 'أقسام', 'سعر', 'اسعار', 'أسعار',
-  'متاح', 'متاحة', 'موجود', 'موجودة', 'شراء', 'اشتري', 'عن', 'على', 'من', 'الى', 'إلى', 'اي', 'أي',
-  'the', 'a', 'an', 'do', 'you', 'have', 'service', 'services', 'package', 'packages', 'category', 'price', 'buy'
+  'متاح', 'متاحة', 'موجود', 'موجودة', 'شراء', 'اشتري', 'عن', 'على', 'من', 'الى', 'إلى', 'اي', 'أي'
 ]);
-
-const CATALOG_ALIASES = new Map([
-  ['هونر', 'honor'], ['هونور', 'honor'],
-  ['هواوي', 'huawei'], ['شاومي', 'xiaomi'], ['شياومي', 'xiaomi'],
-  ['سامسونج', 'samsung'], ['ايفون', 'iphone'], ['آيفون', 'iphone'],
-  ['ريلمي', 'realme'], ['اوبو', 'oppo'], ['أوبو', 'oppo'],
-  ['فيفو', 'vivo'], ['انفنكس', 'infinix'], ['تكنو', 'tecno'],
-  ['ايكلاود', 'icloud'], ['آيكلاود', 'icloud']
-]);
-
-function normalizeCatalogWord(word) {
-  let normalized = word;
-  if (normalized.startsWith('و') && normalized.length > 3) normalized = normalized.slice(1);
-  normalized = normalized.replace(/^ال(?=.{3,})/, '');
-  return CATALOG_ALIASES.get(normalized) || normalized;
-}
 
 function getCatalogQuery(message) {
   return String(message || '')
@@ -186,7 +172,6 @@ function getCatalogQuery(message) {
     .replace(/[\u064b-\u065f\u0670]/g, '')
     .replace(/[؟?!.,،:;()[\]{}"']/g, ' ')
     .split(/\s+/)
-    .map(normalizeCatalogWord)
     .filter(word => word.length > 1 && !CATALOG_STOP_WORDS.has(word))
     .slice(0, 8)
     .join(' ');
@@ -249,7 +234,7 @@ async function executeToolCall(toolCall, customerId, guestInfo = {}) {
       if (!subject || !details) return { error: 'Subject and details are required' };
 
       const orderId = args.order_id ? Number.parseInt(args.order_id, 10) : null;
-      const category = args.category || 'دعم فني عام';
+      const category = args.category || 'دعم فني وشكاوى';
       const urgency = args.urgency || 'متوسطة';
 
       // Insert into database
@@ -290,7 +275,7 @@ async function executeToolCall(toolCall, customerId, guestInfo = {}) {
         success: true,
         complaint_id: complaintId,
         ticket_id: `#TICK-${complaintId}`,
-        message: `تم تسجيل تذكرة الدعم بنجاح برقم #${complaintId} وتم إرسال الإشعار والتفاصيل كاملة للإدارة والدعم الفني على تيليجرام فورياً.`
+        message: `تم تسجيل تذكرة الدعم بنجاح برقم #${complaintId} وتم إرسال الإشعار والتفاصيل كاملة للإدارة على تيليجرام فورياً.`
       };
     }
   } catch (e) {
@@ -364,12 +349,18 @@ function formatOrderStatus(status) {
   return labels[String(status || '').toLowerCase()] || status || 'غير محدد';
 }
 
+// Smart Conversational Local Fallback (Context-aware & Problem-solving)
 async function buildLocalReply(message, customerId, guestInfo = {}) {
   const text = String(message || '').trim();
   const normalized = text.toLowerCase();
 
-  // Handling complaints & refund requests locally if OpenRouter is unreachable
-  if (/شكوى|تذكرة|مشكلة|استرجاع|استرداد|فلوس|تأخر|معلق|كود غلط|ticket|complaint|refund|issue/.test(normalized)) {
+  // 1. Discussions about competition, losses, merchant grievances
+  if (/تنافس|بتنافس|خسرت|تخسرني|بتخصرني|خصرت|عملاء|خف اداء|عيب|منافسة/.test(normalized)) {
+    return `أهلاً بك يا غالي ويسعدنا جداً سماع وجهة نظرك وتفهم موقفك تماماً! 🤝\n\nنحن في **Arab Tech Server** هدفنا الأول ليس منافسة زملائنا التجار أو أصحاب المحلات، بل بالعكس تماماً نحن نوفر أسعار جملة وسيرفرات API مباشرة لتمكين التجار والفنيين من تحقيق أعلى هامش ربح وخدمة عملائهم بأسرع وقت وبأقل تكلفة.\n\nإذا كنت صاحب متجر أو فني، يسعدنا فتح **حساب تاجر / موزع VIP** لك بأسعار مخصصة وأعلى نسبة خصم، حتى نكون شركاء نجاح معاً! هل تحب أن أوصلك مباشرة بالإدارة لمناقشة أسعار الجملة والشراكة، أو لديك طلب أو استفسار محدد؟`;
+  }
+
+  // 2. Clear request to file a complaint or ticket
+  if (/ارفع تذكرة|افتح تذكرة|ارسل شكوى|ابعت للإدارة|ارسل للتليجرام|سجل الشكوى|تذكرة رقم/.test(normalized)) {
     const orderMatch = text.match(/#?(\d{3,7})/);
     const orderId = orderMatch ? orderMatch[1] : null;
 
@@ -384,83 +375,120 @@ async function buildLocalReply(message, customerId, guestInfo = {}) {
             customer_name: guestInfo.name,
             customer_phone: guestInfo.phone,
             customer_email: guestInfo.email,
-            category: /استرجاع|استرداد|فلوس/.test(normalized) ? 'طلب استرجاع رصيد' : 'دعم فني وشكاوى'
+            category: 'شكاوى ودعم فني'
           })
         }
       }, customerId, guestInfo);
 
       if (toolRes && toolRes.success) {
-        return `✅ تم استلام شكواك وتسجيل تذكرة دعم فني برقم **#${toolRes.complaint_id}**.\n\n📲 **تم إرسال تفاصيل الشكوى فوراً إلى الإدارة عبر تيليجرام**.\nفريق الدعم الفني سيقوم بمراجعتها وحل المشكلة معك في أسرع وقت. يمكنك أيضاً متابعتنا على تيليجرام: https://t.me/arabtechserveronline`;
+        return `✅ تم رفع تذكرتك بنجاح برقم **#${toolRes.complaint_id}**.\n\n📲 **تم إرسال كافة التفاصيل فوراً إلى إدارة السيرفر على تيليجرام**.\nفريق الدعم الفني والإدارة سيقومون بمتابعتها والرد عليك في أقرب وقت. يمكنك أيضاً متابعة القناة الرسمية: https://t.me/arabtechserveronline`;
       }
-    } catch (e) {
-      console.error('[AI Local Ticket] Error:', e);
-    }
-    return `أهلاً بك! لقد استلمت تفاصيل مشكلتك وسنقوم برفع تذكرة دعم فني بها فوراً للإدارة عبر تيليجرام. إذا كان لديك رقم طلب أو تفاصيل إضافية يرجى تزويدنا بها.`;
+    } catch (e) {}
   }
 
-  if (/مصمم|مبرمج|مطور|مين عمل|developer|programmer|designer/.test(normalized)) return 'مصمم ومبرمج موقع Arab Tech Server هو Mina Samir، ورقم التواصل: 01279301263.';
-  if (/تواصل|واتس|واتساب|تلجرام|تيليجرام|فيسبوك|رقمكم|contact/.test(normalized)) return 'قنوات التواصل الرسمية:\n• واتساب: https://wa.me/249123667227 أو https://wa.me/16728972935\n• تيليجرام: https://t.me/arabtechserveronline\n• فيسبوك: https://www.facebook.com/ARABTECHSERVEROnline\n• البريد: arabtechserver@gmail.com';
-  if (/اسمي|اسم حسابي|مين انا|my name|username/.test(normalized)) {
-    if (!customerId) return 'أنت تتحدث كزائر حالياً. يرجى تسجيل الدخول لعرض بيانات حسابك: https://arab-tech1.online/login';
-    const customer = await getQuery('SELECT username FROM customers WHERE id = ?', [customerId]);
-    return customer?.username ? `اسم حسابك هو: ${customer.username}` : 'تعذر العثور على بيانات حسابك.';
+  // 3. Questions about delays, pending orders, or refunds
+  if (/استرجاع|استرداد|فلوس|معلق|تأخر|متأخر|كود غلط|مش شغال|ما وصل/.test(normalized)) {
+    const orderMatch = text.match(/#?(\d{3,7})/);
+    if (orderMatch) {
+      const ordId = orderMatch[1];
+      const ord = await getQuery('SELECT * FROM orders WHERE id = ?', [ordId]);
+      if (ord) {
+        return `بحثت عن طلبك رقم **#${ord.id}** (${ord.service_name}):\n• الحالة الحالية: **${formatOrderStatus(ord.status)}**\n• المبلغ: **$${Number(ord.package_price || 0).toFixed(2)} USD**\n${ord.code ? `• كود الرد: \`${ord.code}\`\n` : ''}\nإذا كان هناك أي تأخير غير معتاد أو ترغب في إلغائه واسترداد الرصيد لمحفظتك فوراً، أبلغني وسأرفع تذكرة إلغاء واسترجاع للإدارة فوراً!`;
+      }
+    }
+    return `حقك محفوظ تماماً وسياسة الموقع تضمن رد الرصيد 100% لمحفظتك في حال تأخر أو تعذر تنفيذ أي طلب! 🛡️\n\nفضلاً زودني برقم الطلب (Order ID) لفحصه وتحديث حالته، أو لإلغائه وإعادة الرصيد إلى محفظتك مباشرة.`;
   }
+
+  // 4. Developer / Designer inquiries
+  if (/مصمم|مبرمج|مطور|مين عمل|developer|programmer|designer/.test(normalized)) {
+    return 'مصمم ومبرمج موقع Arab Tech Server هو Mina Samir، ورقم التواصل: 01279301263.';
+  }
+
+  // 5. Official Contacts
+  if (/تواصل|واتس|واتساب|تلجرام|تيليجرام|فيسبوك|رقمكم|contact/.test(normalized)) {
+    return 'قنوات التواصل الرسمية لخدمة العملاء:\n• واتساب: https://wa.me/16728972935 أو https://wa.me/249123667227\n• تيليجرام: https://t.me/arabtechserveronline\n• البريد: arabtechserver@gmail.com';
+  }
+
+  // 6. User profile / Wallet Balance
   if (/رصيد|محفظ|balance|wallet/.test(normalized)) {
     if (!customerId) return 'لعرض رصيدك والشحن، يرجى تسجيل الدخول: https://arab-tech1.online/login';
     const customer = await getQuery('SELECT balance FROM customers WHERE id = ?', [customerId]);
-    return `رصيد محفظتك الحالي: ${Number(customer?.balance || 0).toFixed(2)} USD\nشحن المحفظة: https://arab-tech1.online/wallet`;
+    return `رصيد محفظتك الحالي: **${Number(customer?.balance || 0).toFixed(2)} USD**\nيمكنك شحن المحفظة من هنا: https://arab-tech1.online/wallet`;
   }
+
+  // 7. Orders history
   if (/طلب|طلبات|order|اتعمل|اكتمل|لسه/.test(normalized)) {
-    if (!customerId) return 'لعرض قائمة طلباتك وتتبعها، يرجى تسجيل الدخول: https://arab-tech1.online/login';
-    const rows = await allQuery(`SELECT id, service_name, package_name, package_price, status, created_at FROM orders WHERE customer_id = ? ORDER BY id DESC LIMIT 10`, [customerId]);
-    if (!rows?.length) return 'لا توجد طلبات مسجلة على حسابك حتى الآن. تصفح الخدمات: https://arab-tech1.online/services';
-    return `آخر طلباتك الفعلية:\n${rows.map(order => `• #${order.id} — ${order.service_name || 'خدمة'}${order.package_name ? ` / ${order.package_name}` : ''} — ${formatOrderStatus(order.status)} — ${Number(order.package_price || 0).toFixed(2)} USD`).join('\n')}\nكل الطلبات: https://arab-tech1.online/orders`;
+    if (!customerId) return 'لعرض وتتبع طلباتك، يرجى تسجيل الدخول: https://arab-tech1.online/login';
+    const rows = await allQuery(`SELECT id, service_name, package_name, package_price, status FROM orders WHERE customer_id = ? ORDER BY id DESC LIMIT 5`, [customerId]);
+    if (!rows?.length) return 'لا توجد طلبات مسجلة على حسابك حتى الآن. يمكنك تصفح الخدمات والشراء من: https://arab-tech1.online/services';
+    return `آخر طلباتك:\n${rows.map(order => `• #${order.id} — ${order.service_name || 'خدمة'} — ${formatOrderStatus(order.status)} — $${Number(order.package_price || 0).toFixed(2)}`).join('\n')}\nتتبع كل الطلبات: https://arab-tech1.online/orders`;
   }
-  const isGreeting = /^(مرحبا|مرحباً|اهلا|أهلا|السلام عليكم|الو|hello|hi)\s*[!.؟]*$/i.test(text);
-  if (!isGreeting) {
-    const terms = normalized.replace(/[؟?!.,،:;()[\]{}]/g, ' ').split(/\s+/).filter(word => word.length > 1 && !['هل', 'يوجد', 'عايز', 'اريد', 'خدمة', 'اشتراك', 'عندكم', 'متاح', 'موجود', 'في', 'عن', 'على', 'من', 'the', 'have', 'service'].includes(word));
+
+  // 8. Service / Catalog Search
+  const terms = normalized.replace(/[؟?!.,،:;()[\]{}]/g, ' ').split(/\s+/).filter(word => word.length > 1 && !['هل', 'يوجد', 'عايز', 'اريد', 'خدمة', 'اشتراك', 'عندكم', 'متاح', 'موجود'].includes(word));
+  if (terms.length > 0) {
     const result = await executeToolCall({ function: { name: 'search_services', arguments: JSON.stringify({ query: terms.slice(0, 6).join(' ') || normalized }) } }, customerId);
-    if (!result?.results?.length && terms.length > 1) {
-      const retries = await Promise.all(terms.slice(0, 4).map(term => executeToolCall({ function: { name: 'search_services', arguments: JSON.stringify({ query: term }) } }, customerId)));
-      result.results = retries.flatMap(item => item?.results || []).filter((item, index, all) => all.findIndex(x => String(x.id) === String(item.id)) === index).slice(0, 8);
+    if (result?.results?.length) {
+      return `وجدت هذه الخدمات والأسعار المتاحة لدينا:\n${result.results.slice(0, 5).map(service => `• ${service.name} — ${Number(service.price || service.credit || 0).toFixed(2)} USD${service.category ? ` (${service.category})` : ''}\n  🔗 ${service.url}`).join('\n')}`;
     }
-    if (result?.results?.length) return `وجدت هذه الخدمات المتاحة فعلياً:\n${result.results.slice(0, 5).map(service => `• ${service.name} — ${Number(service.price || service.credit || 0).toFixed(2)} USD${service.category ? ` — ${service.category}` : ''}\n  ${service.url}`).join('\n')}`;
   }
-  return 'أهلاً بك في الدعم الفني الذكي لمنصة Arab Tech Server. أستطيع مساعدتك في الاستفسار عن الخدمات والأسعار، ومتابعة الطلبات، أو رفع شكوى وتذكرة دعم فني مباشرة إلى الإدارة على تيليجرام. كيف يمكنني مساعدتك اليوم؟\nفتح تذكرة دعم: https://arab-tech1.online/tickets/new';
+
+  return `أهلاً بك في الدعم الفني الذكي لمنصة **Arab Tech Server**! 🤖\n\nأنا هنا لمساعدتك في أي استفسار حول خدمات السيرفر، فحص الطلبات وتتبعها، أو التنسيق لحل أي مشكلة أو فتح تذكرة دعم مباشرة للإدارة.\n\nكيف يمكنني خدمتك اليوم؟`;
 }
 
-// Make call to OpenRouter API
+// Make call to OpenRouter API with multi-model fallback support
 async function callOpenRouter(messages) {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
     throw new Error('OPENROUTER_API_KEY is not configured in the backend.');
   }
 
-  const model = process.env.OPENROUTER_MODEL || 'meta-llama/llama-3.1-8b-instruct:free';
-  
-  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://arab-tech1.online', 
-      'X-Title': 'Spider Store Front'
-    },
-    body: JSON.stringify({
-      model: model,
-      messages: messages,
-      tools: tools,
-      tool_choice: "auto",
-    })
-  });
+  const modelCandidates = [
+    process.env.OPENROUTER_MODEL || 'openrouter/free',
+    'openrouter/free',
+    'google/gemma-4-26b-a4b-it:free',
+    'nvidia/nemotron-3-nano-30b-a3b:free',
+    'liquid/lfm-2.5-2.6b:free'
+  ];
 
-  if (!response.ok) {
-    const errText = await response.text();
-    console.error('[AI Route] OpenRouter API Error:', errText);
-    throw new Error(`OpenRouter API responded with status ${response.status}: ${errText.slice(0, 300)}`);
+  const uniqueModels = [...new Set(modelCandidates)];
+  let lastError = null;
+
+  for (const model of uniqueModels) {
+    try {
+      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://arab-tech1.online', 
+          'X-Title': 'Arab Tech Server'
+        },
+        body: JSON.stringify({
+          model: model,
+          messages: messages,
+          tools: tools,
+          tool_choice: "auto",
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data?.choices?.[0]?.message) {
+          return data;
+        }
+      } else {
+        const errText = await response.text();
+        console.warn(`[AI Route] Model ${model} failed (${response.status}):`, errText.slice(0, 150));
+        lastError = new Error(`OpenRouter ${model} failed with status ${response.status}`);
+      }
+    } catch (err) {
+      console.warn(`[AI Route] Model ${model} fetch exception:`, err.message);
+      lastError = err;
+    }
   }
 
-  return await response.json();
+  throw lastError || new Error('All OpenRouter models failed to respond.');
 }
 
 /**
@@ -480,7 +508,7 @@ router.post('/chat', optionalCustomerAuth, async (req, res) => {
       return res.status(400).json({ message: 'Message is required' });
     }
 
-    // Product discovery must not depend on whether the language model decides to call a tool.
+    // Product discovery shortcut
     if (CATALOG_WORDS.test(String(message))) {
       const catalogQuery = getCatalogQuery(message) || String(message).trim();
       const catalogResult = await executeToolCall({
@@ -496,7 +524,7 @@ router.post('/chat', optionalCustomerAuth, async (req, res) => {
       ? await getQuery('SELECT id, username, email, phone FROM customers WHERE id = ?', [customerId])
       : null;
     const userContext = customer
-      ? `\nحالة المستخدم: مسجل دخول ومصادق عليه. اسم المستخدم: ${customer.username || customer.name || 'غير محدد'}. البريد: ${customer.email || ''}. الهاتف: ${customer.phone || ''}. إذا طلب رفع شكوى استخدم بيانات حسابه.\n`
+      ? `\nحالة المستخدم: مسجل دخول ومصادق عليه. اسم المستخدم: ${customer.username || customer.name || 'غير محدد'}. البريد: ${customer.email || ''}. الهاتف: ${customer.phone || ''}.\n`
       : `\nحالة المستخدم: زائر / غير مسجل دخول.${guest_name ? ` اسم الزائر: ${guest_name}.` : ''}${guest_phone ? ` هاتف الزائر: ${guest_phone}.` : ''}\n`;
 
     // Construct messages array
@@ -515,7 +543,7 @@ router.post('/chat', optionalCustomerAuth, async (req, res) => {
     try {
       openRouterResponse = await callOpenRouter(messages);
     } catch (e) {
-      console.warn('[AI Chat] OpenRouter call failed or key not set, using smart local assistant:', e.message);
+      console.warn('[AI Chat] OpenRouter models busy, using smart local assistant:', e.message);
       const reply = await buildLocalReply(message, customerId, guestInfo);
       return res.json({ reply, history: makeHistory(history, message, reply), fallback: true });
     }
@@ -523,12 +551,17 @@ router.post('/chat', optionalCustomerAuth, async (req, res) => {
     let responseMessage = openRouterResponse?.choices?.[0]?.message;
     if (!responseMessage) throw new Error('AI provider returned an empty response');
 
+    let createdTicketId = null;
+
     // Handle tool calls if any
     if (responseMessage.tool_calls && responseMessage.tool_calls.length > 0) {
       messages.push(responseMessage); // Add assistant's tool call request
 
       for (const toolCall of responseMessage.tool_calls) {
         const toolResult = await executeToolCall(toolCall, customerId, guestInfo);
+        if (toolResult && toolResult.ticket_id) {
+          createdTicketId = toolResult.ticket_id;
+        }
         messages.push({
           tool_call_id: toolCall.id,
           role: 'tool',
@@ -543,7 +576,7 @@ router.post('/chat', optionalCustomerAuth, async (req, res) => {
       } catch (e) {
         console.error('[AI Chat] Provider failed after tool call, using local assistant:', e.message);
         const reply = await buildLocalReply(message, customerId, guestInfo);
-        return res.json({ reply, history: makeHistory(history, message, reply), fallback: true });
+        return res.json({ reply, history: makeHistory(history, message, reply), ticket_id: createdTicketId, fallback: true });
       }
       responseMessage = openRouterResponse?.choices?.[0]?.message;
       if (!responseMessage) throw new Error('AI provider returned an empty tool response');
@@ -552,6 +585,7 @@ router.post('/chat', optionalCustomerAuth, async (req, res) => {
     // Final response to frontend
     res.json({
       reply: responseMessage.content,
+      ticket_id: createdTicketId,
       history: [...messages.filter(m => m.role !== 'system' && m.role !== 'tool' && !m.tool_calls), { role: 'assistant', content: responseMessage.content }]
     });
 
@@ -595,7 +629,7 @@ router.post('/tickets', optionalCustomerAuth, async (req, res) => {
 
     const orderId = order_id ? Number.parseInt(order_id, 10) : null;
     const cleanUrgency = urgency || 'متوسطة';
-    const cleanCategory = category || 'دعم فني عام';
+    const cleanCategory = category || 'دعم فني وشكاوى';
 
     // Insert into DB
     const result = await runQuery(
