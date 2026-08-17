@@ -436,59 +436,38 @@ async function buildLocalReply(message, customerId, guestInfo = {}) {
   return `أهلاً بك في الدعم الفني الذكي لمنصة **Arab Tech Server**! 🤖\n\nأنا هنا لمساعدتك في أي استفسار حول خدمات السيرفر، فحص الطلبات وتتبعها، أو التنسيق لحل أي مشكلة أو فتح تذكرة دعم مباشرة للإدارة.\n\nكيف يمكنني خدمتك اليوم؟`;
 }
 
-// Make call to OpenRouter API with multi-model fallback support
+// Make direct call to OpenRouter API (Single Model - No Switching)
 async function callOpenRouter(messages) {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
     throw new Error('OPENROUTER_API_KEY is not configured in the backend.');
   }
 
-  const modelCandidates = [
-    process.env.OPENROUTER_MODEL || 'openrouter/free',
-    'openrouter/free',
-    'google/gemma-4-26b-a4b-it:free',
-    'nvidia/nemotron-3-nano-30b-a3b:free',
-    'liquid/lfm-2.5-2.6b:free'
-  ];
+  const model = process.env.OPENROUTER_MODEL || 'openrouter/free';
 
-  const uniqueModels = [...new Set(modelCandidates)];
-  let lastError = null;
+  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://arab-tech1.online', 
+      'X-Title': 'Arab Tech Server'
+    },
+    body: JSON.stringify({
+      model: model,
+      messages: messages,
+      tools: tools,
+      tool_choice: "auto",
+    })
+  });
 
-  for (const model of uniqueModels) {
-    try {
-      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': 'https://arab-tech1.online', 
-          'X-Title': 'Arab Tech Server'
-        },
-        body: JSON.stringify({
-          model: model,
-          messages: messages,
-          tools: tools,
-          tool_choice: "auto",
-        })
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        if (data?.choices?.[0]?.message) {
-          return data;
-        }
-      } else {
-        const errText = await response.text();
-        console.warn(`[AI Route] Model ${model} failed (${response.status}):`, errText.slice(0, 150));
-        lastError = new Error(`OpenRouter ${model} failed with status ${response.status}`);
-      }
-    } catch (err) {
-      console.warn(`[AI Route] Model ${model} fetch exception:`, err.message);
-      lastError = err;
-    }
+  if (!response.ok) {
+    const errText = await response.text();
+    console.error(`[AI Route] OpenRouter model ${model} error (${response.status}):`, errText);
+    throw new Error(`OpenRouter ${model} failed with status ${response.status}`);
   }
 
-  throw lastError || new Error('All OpenRouter models failed to respond.');
+  return await response.json();
 }
 
 /**
