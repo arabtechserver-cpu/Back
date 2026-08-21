@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { getReferralProgress } = require('../utils/referral');
+const { getReferralProgress, getReferralRewardStatus, REFERRAL_REWARD_USD } = require('../utils/referral');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const axios = require('axios');
@@ -14,6 +14,26 @@ const telegram = require('../utils/telegramService');
 const emailService = require('../utils/emailService');
 const { allQuery: allQuerySettings } = require('../db');
 const wa = require('../whatsapp');
+
+async function awardReferralRewardIfEligible(referrerId) {
+  const countRow = await getQuery('SELECT COUNT(*) AS count FROM customers WHERE referred_by = ?', [referrerId]);
+  const referrer = await getQuery('SELECT username, balance, referrals_rewarded FROM customers WHERE id = ?', [referrerId]);
+  if (!referrer) return;
+
+  const count = Number(countRow?.count || 0);
+  const alreadyRewarded = Number(referrer.referrals_rewarded || 0);
+  const eligibleRewards = Math.floor(count / 30);
+  const pendingRewards = eligibleRewards - alreadyRewarded;
+  for (let index = 0; index < pendingRewards; index += 1) {
+    const balanceBefore = Number(referrer.balance || 0) + index * REFERRAL_REWARD_USD;
+    const balanceAfter = balanceBefore + REFERRAL_REWARD_USD;
+    await runQuery('UPDATE customers SET balance = balance + ?, referrals_rewarded = referrals_rewarded + 1 WHERE id = ?', [REFERRAL_REWARD_USD, referrerId]);
+    await runQuery(
+      'INSERT INTO wallet_transactions (customer_id, customer_username, type, amount, balance_before, balance_after, reference_type, reference_id, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [referrerId, referrer.username || '', 'credit', REFERRAL_REWARD_USD, balanceBefore, balanceAfter, 'referral_reward', `${referrerId}:${alreadyRewarded + index + 1}`, 'هدية إحالة - 30 مستخدمًا']
+    );
+  }
+}
 
 // Database-backed store for customer OTPs during login & registration
 async function setCustomerOtp(otpKey, data) {
@@ -393,15 +413,7 @@ router.post('/google-auth', async (req, res) => {
           [finalUsername, email, hashedPassword, googleId, newRefCode, referrerId]
         );
 
-        if (referrerId) {
-          const refCountRow = await getQuery('SELECT COUNT(*) as cnt FROM customers WHERE referred_by = ?', [referrerId]);
-          const currentCount = Number(refCountRow ? refCountRow.cnt : 0);
-          const referrerObj = await getQuery('SELECT referrals_rewarded FROM customers WHERE id = ?', [referrerId]);
-          const rewarded = Number(referrerObj ? referrerObj.referrals_rewarded || 0 : 0);
-          if (currentCount - (rewarded * 30) >= 30) {
-            await runQuery('UPDATE customers SET balance = balance + 5, referrals_rewarded = referrals_rewarded + 1 WHERE id = ?', [referrerId]);
-          }
-        }
+        if (referrerId) await awardReferralRewardIfEligible(referrerId);
 
       const newCustomerId = result.lastID;
 
@@ -469,15 +481,7 @@ router.post('/verify-auth-otp', async (req, res) => {
           [item.username, item.email, item.password, item.phone, newRefCode, referrerId]
         );
 
-        if (referrerId) {
-          const referrals = await allQuery('SELECT id FROM customers WHERE referred_by = ?', [referrerId]);
-          const currentCount = referrals ? referrals.length : 0;
-          const referrerObj = await getQuery('SELECT referrals_rewarded FROM customers WHERE id = ?', [referrerId]);
-          const rewarded = Number(referrerObj ? referrerObj.referrals_rewarded || 0 : 0);
-          if (currentCount - (rewarded * 30) >= 30) {
-            await runQuery('UPDATE customers SET balance = balance + 5, referrals_rewarded = referrals_rewarded + 1 WHERE id = ?', [referrerId]);
-          }
-        }
+        if (referrerId) await awardReferralRewardIfEligible(referrerId);
 
       await deleteCustomerOtp(otpKey);
 
@@ -1621,15 +1625,38 @@ router.get('/referral-info', customerAuth, async (req, res) => {
       await runQuery('UPDATE customers SET referral_code = ? WHERE id = ?', [newRefCode, req.customer.id]);
       customer.referral_code = newRefCode;
     }
+    // Reconcile eligible milestones when the page is opened, so existing
+    // referrals receive any outstanding wallet-only gift immediately.
+    await awardReferralRewardIfEligible(req.customer.id);
+    customer = await getQuery('SELECT * FROM customers WHERE id = ?', [req.customer.id]);
     const countRow = await getQuery(
       'SELECT COUNT(DISTINCT id) AS count FROM customers WHERE referred_by = ?',
       [req.customer.id]
     );
     const progress = getReferralProgress(countRow?.count);
-    res.json({ referral_code: customer.referral_code, referral_count: progress.count, referral_goal: progress.goal, referral_percent: progress.percent });
+    const rewardStatus = getReferralRewardStatus(progress.count, customer.referrals_rewarded);
+    res.json({ referral_code: customer.referral_code, referral_count: progress.count, referral_goal: progress.goal, referral_percent: progress.percent, ...rewardStatus });
   } catch (error) {
     console.error('Error fetching referral info:', error);
     res.status(500).json({ message: 'Internal Server Error' });
+  }
+});
+
+router.get('/wallet-transactions', customerAuth, async (req, res) => {
+  try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
+    const transactions = await allQuery(`
+      SELECT id, type, amount, balance_before, balance_after,
+             reference_type, reference_id, description, created_at
+      FROM wallet_transactions
+      WHERE customer_id = ?
+      ORDER BY id DESC
+      LIMIT ?
+    `, [req.customer.id, limit]);
+    res.json(Array.isArray(transactions) ? transactions : []);
+  } catch (error) {
+    console.error('Fetch customer wallet transactions error:', error);
+    res.status(500).json({ message: 'حدث خطأ أثناء جلب معاملات محفظتك.' });
   }
 });
 
