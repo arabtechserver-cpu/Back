@@ -538,6 +538,9 @@ async function createTables() {
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS transaction_password VARCHAR(255) DEFAULT '';
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS visits_count INT DEFAULT 0;
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS discount_percent NUMERIC(5,2) DEFAULT 0;
+    ALTER TABLE customers ADD COLUMN IF NOT EXISTS referral_code VARCHAR(50) UNIQUE DEFAULT NULL;
+    ALTER TABLE customers ADD COLUMN IF NOT EXISTS referred_by INT DEFAULT NULL;
+    ALTER TABLE customers ADD COLUMN IF NOT EXISTS referrals_rewarded INT DEFAULT 0;
 
     CREATE TABLE IF NOT EXISTS user_passkeys (
       id SERIAL PRIMARY KEY,

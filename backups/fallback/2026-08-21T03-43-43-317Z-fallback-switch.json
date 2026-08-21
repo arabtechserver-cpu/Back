@@ -1,6 +1,6 @@
 {
-  "created_at": "2026-08-11T21:12:46.635Z",
-  "reason": "startup",
+  "created_at": "2026-08-21T03:43:43.317Z",
+  "reason": "fallback-switch",
   "fallbackMode": true,
   "tables": {
     "users": [
@@ -10,8 +10,6 @@
         "password": "$2a$10$k1143hMdN5A1kWhRxtp30eWaY9AyNXTJBy5TdSXN6.azRQXyJImTi"
       }
     ],
-    "categories": [],
-    "services": [],
     "orders": [],
     "customers": [],
     "banners": [],
@@ -51,14 +49,6 @@
         "value": "465"
       },
       {
-        "id": 21792,
-        "key": "[\"USD\"]"
-      },
-      {
-        "id": 21793,
-        "key": "{\"USD\":1}"
-      },
-      {
         "id": 21794,
         "key": "base_currency",
         "value": "USD"
@@ -76,7 +66,17 @@
     ],
     "customer_discounts": [],
     "reviews": [],
-    "api_providers": []
-  },
-  "source": "database.json"
+    "api_providers": [
+      {
+        "id": 1,
+        "name": "EA Unlocker",
+        "api_url": "https://ea-unlocker.com/api/index.php",
+        "username": "mina",
+        "api_key": "50C-XDK-PZ3-G1H-1GI-8LH-KE4-B6O",
+        "is_active": 1,
+        "balance": "0.00",
+        "currency": "USD"
+      }
+    ]
+  }
 }

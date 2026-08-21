@@ -1596,14 +1596,15 @@ router.get('/admin/:id/api-logs', authMiddleware, async (req, res) => {
 
 router.get('/referral-info', customerAuth, async (req, res) => {
   try {
-    let customer = await getQuery('SELECT referral_code FROM customers WHERE id = ?', [req.customer.id]);
+    let customer = await getQuery('SELECT * FROM customers WHERE id = ?', [req.customer.id]);
+    if (!customer) return res.status(404).json({ message: 'Customer not found' });
     if (!customer.referral_code) {
       const newRefCode = "REF" + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substring(2,5).toUpperCase();
       await runQuery('UPDATE customers SET referral_code = ? WHERE id = ?', [newRefCode, req.customer.id]);
       customer.referral_code = newRefCode;
     }
-    const countRow = await getQuery('SELECT COUNT(*) as cnt FROM customers WHERE referred_by = ?', [req.customer.id]);
-    const count = Number(countRow ? countRow.cnt : 0);
+    const referrals = await allQuery('SELECT * FROM customers WHERE referred_by = ?', [req.customer.id]);
+    const count = referrals ? referrals.length : 0;
     res.json({ referral_code: customer.referral_code, referral_count: count });
   } catch (error) {
     console.error('Error fetching referral info:', error);
