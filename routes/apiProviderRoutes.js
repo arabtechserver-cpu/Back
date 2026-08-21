@@ -182,18 +182,6 @@ async function performProviderSync(providerId, customRate, customMarkup, customS
   let addedServicesCount = 0;
   let updatedServicesCount = 0;
 
-  // Keep valid existing fields when a provider omits Requires.Custom on a sync response.
-  const mergeFields = (current, incoming) => {
-    const parse = value => { try { return Array.isArray(value) ? value : JSON.parse(value || '[]'); } catch { return []; } };
-    const result = [];
-    const seen = new Set();
-    [...parse(current), ...parse(incoming)].forEach(field => {
-      const key = String(field?.api_name || field?.fieldname || field?.name || field?.id || '').trim().toLowerCase();
-      if (key && !seen.has(key)) { seen.add(key); result.push(field); }
-    });
-    return result;
-  };
-
   if (shouldGroup) {
     const groups = {};
     for (const s of allServices) {
@@ -222,18 +210,6 @@ async function performProviderSync(providerId, customRate, customMarkup, customS
         }
       }
 
-      if (combinedFields.length === 0) {
-        const needsImei = groupServices.some(s => {
-          const nameLower = (s.name || '').toLowerCase();
-          const imeiKeywords = ['frp', 'icloud', 'bypass', 'remove', 'unlock', 'passcode', 'ramdisk', 'clean', 'lost', 'check', 'mac', 'network', 'imei', 'sn', 'ecid', 'serial'];
-          const likelyNeedsImei = imeiKeywords.some(kw => nameLower.includes(kw));
-          return likelyNeedsImei && s.requires_imei !== false && (s.serviceType || 'imei').toLowerCase() === 'imei';
-        });
-        if (needsImei) {
-          combinedFields.unshift({ id: 'imei', name: 'imei', label: 'IMEI / SN / ECID', placeholder: 'أدخل رقم IMEI أو الرقم التسلسلي (SN) أو ECID', type: 'text', required: false });
-        }
-      }
-
       let cat = await getQuery('SELECT id FROM categories WHERE name = ?', [cleanGroupName]);
       let categoryId;
       if (!cat) {
@@ -245,9 +221,7 @@ async function performProviderSync(providerId, customRate, customMarkup, customS
         addedCategoriesCount++;
       } else {
         categoryId = cat.id;
-        const existingCategory = await getQuery('SELECT fields FROM categories WHERE id = ?', [categoryId]);
-        const safeCategoryFields = mergeFields(existingCategory?.fields, combinedFields);
-        if (safeCategoryFields.length) await runQuery("UPDATE categories SET fields = ? WHERE id = ?", [JSON.stringify(safeCategoryFields), categoryId]);
+        await runQuery("UPDATE categories SET fields = ? WHERE id = ?", [JSON.stringify(combinedFields), categoryId]);
       }
 
       const mergedPackages = [];
@@ -267,8 +241,10 @@ async function performProviderSync(providerId, customRate, customMarkup, customS
             if (storedField) packageFields.push(storedField);
           });
         }
-        // Group-level fields are also valid for packages when the provider omits per-service fields.
-        const effectivePackageFields = mergeFields(combinedFields, packageFields);
+        // Use only fields returned for this package. If the provider exposes fields
+        // at group level instead, use that exact provider response without merging
+        // stale local fields or fields from unrelated packages.
+        const effectivePackageFields = packageFields.length ? packageFields : combinedFields;
 
         mergedPackages.push({
           id: idx + 1,
@@ -325,11 +301,6 @@ async function performProviderSync(providerId, customRate, customMarkup, customS
         addedCategoriesCount++;
       } else {
         categoryId = cat.id;
-        if (s.customFields?.length) {
-          const existingCategory = await getQuery('SELECT fields FROM categories WHERE id = ?', [categoryId]);
-          const categoryFields = mergeFields(existingCategory?.fields, s.customFields.map(buildStoredCustomField).filter(Boolean));
-          if (categoryFields.length) await runQuery('UPDATE categories SET fields = ? WHERE id = ?', [JSON.stringify(categoryFields), categoryId]);
-        }
       }
 
       const serviceFields = [];
@@ -341,16 +312,6 @@ async function performProviderSync(providerId, customRate, customMarkup, customS
       }
 
 
-
-      if (serviceFields.length === 0) {
-        const nameLower = (s.name || '').toLowerCase();
-        const imeiKeywords = ['frp', 'icloud', 'bypass', 'remove', 'unlock', 'passcode', 'ramdisk', 'clean', 'lost', 'check', 'mac', 'network', 'imei', 'sn', 'ecid', 'serial'];
-        const likelyNeedsImei = imeiKeywords.some(kw => nameLower.includes(kw));
-        
-        if (likelyNeedsImei && s.requires_imei !== false && (s.serviceType || 'imei').toLowerCase() === 'imei') {
-          serviceFields.unshift({ id: 'imei', name: 'imei', label: 'IMEI / SN / ECID', placeholder: 'أدخل رقم IMEI أو الرقم التسلسلي (SN) أو ECID', type: 'text', required: true });
-        }
-      }
 
       let multiplier = 1;
       if (apiCurrency === 'EGP') multiplier = 1 / rate;
@@ -522,21 +483,6 @@ router.post('/:id/import-services', authMiddleware, async (req, res) => {
         }
 
 
-
-
-        const needsImei = groupServices.some(s => {
-          const nameLower = (s.name || '').toLowerCase();
-          const imeiKeywords = ['frp', 'icloud', 'bypass', 'remove', 'unlock', 'passcode', 'ramdisk', 'clean', 'lost', 'check', 'mac', 'network', 'imei', 'sn', 'ecid', 'serial'];
-          const likelyNeedsImei = imeiKeywords.some(kw => nameLower.includes(kw));
-          return likelyNeedsImei && s.requires_imei !== false && (s.serviceType || 'imei').toLowerCase() === 'imei';
-        });
-        if (needsImei) {
-          const hasImei = combinedFields.some(f => f.id === 'imei' || (f.label && f.label.toLowerCase().includes('imei')) || (f.name && f.name.toLowerCase().includes('imei')));
-          if (!hasImei) {
-            combinedFields.unshift({ id: 'imei', name: 'imei', label: 'IMEI', placeholder: 'أدخل رقم IMEI', type: 'text', required: true });
-          }
-        }
-
         let cat = await getQuery('SELECT id FROM categories WHERE name = ?', [cleanGroupName]);
         let categoryId;
         if (!cat) {
@@ -570,14 +516,6 @@ router.post('/:id/import-services', authMiddleware, async (req, res) => {
           const isDynamicPkg = (s.max_quantity > 1 && s.max_quantity !== s.min_quantity) || (s.min_quantity > 1 && s.max_quantity === 0) || s.requires_quantity;
 
           const packageFields = [];
-          if (s.requires_imei !== false && (s.serviceType || 'imei').toLowerCase() === 'imei') {
-            const hasCustomImei = s.customFields && s.customFields.some(cf => (cf.fieldname || '').toLowerCase().includes('imei'));
-            if (!hasCustomImei) {
-              packageFields.push({ id: 'imei', name: 'imei', label: 'IMEI', placeholder: 'أدخل رقم IMEI', type: 'text', required: true });
-            }
-          } else if (s.serviceType === 'server') {
-             // For server services, maybe player_id or username is needed, but we rely on custom fields if any.
-          }
           if (s.customFields && s.customFields.length > 0) {
             s.customFields.forEach(cf => {
               const storedField = buildStoredCustomField(cf);
@@ -666,11 +604,6 @@ router.post('/:id/import-services', authMiddleware, async (req, res) => {
             if (storedField) serviceFields.push(storedField);
           });
         }
-        if ((s.serviceType || 'imei') === 'imei' && s.requires_imei !== false) {
-           const hasImei = serviceFields.some(f => f.id === 'imei' || (f.label && f.label.toLowerCase().includes('imei')) || (f.name && f.name.toLowerCase().includes('imei')));
-           if (!hasImei) serviceFields.unshift({ id: 'imei', name: 'imei', label: 'IMEI', placeholder: 'أدخل رقم IMEI', type: 'text', required: true });
-        }
-
         let multiplier = 1;
         if (apiCurrency === 'EGP') multiplier = 1 / rate;
 
