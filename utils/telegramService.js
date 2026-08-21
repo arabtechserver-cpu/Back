@@ -264,6 +264,42 @@ async function processCallbackQuery(callbackQuery) {
   const data = callbackQuery.data;
   const cbId = callbackQuery.id;
 
+  
+  // Admin: Approve API Order
+  if (data.startsWith('approve_api_')) {
+    const adminChatIds = await getAdminChatIds();
+    if (!adminChatIds.includes(String(chatId))) {
+      await answerCallbackQuery(cbId, "This action is for admins only", true);
+      return;
+    }
+    const orderId = data.replace('approve_api_', '');
+    try {
+      const unlockerRoutes = require('../routes/unlockerRoutes');
+      await unlockerRoutes.autoSubmitUnlockerOrder(orderId);
+      
+      const newMarkup = { inline_keyboard: [[{ text: 'تم الموافقة وإرسال الطلب بنجاح', callback_data: 'noop' }]] };
+      
+      if (callbackQuery.message.photo) {
+        await tgRequest('editMessageReplyMarkup', {
+          chat_id: chatId,
+          message_id: callbackQuery.message.message_id,
+          reply_markup: newMarkup
+        }).catch(()=>null);
+      } else {
+        await tgRequest('editMessageReplyMarkup', {
+          chat_id: chatId,
+          message_id: callbackQuery.message.message_id,
+          reply_markup: newMarkup
+        }).catch(()=>null);
+      }
+      await answerCallbackQuery(cbId, "API Order Sent Successfully!");
+    } catch (err) {
+      console.error("Failed to submit API order via Telegram:", err);
+      await answerCallbackQuery(cbId, "Error: " + err.message, true);
+    }
+    return;
+  }
+
   // Identify Customer
   const customer = await getQuery('SELECT * FROM customers WHERE telegram_chat_id = ?', [chatId]);
   if (!customer) {
