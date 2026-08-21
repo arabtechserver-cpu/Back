@@ -143,7 +143,7 @@ router.post('/', async (req, res) => {
   try {
     // Verify service and get parent category name and download link
     const serviceInfo = await getQuery(`
-      SELECT s.name as service_name, s.download_link, s.download_link_title, s.api_source, c.name as category_name 
+      SELECT s.name as service_name, s.download_link, s.download_link_title, s.api_source, s.api_provider_id, c.name as category_name 
       FROM services s 
       JOIN categories c ON s.category_id = c.id 
       WHERE s.id = ?
@@ -305,13 +305,21 @@ router.post('/', async (req, res) => {
             `\n🔗 راجع الطلب في لوحة التحكم`
           ].filter(Boolean).join('\n');
           for (const chatId of adminChatIds) {
-            if (savedReceiptPath) {
-              const fullImagePath = path.join(__dirname, '..', savedReceiptPath);
-              await telegram.sendPhoto(String(chatId), fullImagePath, tgMsg).catch(() => {});
-            } else {
-              await telegram.sendMessage(String(chatId), tgMsg).catch(() => {});
+              let keyboard = null;
+              if (serviceInfo.api_provider_id && !autoSubmitted) {
+                keyboard = {
+                  inline_keyboard: [
+                    [{ text: 'موافقة وإرسال للمزود', callback_data: `approve_api_${orderId}` }]
+                  ]
+                };
+              }
+              if (savedReceiptPath) {
+                const fullImagePath = path.join(__dirname, '..', savedReceiptPath);
+                await telegram.sendPhoto(String(chatId), fullImagePath, tgMsg, keyboard).catch(() => {});
+              } else {
+                await telegram.sendMessage(String(chatId), tgMsg, keyboard).catch(() => {});
+              }
             }
-          }
           console.log(`[Telegram Admin] Order #${orderId} notification sent to ${adminChatIds.length} admin(s)`);
         }
 

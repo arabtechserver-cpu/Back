@@ -91,13 +91,16 @@ async function sendMessage(chatId, text, replyMarkup = null, parseMode = 'Markdo
   }
 }
 
-async function sendPhoto(chatId, imageSource, caption = '', parseMode = 'Markdown') {
+async function sendPhoto(chatId, imageSource, caption = '', replyMarkup = null, parseMode = 'Markdown') {
   if (!chatId || !imageSource) return false;
   try {
     const form = new FormData();
     form.append('chat_id', chatId);
     form.append('caption', caption);
     form.append('parse_mode', parseMode);
+    if (replyMarkup) {
+      form.append('reply_markup', JSON.stringify(replyMarkup));
+    }
     
     if (typeof imageSource === 'string' && imageSource.startsWith('data:image/')) {
       const base64Data = imageSource.split(';base64,').pop();
