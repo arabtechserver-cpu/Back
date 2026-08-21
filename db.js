@@ -536,6 +536,8 @@ async function createTables() {
 
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS google_id VARCHAR(255) DEFAULT '';
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS transaction_password VARCHAR(255) DEFAULT '';
+    ALTER TABLE customers ADD COLUMN IF NOT EXISTS visits_count INT DEFAULT 0;
+    ALTER TABLE customers ADD COLUMN IF NOT EXISTS discount_percent NUMERIC(5,2) DEFAULT 0;
 
     CREATE TABLE IF NOT EXISTS user_passkeys (
       id SERIAL PRIMARY KEY,
@@ -1626,3 +1628,4 @@ module.exports = {
   onDatabaseAlert: (handler) => dbEvents.on('database-alert', handler),
   onDatabaseModeChange: (handler) => dbEvents.on('database-mode-change', handler),
 };
+

@@ -170,6 +170,7 @@ router.post('/register', turnstileMiddleware, async (req, res) => {
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     const otpKey = `reg_${cleanUsername}_${Date.now()}`;
 
+    const referred_by_code = req.body.referred_by_code || null;
     await setCustomerOtp(otpKey, {
       code,
       type: 'register',
@@ -178,6 +179,7 @@ router.post('/register', turnstileMiddleware, async (req, res) => {
       canonicalEmail,
       password: hashedPassword,
       phone: userPhone,
+      referred_by_code,
       expiresAt: Date.now() + 10 * 60 * 1000
     });
 
@@ -377,10 +379,28 @@ router.post('/google-auth', async (req, res) => {
       const randomPassword = `G_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
       const hashedPassword = await bcrypt.hash(randomPassword, 10);
 
-      const result = await runQuery(
-        'INSERT INTO customers (username, email, password, google_id) VALUES (?, ?, ?, ?)',
-        [finalUsername, email, hashedPassword, googleId]
-      );
+              let referrerId = null;
+        const referred_by_code = req.body.referred_by_code;
+        if (referred_by_code) {
+          const referrer = await getQuery('SELECT id FROM customers WHERE referral_code = ?', [referred_by_code]);
+          if (referrer) referrerId = referrer.id;
+        }
+        const newRefCode = "REF" + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substring(2,5).toUpperCase();
+
+        const result = await runQuery(
+          'INSERT INTO customers (username, email, password, google_id, referral_code, referred_by) VALUES (?, ?, ?, ?, ?, ?)',
+          [finalUsername, email, hashedPassword, googleId, newRefCode, referrerId]
+        );
+
+        if (referrerId) {
+          const refCountRow = await getQuery('SELECT COUNT(*) as cnt FROM customers WHERE referred_by = ?', [referrerId]);
+          const currentCount = Number(refCountRow ? refCountRow.cnt : 0);
+          const referrerObj = await getQuery('SELECT referrals_rewarded FROM customers WHERE id = ?', [referrerId]);
+          const rewarded = Number(referrerObj ? referrerObj.referrals_rewarded || 0 : 0);
+          if (currentCount - (rewarded * 30) >= 30) {
+            await runQuery('UPDATE customers SET balance = balance + 5, referrals_rewarded = referrals_rewarded + 1 WHERE id = ?', [referrerId]);
+          }
+        }
 
       const newCustomerId = result.lastID;
 
@@ -1574,4 +1594,26 @@ router.get('/admin/:id/api-logs', authMiddleware, async (req, res) => {
   }
 });
 
+router.get('/referral-info', customerAuth, async (req, res) => {
+  try {
+    let customer = await getQuery('SELECT referral_code FROM customers WHERE id = ?', [req.customer.id]);
+    if (!customer.referral_code) {
+      const newRefCode = "REF" + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substring(2,5).toUpperCase();
+      await runQuery('UPDATE customers SET referral_code = ? WHERE id = ?', [newRefCode, req.customer.id]);
+      customer.referral_code = newRefCode;
+    }
+    const countRow = await getQuery('SELECT COUNT(*) as cnt FROM customers WHERE referred_by = ?', [req.customer.id]);
+    const count = Number(countRow ? countRow.cnt : 0);
+    res.json({ referral_code: customer.referral_code, referral_count: count });
+  } catch (error) {
+    console.error('Error fetching referral info:', error);
+    res.status(500).json({ message: 'Internal Server Error' });
+  }
+});
+
 module.exports = router;
+
+
+
+
+

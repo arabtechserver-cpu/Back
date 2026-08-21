@@ -1,0 +1,82 @@
+{
+  "created_at": "2026-08-21T02:55:14.450Z",
+  "reason": "fallback-switch",
+  "fallbackMode": true,
+  "tables": {
+    "users": [
+      {
+        "id": 1,
+        "username": "admin",
+        "password": "$2a$10$k1143hMdN5A1kWhRxtp30eWaY9AyNXTJBy5TdSXN6.azRQXyJImTi"
+      }
+    ],
+    "orders": [],
+    "customers": [],
+    "banners": [],
+    "wallet_requests": [],
+    "wallet_transactions": [],
+    "settings": [
+      {
+        "key": "site_name",
+        "value": "عرب تك سيرفر"
+      },
+      {
+        "key": "site_logo",
+        "value": "/logo.jpg"
+      },
+      {
+        "key": "site_favicon",
+        "value": "/favicon.png"
+      },
+      {
+        "id": 21787,
+        "key": "email_user",
+        "value": "********"
+      },
+      {
+        "id": 21788,
+        "key": "email_pass",
+        "value": "********"
+      },
+      {
+        "id": 21789,
+        "key": "email_host",
+        "value": "smtp.gmail.com"
+      },
+      {
+        "id": 21790,
+        "key": "email_port",
+        "value": "465"
+      },
+      {
+        "id": 21794,
+        "key": "base_currency",
+        "value": "USD"
+      },
+      {
+        "id": 21795,
+        "key": "currencies",
+        "value": "[\"USD\"]"
+      },
+      {
+        "id": 21796,
+        "key": "exchange_rates",
+        "value": "{\"USD\":1}"
+      }
+    ],
+    "customer_discounts": [],
+    "reviews": [],
+    "api_providers": [
+      {
+        "id": 1,
+        "name": "EA Unlocker",
+        "api_url": "https://ea-unlocker.com/api/index.php",
+        "username": "mina",
+        "api_key": "50C-XDK-PZ3-G1H-1GI-8LH-KE4-B6O",
+        "is_active": 1,
+        "balance": "0.00",
+        "currency": "USD"
+      }
+    ]
+  }
+}

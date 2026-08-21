@@ -664,5 +664,4 @@ router.get('/tickets', optionalCustomerAuth, async (req, res) => {
     return res.status(500).json({ message: 'حدث خطأ أثناء جلب تذاكر الدعم.' });
   }
 });
-
 module.exports = router;
