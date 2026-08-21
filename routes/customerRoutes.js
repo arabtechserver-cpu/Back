@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const { getReferralProgress } = require('../utils/referral');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const axios = require('axios');
@@ -1620,9 +1621,12 @@ router.get('/referral-info', customerAuth, async (req, res) => {
       await runQuery('UPDATE customers SET referral_code = ? WHERE id = ?', [newRefCode, req.customer.id]);
       customer.referral_code = newRefCode;
     }
-    const referrals = await allQuery('SELECT * FROM customers WHERE referred_by = ?', [req.customer.id]);
-    const count = referrals ? referrals.length : 0;
-    res.json({ referral_code: customer.referral_code, referral_count: count });
+    const countRow = await getQuery(
+      'SELECT COUNT(DISTINCT id) AS count FROM customers WHERE referred_by = ?',
+      [req.customer.id]
+    );
+    const progress = getReferralProgress(countRow?.count);
+    res.json({ referral_code: customer.referral_code, referral_count: progress.count, referral_goal: progress.goal, referral_percent: progress.percent });
   } catch (error) {
     console.error('Error fetching referral info:', error);
     res.status(500).json({ message: 'Internal Server Error' });

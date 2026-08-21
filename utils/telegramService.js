@@ -275,9 +275,16 @@ async function processCallbackQuery(callbackQuery) {
     const orderId = data.replace('approve_api_', '');
     try {
       const unlockerRoutes = require('../routes/unlockerRoutes');
-      await unlockerRoutes.autoSubmitUnlockerOrder(orderId);
-      
-      const newMarkup = { inline_keyboard: [[{ text: 'تم الموافقة وإرسال الطلب بنجاح', callback_data: 'noop' }]] };
+      const result = await unlockerRoutes.autoSubmitUnlockerOrder(orderId);
+      if (!result || result.success !== true) {
+        const reason = result?.error || 'تعذر إرسال الطلب إلى المزوّد.';
+        const failedMarkup = { inline_keyboard: [[{ text: 'فشل الإرسال - حاول مرة أخرى', callback_data: `approve_api_${orderId}` }]] };
+        await tgRequest('editMessageReplyMarkup', { chat_id: chatId, message_id: callbackQuery.message.message_id, reply_markup: failedMarkup }).catch(() => null);
+        await answerCallbackQuery(cbId, reason.slice(0, 190), true);
+        return;
+      }
+
+      const newMarkup = { inline_keyboard: [[{ text: 'تمت الموافقة وإرسال الطلب للمزوّد ✅', callback_data: 'noop' }]] };
       
       if (callbackQuery.message.photo) {
         await tgRequest('editMessageReplyMarkup', {
