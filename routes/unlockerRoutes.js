@@ -439,18 +439,6 @@ async function performSmartSync(customRate, customMarkup, customShouldGroup) {
         }
       }
 
-      // If no fields collected and group is IMEI-dominant, inject IMEI fallback field
-      if (combinedFields.length === 0) {
-        const dominantTypeEarly = Object.entries(
-          groupServices.reduce((acc, s) => { const t = s.serviceType || 'imei'; acc[t] = (acc[t] || 0) + 1; return acc; }, {})
-        ).sort((a, b) => b[1] - a[1])[0]?.[0] || 'imei';
-        if (dominantTypeEarly === 'imei') {
-          combinedFields.push({ id: 'imei', name: 'imei', label: 'IMEI / SN / ECID', placeholder: 'أدخل رقم IMEI أو الرقم التسلسلي (SN) أو ECID', type: 'text', required: true });
-        } else {
-          combinedFields.push({ id: 'player_id', name: 'player_id', label: 'معرّف الجهاز / ID', placeholder: 'أدخل معرّف الجهاز بدقة هنا', type: 'text', required: true });
-        }
-      }
-
       // UPSERT CATEGORY
       let cat = await getQuery('SELECT id FROM categories WHERE name = ?', [cleanGroupName]);
       let categoryId;
@@ -559,16 +547,6 @@ async function performSmartSync(customRate, customMarkup, customShouldGroup) {
           if (storedField) serviceFields.push(storedField);
         });
       }
-      // If no custom fields and service is IMEI type, inject IMEI field as fallback
-      if (serviceFields.length === 0) {
-        const svcType = s.serviceType || 'imei';
-        if (svcType === 'imei') {
-          serviceFields.push({ id: 'imei', name: 'imei', label: 'IMEI / SN / ECID', placeholder: 'أدخل رقم IMEI أو الرقم التسلسلي (SN) أو ECID', type: 'text', required: true });
-        } else {
-          serviceFields.push({ id: 'player_id', name: 'player_id', label: 'معرّف الجهاز / ID', placeholder: 'أدخل معرّف الجهاز بدقة هنا', type: 'text', required: true });
-        }
-      }
-
       let multiplier = 1;
       if (apiCurrency === 'EGP') multiplier = 1 / rate;
 
@@ -809,15 +787,6 @@ router.post('/import-services', authMiddleware, async (req, res) => {
             });
           }
 
-          if (packageFields.length === 0) {
-            const nameLower = (s.name || '').toLowerCase();
-            const imeiKeywords = ['frp', 'icloud', 'bypass', 'remove', 'unlock', 'passcode', 'ramdisk', 'clean', 'lost', 'check', 'mac', 'network', 'imei', 'sn', 'ecid', 'serial'];
-            const likelyNeedsImei = imeiKeywords.some(kw => nameLower.includes(kw));
-            if (likelyNeedsImei && s.requires_imei !== false && (s.serviceType || 'imei').toLowerCase() === 'imei') {
-              packageFields.push({ id: 'imei', name: 'imei', label: 'IMEI / SN / ECID', placeholder: 'أدخل رقم IMEI أو الرقم التسلسلي (SN) أو ECID', type: 'text', required: true });
-            }
-          }
-
           const pkgData = {
             id: pkgIndex >= 0 ? mergedPackages[pkgIndex].id : (mergedPackages.length + 1),
             name: cleanPkgName,
@@ -887,15 +856,6 @@ router.post('/import-services', authMiddleware, async (req, res) => {
             seen.add(fieldId);
             seen.add(fieldLabel);
             serviceFields.push(storedField);
-          }
-        }
-        
-        if (serviceFields.length === 0) {
-          const nameLower = (s.name || '').toLowerCase();
-          const imeiKeywords = ['frp', 'icloud', 'bypass', 'remove', 'unlock', 'passcode', 'ramdisk', 'clean', 'lost', 'check', 'mac', 'network', 'imei', 'sn', 'ecid', 'serial'];
-          const likelyNeedsImei = imeiKeywords.some(kw => nameLower.includes(kw));
-          if (likelyNeedsImei && s.requires_imei !== false && (s.serviceType || 'imei').toLowerCase() === 'imei') {
-            serviceFields.push({ id: 'imei', name: 'imei', label: 'IMEI / SN / ECID', placeholder: 'أدخل رقم IMEI أو الرقم التسلسلي (SN) أو ECID', type: 'text', required: true });
           }
         }
         

@@ -2,6 +2,7 @@ const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 const fs = require('fs');
 const path = require('path');
+const { removeLegacySerialDuplicate } = require('./services/providerFieldCleanup');
 const dbEvents = require('./utils/dbEvents');
 require('dotenv').config();
 
@@ -1204,7 +1205,8 @@ async function seedData() {
         let changed = false;
         let fieldsArr = typeof s.fields === 'string' ? JSON.parse(s.fields) : (s.fields || []);
         if (Array.isArray(fieldsArr)) {
-          const cleaned = fieldsArr.filter(f => f.id !== 'player_id' && f.name !== 'player_id');
+          const withoutLegacyPlayerId = fieldsArr.filter(f => f.id !== 'player_id' && f.name !== 'player_id');
+          const cleaned = removeLegacySerialDuplicate(withoutLegacyPlayerId);
           if (cleaned.length !== fieldsArr.length) {
             fieldsArr = cleaned;
             changed = true;
@@ -1214,7 +1216,8 @@ async function seedData() {
         if (Array.isArray(pkgsArr)) {
           for (const p of pkgsArr) {
             if (Array.isArray(p.fields)) {
-              const pCleaned = p.fields.filter(f => f.id !== 'player_id' && f.name !== 'player_id');
+              const withoutLegacyPlayerId = p.fields.filter(f => f.id !== 'player_id' && f.name !== 'player_id');
+              const pCleaned = removeLegacySerialDuplicate(withoutLegacyPlayerId);
               if (pCleaned.length !== p.fields.length) {
                 p.fields = pCleaned;
                 changed = true;

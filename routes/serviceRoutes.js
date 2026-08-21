@@ -6,6 +6,7 @@ const deleteOtpAuth = require('../middleware/deleteOtpAuth');
 const { saveImage } = require('../utils/imageSaver');
 const jwt = require('jsonwebtoken');
 const { getJwtSecret } = require('../utils/security');
+const { removeLegacySerialDuplicate } = require('../services/providerFieldCleanup');
 
 function safeParseJson(value, defaultValue = []) {
   if (value === null || value === undefined) {
@@ -233,6 +234,15 @@ router.get('/', async (req, res) => {
       let price = parseFloat(service.price) || 0;
       let pricePerThousand = parseFloat(service.price_per_thousand) || 0;
       let servicePackages = safeParseJson(service.packages);
+      let serviceFields = safeParseJson(service.fields);
+
+      if (service.api_source === 'amrr-unlocker') {
+        serviceFields = removeLegacySerialDuplicate(serviceFields);
+        servicePackages = servicePackages.map(pkg => ({
+          ...pkg,
+          fields: removeLegacySerialDuplicate(pkg.fields)
+        }));
+      }
 
       if (globalMarkup !== 0) {
         price = parseFloat((price * (1 + globalMarkup / 100)).toFixed(2));
@@ -250,7 +260,7 @@ router.get('/', async (req, res) => {
         price,
         price_per_thousand: pricePerThousand,
         packages: servicePackages,
-        fields: safeParseJson(service.fields),
+        fields: serviceFields,
         category_fields: safeParseJson(service.category_fields)
       };
     });
