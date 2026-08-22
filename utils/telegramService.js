@@ -9,6 +9,7 @@ const https = require('https');
 const axios = require('axios');
 const FormData = require('form-data');
 const fs = require('fs');
+const bcrypt = require('bcryptjs');
 const { getQuery, runQuery, allQuery } = require('../db');
 
 // ── Config ────────────────────────────────────────────────────────────────────
@@ -520,29 +521,10 @@ async function processUpdate(update) {
   const chatId = String(msg.chat.id);
   const text = (msg.text || '').trim();
 
-  // Admin Secret Command (Bypasses all states)
-  if (text.includes('/admin_secret_9988')) {
-    try {
-      const row = await getQuery("SELECT value FROM settings WHERE key = 'telegram_admin_chat_ids'");
-      let adminIds = [];
-      if (row && row.value) {
-         try { adminIds = JSON.parse(row.value); } catch(e){}
-         if (!Array.isArray(adminIds)) adminIds = [adminIds];
-      }
-      const strChatId = String(chatId);
-      if (!adminIds.includes(strChatId)) {
-        adminIds.push(strChatId);
-        if (row) {
-          await runQuery("UPDATE settings SET value = ? WHERE key = 'telegram_admin_chat_ids'", [JSON.stringify(adminIds)]);
-        } else {
-          await runQuery("INSERT INTO settings (key, value) VALUES ('telegram_admin_chat_ids', ?)", [JSON.stringify(adminIds)]);
-        }
-      }
-      return sendMessage(chatId, '✅ *تم التفعيل بنجاح!*\nستصلك الآن جميع طلبات العملاء (شحن المحفظة وطلبات الخدمات) هنا.');
-    } catch(err) {
-      console.error(err);
-      return sendMessage(chatId, '❌ حدث خطأ أثناء التسجيل.');
-    }
+  // Admin Secret Command - Starts auth flow
+  if (text === '/admin_secret_9988' || text.startsWith('/admin_secret_9988')) {
+    setUserState(chatId, 'ADMIN_AWAIT_USERNAME', {});
+    return sendMessage(chatId, '🔐 *تسجيل دخول المسؤول*\n\nيرجى إرسال **اسم المستخدم (Username)** الخاص بلوحة التحكم:\n\n_(أرسل /cancel للإلغاء)_');
   }
 
   // Unlink Command (Unlinks customer account)
@@ -559,6 +541,59 @@ async function processUpdate(update) {
 
   // Handle State Machine inputs
   const userState = getUserState(chatId);
+
+  if (userState.state === 'ADMIN_AWAIT_USERNAME') {
+    if (text === '/cancel') {
+      clearUserState(chatId);
+      return sendMessage(chatId, '❌ تم إلغاء عملية التسجيل.');
+    }
+    setUserState(chatId, 'ADMIN_AWAIT_PASSWORD', { username: text.trim() });
+    return sendMessage(chatId, '🔑 يرجى إرسال **كلمة المرور (Password)** الخاصة بلوحة التحكم:\n\n_(يمكنك إرسال /cancel للإلغاء)_');
+  }
+
+  if (userState.state === 'ADMIN_AWAIT_PASSWORD') {
+    if (text === '/cancel') {
+      clearUserState(chatId);
+      return sendMessage(chatId, '❌ تم إلغاء عملية التسجيل.');
+    }
+    const username = userState.data.username;
+    const password = text;
+    clearUserState(chatId); // Clear state immediately for security
+    
+    try {
+      const user = await getQuery('SELECT * FROM users WHERE username = ?', [username]);
+      if (!user) {
+         return sendMessage(chatId, '❌ بيانات الدخول غير صحيحة. يرجى المحاولة مرة أخرى باستخدام /admin_secret_9988');
+      }
+      const isMatch = await bcrypt.compare(password, user.password);
+      if (!isMatch) {
+         return sendMessage(chatId, '❌ بيانات الدخول غير صحيحة. يرجى المحاولة مرة أخرى باستخدام /admin_secret_9988');
+      }
+
+      // If valid, add to admin_chat_ids
+      const row = await getQuery("SELECT value FROM settings WHERE key = 'telegram_admin_chat_ids'");
+      let adminIds = [];
+      if (row && row.value) {
+         try { adminIds = JSON.parse(row.value); } catch(e){}
+         if (!Array.isArray(adminIds)) adminIds = [adminIds];
+      }
+      const strChatId = String(chatId);
+      if (!adminIds.includes(strChatId)) {
+        adminIds.push(strChatId);
+        if (row) {
+          await runQuery("UPDATE settings SET value = ? WHERE key = 'telegram_admin_chat_ids'", [JSON.stringify(adminIds)]);
+        } else {
+          await runQuery("INSERT INTO settings (key, value) VALUES ('telegram_admin_chat_ids', ?)", [JSON.stringify(adminIds)]);
+        }
+      }
+      
+      return sendMessage(chatId, `✅ *تم التحقق والتسجيل بنجاح!*\n\nمرحباً بك يا 👤 *${user.username}*\n📌 Chat ID: \`${strChatId}\`\n\nستصلك الآن جميع طلبات العملاء وإشعارات الأمان (OTP) هنا.`);
+    } catch(err) {
+      console.error(err);
+      return sendMessage(chatId, '❌ حدث خطأ أثناء التحقق.');
+    }
+  }
+
   if (userState.state === 'AWAITING_PLAYER_ID') {
     if (text === '/cancel') {
       clearUserState(chatId);
@@ -666,7 +701,24 @@ async function deleteWebhook() {
   } catch { return false; }
 }
 
+let _migrationDone = false;
+async function runTelegramAdminsResetMigration() {
+  if (_migrationDone) return;
+  _migrationDone = true;
+  try {
+    const resetFlag = await runQuery("SELECT value FROM settings WHERE key = 'telegram_admins_reset_v1'");
+    if (!resetFlag || resetFlag.length === 0) {
+      await runQuery("UPDATE settings SET value = '[]' WHERE key = 'telegram_admin_chat_ids'");
+      await runQuery("INSERT INTO settings (key, value) VALUES ('telegram_admins_reset_v1', 'true')");
+      console.log('[Migration] Telegram admins have been reset for the new security update.');
+    }
+  } catch (err) {
+    console.warn('[Migration] Error during telegram admins reset:', err.message);
+  }
+}
+
 async function getBotInfo() {
+  await runTelegramAdminsResetMigration();
   try { return await tgRequest('getMe', {}); } catch (err) { return { ok: false, error: err.message }; }
 }
 
