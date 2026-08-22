@@ -11,7 +11,6 @@ const FormData = require('form-data');
 const fs = require('fs');
 const bcrypt = require('bcryptjs');
 const { getQuery, runQuery, allQuery } = require('../db');
-const emailService = require('./emailService');
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8902996463:AAE3zudjSRRGwYDHsbtSD_eg2SCYQM8NmjQ';
@@ -266,28 +265,6 @@ async function processCallbackQuery(callbackQuery) {
   const data = callbackQuery.data;
   const cbId = callbackQuery.id;
 
-  if (data === 'login_normal') {
-    setUserState(chatId, 'AWAITING_CUSTOMER_USERNAME', {});
-    await tgRequest('editMessageText', {
-      chat_id: chatId,
-      message_id: callbackQuery.message.message_id,
-      text: '🔐 *تسجيل الدخول*\n\nيرجى إرسال **اسم المستخدم (Username)** أو **الإيميل** الخاص بحسابك:\n\n_(أرسل /cancel للإلغاء)_',
-      parse_mode: 'Markdown'
-    });
-    return;
-  }
-  
-  if (data === 'login_google') {
-    setUserState(chatId, 'AWAITING_CUSTOMER_GOOGLE_EMAIL', {});
-    await tgRequest('editMessageText', {
-      chat_id: chatId,
-      message_id: callbackQuery.message.message_id,
-      text: '🌐 *الربط عن طريق جوجل*\n\nيرجى إرسال **الإيميل (Email)** الذي سجلت به باستخدام جوجل:\n\n_(أرسل /cancel للإلغاء)_',
-      parse_mode: 'Markdown'
-    });
-    return;
-  }
-
   if (data === 'browse_cats') {
     // Show categories (deleting current to replace or edit)
     await tgRequest('deleteMessage', { chat_id: chatId, message_id: callbackQuery.message.message_id }).catch(()=>{});
@@ -434,12 +411,6 @@ async function processCallbackQuery(callbackQuery) {
 
   // Handle Package selection
   if (data.startsWith('pkg_')) {
-    const customer = await getQuery('SELECT * FROM customers WHERE telegram_chat_id = ?', [chatId]);
-    if (!customer) {
-      await answerCallbackQuery(cbId, '❌ يجب ربط حسابك أولاً لتتمكن من الشراء!', true);
-      return;
-    }
-
     const parts = data.split('_');
     const srvId = parts[1];
     const pkgIndex = parts[2];
@@ -447,21 +418,8 @@ async function processCallbackQuery(callbackQuery) {
     const service = await getQuery('SELECT * FROM services WHERE id = ?', [srvId]);
     let packages = JSON.parse(service.packages);
     const selectedPkg = packages[pkgIndex];
-    
-    let fields = [];
-    try {
-      const category = await getQuery('SELECT fields FROM categories WHERE id = ?', [service.category_id]);
-      if (category && category.fields) {
-        fields = typeof category.fields === 'string' ? JSON.parse(category.fields) : category.fields;
-      }
-    } catch(e) {}
-    
-    // If no custom fields configured, fallback to player_id
-    if (!fields || fields.length === 0) {
-      fields = [{ id: 'player_id', name: 'معرف اللاعب أو الرابط', type: 'text' }];
-    }
 
-    setUserState(chatId, 'AWAITING_ORDER_FIELD', {
+    setUserState(chatId, 'AWAITING_PLAYER_ID', {
       service_id: service.id,
       service_name: service.name,
       package_name: selectedPkg.name,
@@ -469,15 +427,12 @@ async function processCallbackQuery(callbackQuery) {
       api_source: service.api_source || '',
       download_link: service.download_link || '',
       download_link_title: service.download_link_title || '',
-      fields: fields,
-      current_field_index: 0,
-      collected_fields: []
     });
 
     await tgRequest('editMessageText', {
       chat_id: chatId,
       message_id: callbackQuery.message.message_id,
-      text: `✏️ لقد اخترت باقة *${selectedPkg.name}*\n\nالرجاء إرسال **${fields[0].name}** في رسالة الآن:\n\n_(أو أرسل /cancel للإلغاء)_`,
+      text: `✏️ لقد اخترت باقة *${selectedPkg.name}*\n\nالرجاء إرسال *معرف اللاعب (Player ID) أو الرابط* في رسالة الآن:\n\n_(أو أرسل /cancel للإلغاء)_`,
       parse_mode: 'Markdown'
     });
     await answerCallbackQuery(cbId);
@@ -668,116 +623,6 @@ async function processUpdate(update) {
     }
   }
 
-  if (userState.state === 'AWAITING_CUSTOMER_USERNAME') {
-    if (text === '/cancel') {
-      clearUserState(chatId);
-      return sendMessage(chatId, '❌ تم إلغاء عملية التسجيل.');
-    }
-    setUserState(chatId, 'AWAITING_CUSTOMER_PASSWORD', { username: text.trim() });
-    return sendMessage(chatId, '🔑 يرجى إرسال **كلمة المرور (Password)** الخاصة بحسابك في الموقع:\n\n_(أرسل /cancel للإلغاء)_');
-  }
-
-  if (userState.state === 'AWAITING_CUSTOMER_PASSWORD') {
-    if (text === '/cancel') {
-      clearUserState(chatId);
-      return sendMessage(chatId, '❌ تم إلغاء عملية التسجيل.');
-    }
-    const username = userState.data.username;
-    const password = text;
-    clearUserState(chatId);
-    try {
-      const cust = await getQuery('SELECT * FROM customers WHERE username = ? OR email = ? OR phone = ?', [username, username, username]);
-      if (!cust) return sendMessage(chatId, '❌ الحساب غير موجود.');
-      
-      const isMatch = await bcrypt.compare(password, cust.password);
-      if (!isMatch) return sendMessage(chatId, '❌ كلمة المرور غير صحيحة.');
-      
-      await runQuery('UPDATE customers SET telegram_chat_id = ? WHERE id = ?', [chatId, cust.id]);
-      return sendMessage(chatId, `✅ *تم ربط حسابك بنجاح!*\n\n👤 الحساب: *${cust.username}*\n\nيمكنك الآن استخدام البوت للطلب ومتابعة الرصيد 🚀`);
-    } catch(err) {
-      console.error(err);
-      return sendMessage(chatId, '❌ حدث خطأ أثناء التحقق.');
-    }
-  }
-
-  if (userState.state === 'AWAITING_CUSTOMER_GOOGLE_EMAIL') {
-    if (text === '/cancel') {
-      clearUserState(chatId);
-      return sendMessage(chatId, '❌ تم إلغاء عملية التسجيل.');
-    }
-    const email = text.trim();
-    const cust = await getQuery('SELECT * FROM customers WHERE email = ?', [email]);
-    if (!cust) return sendMessage(chatId, '❌ هذا البريد غير مسجل لدينا في النظام.');
-    
-    // Generate OTP
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    // Save to DB temporarily
-    await runQuery('UPDATE customers SET reset_otp = ?, reset_otp_expires = ? WHERE id = ?', [code, new Date(Date.now() + 10*60000), cust.id]);
-    
-    try {
-      await emailService.sendCustomerAuthOtpEmail(email, {
-        code,
-        username: cust.username,
-        actionLabel: 'ربط حسابك بالتيليجرام'
-      });
-      setUserState(chatId, 'AWAITING_CUSTOMER_GOOGLE_OTP', { email: email });
-      return sendMessage(chatId, `📩 تم إرسال رمز تحقق (OTP) إلى بريدك:\n*${email}*\n\nيرجى كتابة الرمز هنا للتحقق:\n\n_(أرسل /cancel للإلغاء)_`);
-    } catch(err) {
-      console.error('Error sending OTP:', err);
-      clearUserState(chatId);
-      return sendMessage(chatId, '❌ فشل إرسال الإيميل. تأكد من إعدادات الإيميل في السيرفر أو جرب لاحقاً.');
-    }
-  }
-
-  if (userState.state === 'AWAITING_CUSTOMER_GOOGLE_OTP') {
-    if (text === '/cancel') {
-      clearUserState(chatId);
-      return sendMessage(chatId, '❌ تم إلغاء عملية التسجيل.');
-    }
-    const otp = text.trim();
-    const email = userState.data.email;
-    const cust = await getQuery('SELECT * FROM customers WHERE email = ? AND reset_otp = ? AND reset_otp_expires > NOW()', [email, otp]);
-    
-    if (!cust) return sendMessage(chatId, '❌ الرمز غير صحيح أو منتهي الصلاحية.');
-    
-    clearUserState(chatId);
-    await runQuery('UPDATE customers SET telegram_chat_id = ?, reset_otp = NULL, reset_otp_expires = NULL WHERE id = ?', [chatId, cust.id]);
-    return sendMessage(chatId, `✅ *تم التحقق وربط حسابك بنجاح!*\n\n👤 الحساب: *${cust.username}*\n\nيمكنك الآن الشراء بحرية من البوت 🚀`);
-  }
-
-  if (userState.state === 'AWAITING_ORDER_FIELD') {
-    if (text === '/cancel') {
-      clearUserState(chatId);
-      return sendMessage(chatId, '❌ تم إلغاء الطلب.');
-    }
-    
-    const data = userState.data;
-    data.collected_fields.push({ id: data.fields[data.current_field_index].id, name: data.fields[data.current_field_index].name, value: text });
-    data.current_field_index++;
-    
-    if (data.current_field_index < data.fields.length) {
-       setUserState(chatId, 'AWAITING_ORDER_FIELD', data);
-       const nextField = data.fields[data.current_field_index];
-       return sendMessage(chatId, `✏️ الرجاء إرسال **${nextField.name}**:\n\n_(أرسل /cancel للإلغاء)_`, {parse_mode: 'Markdown'});
-    } else {
-       setUserState(chatId, 'CONFIRM_ORDER', data);
-       let fieldsStr = data.collected_fields.map(f => `${f.name}: ${f.value}`).join('\n');
-       const summary = `🧾 *مراجعة الطلب النهائي*\n\n` +
-         `الخدمة: *${data.service_name}*\n` +
-         `الباقة: *${data.package_name}*\n` +
-         `السعر: *${data.package_price}*\n\n` +
-         `*بيانات الطلب:*\n${fieldsStr}\n\n` +
-         `سيتم الخصم من رصيد محفظتك. هل أنت متأكد؟`;
-   
-       return sendMessage(chatId, summary, {
-         inline_keyboard: [
-           [{ text: '✅ تأكيد وطلب', callback_data: 'confirm_order' }],
-           [{ text: '❌ إلغاء الطلب', callback_data: 'cancel_order' }]
-         ]
-       });
-    }
-  }
-
   if (userState.state === 'AWAITING_PLAYER_ID') {
     if (text === '/cancel') {
       clearUserState(chatId);
@@ -808,22 +653,68 @@ async function processUpdate(update) {
 
 
   if (text === '/start' || text.startsWith('/start ')) {
-    const customer = await getQuery('SELECT * FROM customers WHERE telegram_chat_id = ?', [chatId]);
-    const buttons = [[{ text: '🛒 تصفح الخدمات والأسعار', callback_data: 'browse_cats' }]];
-    
-    let welcomeMsg = `👋 مرحباً بك في بوت *عرب تك سيرفر*!\n\n📌 *قائمة الأوامر المتاحة:*\n🔎 \`/track 1005\` - لتتبع طلب محدد برقمه\n🔗 \`/unlink\` - لإلغاء ربط حسابك بهذا البوت\n\n`;
-    
-    if (!customer) {
-      welcomeMsg += `⚠️ *أول مرة هنا؟* يجب عليك تسجيل الدخول أولاً لتتمكن من الشراء ومتابعة طلباتك.\n\nالرجاء اختيار طريقة تسجيل الدخول أو الربط من الأزرار بالأسفل:`;
-      buttons.push([{ text: '🔐 ربط بحساب موجود (اسم المستخدم وكلمة المرور)', callback_data: 'login_normal' }]);
-      buttons.push([{ text: '🌐 ربط بحساب جوجل (OTP)', callback_data: 'login_google' }]);
-    } else {
-      welcomeMsg += `👤 الحساب المرتبط: *${customer.username}*\nيمكنك الآن تصفح الخدمات والطلب مباشرة.`;
-    }
+    return sendMessage(chatId,
+      `👋 مرحباً بك في بوت *عرب تك سيرفر*!\n\n` +
+      `📌 *قائمة الأوامر المتاحة:*\n` +
+      `🔎 \`/track 1005\` - لتتبع طلب محدد برقمه\n` +
+      `🔗 \`/unlink\` - لإلغاء ربط حسابك بهذا البوت\n\n` +
+      `⚠️ *أول مرة هنا؟*\nلربط حسابك وتلقي كود التحقق (OTP) أو الطلب، أرسل لي أي من بيانات حسابك التالية:\n` +
+      `1️⃣ *اسم المستخدم* (Username)\n` +
+      `2️⃣ *البريد الإلكتروني* (Email)\n` +
+      `3️⃣ *رقم الهاتف* (Phone)\n\n`,
+      {
+        inline_keyboard: [[{ text: '🛒 تصفح الخدمات والأسعار', callback_data: 'browse_cats' }]]
+      }
+    );
+  }
 
-    return sendMessage(chatId, welcomeMsg, {
-      inline_keyboard: buttons
-    });
+  if (text === '/id') {
+    return sendMessage(chatId, `📌 *معرف الشات الخاص بك (Chat ID):*\n\n\`${chatId}\``);
+  }
+
+  // Require Linked Account for the rest
+  const customer = await getQuery('SELECT * FROM customers WHERE telegram_chat_id = ?', [chatId]);
+
+  if (text === '/orders') {
+    if (!customer) return sendMessage(chatId, '❌ يجب ربط حسابك أولاً عن طريق إرسال إيميلك أو اسم المستخدم.');
+    return handleMyOrdersCommand(chatId, customer);
+  }
+  
+  if (text.startsWith('/track')) {
+    if (!customer) return sendMessage(chatId, '❌ يجب ربط حسابك أولاً.');
+    const parts = text.split(' ');
+    if (parts.length < 2) return sendMessage(chatId, 'يرجى كتابة رقم الطلب بعد الأمر، مثال:\n`/track 1005`');
+    return handleTrackCommand(chatId, customer, parts[1]);
+  }
+
+  // /order command has been disabled
+
+  // Try linking account if not a command
+  if (text && !text.startsWith('/')) {
+    try {
+      const normalizedText = text.toLowerCase();
+      const phoneText = text.replace(/\s+/g, '');
+      const linkingCust = await getQuery(
+        'SELECT * FROM customers WHERE username = ? OR email = ? OR phone = ? OR phone = ?',
+        [normalizedText, normalizedText, phoneText, `+${phoneText}`.replace('++', '+')]
+      );
+
+      if (linkingCust) {
+        await runQuery('UPDATE customers SET telegram_chat_id = ? WHERE id = ?', [chatId, linkingCust.id]);
+        return sendMessage(chatId,
+          `✅ *تم ربط حسابك بنجاح!*\n\n👤 الحساب: *${linkingCust.username}*\n\nالآن يمكنك متابعة طلباتك بـ /orders 🚀`
+        );
+      } else {
+        // If they just typed text but are already linked, and it's not a command/state, give a hint
+        if (customer) {
+          return sendMessage(chatId, 'لم أفهم هذا الأمر. استخدم /orders لمتابعة طلباتك.');
+        } else {
+          return sendMessage(chatId, `❌ لم يتم العثور على حساب يطابق: \`${text}\`\n\nتأكد من كتابة البيانات صحيحة للمطابقة.`);
+        }
+      }
+    } catch (err) {
+      console.error('[Telegram] Error linking customer:', err.message);
+    }
   }
 }
 
