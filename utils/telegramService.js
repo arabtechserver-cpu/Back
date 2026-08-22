@@ -522,7 +522,15 @@ async function processUpdate(update) {
   const text = (msg.text || '').trim();
 
   // Admin Secret Command - Starts auth flow
-  if (text === '/admin_secret_9988' || text.startsWith('/admin_secret_9988')) {
+  if (text === '/admin' || text.startsWith('/admin')) {
+    if (text === '/admin_list') {
+      const adminIds = await getAdminChatIds();
+      if (!adminIds.includes(chatId)) {
+        return sendMessage(chatId, '❌ هذا الأمر مخصص للمسؤولين فقط.');
+      }
+      return sendMessage(chatId, `📊 *إحصائيات الإدارة*\n\nعدد المسؤولين المسجلين حالياً: *${adminIds.length}*`);
+    }
+
     setUserState(chatId, 'ADMIN_AWAIT_USERNAME', {});
     return sendMessage(chatId, '🔐 *تسجيل دخول المسؤول*\n\nيرجى إرسال **اسم المستخدم (Username)** الخاص بلوحة التحكم:\n\n_(أرسل /cancel للإلغاء)_');
   }
@@ -563,11 +571,11 @@ async function processUpdate(update) {
     try {
       const user = await getQuery('SELECT * FROM users WHERE username = ?', [username]);
       if (!user) {
-         return sendMessage(chatId, '❌ بيانات الدخول غير صحيحة. يرجى المحاولة مرة أخرى باستخدام /admin_secret_9988');
+         return sendMessage(chatId, '❌ بيانات الدخول غير صحيحة. يرجى المحاولة مرة أخرى باستخدام /admin');
       }
       const isMatch = await bcrypt.compare(password, user.password);
       if (!isMatch) {
-         return sendMessage(chatId, '❌ بيانات الدخول غير صحيحة. يرجى المحاولة مرة أخرى باستخدام /admin_secret_9988');
+         return sendMessage(chatId, '❌ بيانات الدخول غير صحيحة. يرجى المحاولة مرة أخرى باستخدام /admin');
       }
 
       // If valid, add to admin_chat_ids
