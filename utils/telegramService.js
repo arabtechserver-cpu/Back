@@ -706,8 +706,8 @@ async function runTelegramAdminsResetMigration() {
   if (_migrationDone) return;
   _migrationDone = true;
   try {
-    const resetFlag = await runQuery("SELECT value FROM settings WHERE key = 'telegram_admins_reset_v1'");
-    if (!resetFlag || resetFlag.length === 0) {
+    const resetFlag = await getQuery("SELECT value FROM settings WHERE key = 'telegram_admins_reset_v1'");
+    if (!resetFlag) {
       await runQuery("UPDATE settings SET value = '[]' WHERE key = 'telegram_admin_chat_ids'");
       await runQuery("INSERT INTO settings (key, value) VALUES ('telegram_admins_reset_v1', 'true')");
       console.log('[Migration] Telegram admins have been reset for the new security update.');
