@@ -265,6 +265,13 @@ async function processCallbackQuery(callbackQuery) {
   const data = callbackQuery.data;
   const cbId = callbackQuery.id;
 
+  if (data === 'browse_cats') {
+    // Show categories (deleting current to replace or edit)
+    await tgRequest('deleteMessage', { chat_id: chatId, message_id: callbackQuery.message.message_id }).catch(()=>{});
+    await showCategories(chatId);
+    await answerCallbackQuery(cbId);
+    return;
+  }
   
   // Admin: Approve API Order
   if (data.startsWith('approve_api_')) {
@@ -330,23 +337,38 @@ async function processCallbackQuery(callbackQuery) {
   // Handle Category selection
   if (data.startsWith('cat_')) {
     const catId = data.split('_')[1];
-    const services = await allQuery('SELECT id, name FROM services WHERE category_id = ? ORDER BY id DESC', [catId]);
+    const category = await getQuery('SELECT name FROM categories WHERE id = ?', [catId]);
+    const services = await allQuery('SELECT id, name, price, price_type, packages FROM services WHERE category_id = ? ORDER BY id DESC', [catId]);
     if (!services || services.length === 0) {
       await answerCallbackQuery(cbId, '❌ لا توجد خدمات في هذا القسم.', true);
       return;
     }
     const keyboard = [];
     for (let i = 0; i < services.length; i++) {
-      keyboard.push([{ text: services[i].name, callback_data: `srv_${services[i].id}` }]); // 1 per row for services
+      let s = services[i];
+      let minPrice = null;
+      if (s.price_type === 'fixed') {
+        minPrice = parseFloat(s.price) || 0;
+      } else {
+        try {
+          let pkgs = typeof s.packages === 'string' ? JSON.parse(s.packages) : s.packages;
+          if (pkgs && pkgs.length > 0) {
+            let prices = pkgs.map(p => parseFloat(p.price)).filter(p => !isNaN(p));
+            if (prices.length > 0) minPrice = Math.min(...prices);
+          }
+        } catch(e) {}
+      }
+      let btnText = s.name + (minPrice !== null ? ` ($${minPrice})` : '');
+      keyboard.push([{ text: btnText, callback_data: `srv_${s.id}` }]);
     }
-    keyboard.push([{ text: '↩️ رجوع للأقسام', callback_data: 'back_to_cat' }]);
-    keyboard.push([{ text: '❌ إلغاء الطلب', callback_data: 'cancel_order' }]);
+    keyboard.push([{ text: '↩️ رجوع للأقسام', callback_data: 'browse_cats' }]);
+    keyboard.push([{ text: '❌ إغلاق', callback_data: 'cancel_order' }]);
     
     await answerCallbackQuery(cbId);
     await tgRequest('editMessageText', {
       chat_id: chatId,
       message_id: callbackQuery.message.message_id,
-      text: '🎮 *اختر الخدمة المطلوبة:*',
+      text: `🎮 *الخدمات المتاحة في قسم: ${category ? category.name : ''}*`,
       reply_markup: { inline_keyboard: keyboard },
       parse_mode: 'Markdown'
     });
@@ -354,7 +376,6 @@ async function processCallbackQuery(callbackQuery) {
   }
 
   if (data === 'back_to_cat') {
-    // Re-show categories (by deleting current and sending new)
     await tgRequest('deleteMessage', { chat_id: chatId, message_id: callbackQuery.message.message_id }).catch(()=>{});
     await showCategories(chatId);
     await answerCallbackQuery(cbId);
@@ -640,7 +661,10 @@ async function processUpdate(update) {
       `⚠️ *أول مرة هنا؟*\nلربط حسابك وتلقي كود التحقق (OTP) أو الطلب، أرسل لي أي من بيانات حسابك التالية:\n` +
       `1️⃣ *اسم المستخدم* (Username)\n` +
       `2️⃣ *البريد الإلكتروني* (Email)\n` +
-      `3️⃣ *رقم الهاتف* (Phone)\n\n`
+      `3️⃣ *رقم الهاتف* (Phone)\n\n`,
+      {
+        inline_keyboard: [[{ text: '🛒 تصفح الخدمات والأسعار', callback_data: 'browse_cats' }]]
+      }
     );
   }
 
