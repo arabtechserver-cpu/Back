@@ -1,0 +1,95 @@
+const { allQuery, runQuery } = require('./db');
+
+async function removeDuplicates() {
+  console.log("Starting deduplication...");
+  
+  // 1. Deduplicate Categories
+  const categories = await allQuery('SELECT * FROM categories ORDER BY id ASC');
+  const catGroups = {};
+  for (const cat of categories) {
+    const name = (cat.name || '').trim().toLowerCase();
+    if (!catGroups[name]) catGroups[name] = [];
+    catGroups[name].push(cat);
+  }
+  
+  let deletedCats = 0;
+  for (const name in catGroups) {
+    const list = catGroups[name];
+    if (list.length > 1) {
+      const kept = list[0];
+      for (let i = 1; i < list.length; i++) {
+        const dup = list[i];
+        // Move services to the kept category
+        await runQuery('UPDATE services SET category_id = ? WHERE category_id = ?', [kept.id, dup.id]);
+        // Delete duplicate category
+        await runQuery('DELETE FROM categories WHERE id = ?', [dup.id]);
+        deletedCats++;
+      }
+    }
+  }
+  console.log(`Deleted ${deletedCats} duplicate categories.`);
+
+  // 2. Deduplicate Services
+  const services = await allQuery('SELECT * FROM services ORDER BY id ASC');
+  const srvGroups = {};
+  for (const srv of services) {
+    // Group by category_id and name
+    const key = `${srv.category_id}_${(srv.name || '').trim().toLowerCase()}`;
+    if (!srvGroups[key]) srvGroups[key] = [];
+    srvGroups[key].push(srv);
+  }
+
+  let deletedSrvs = 0;
+  let updatedPackages = 0;
+  
+  for (const key in srvGroups) {
+    const list = srvGroups[key];
+    const kept = list[0];
+    
+    // Deduplicate packages within the kept service
+    if (kept.packages && kept.packages !== '[]') {
+      try {
+        let pkgs = typeof kept.packages === 'string' ? JSON.parse(kept.packages) : kept.packages;
+        if (Array.isArray(pkgs)) {
+          const uniquePkgs = [];
+          const seenPkgNames = new Set();
+          for (const pkg of pkgs) {
+            const pkgName = (pkg.name || '').trim().toLowerCase();
+            if (!seenPkgNames.has(pkgName)) {
+              seenPkgNames.add(pkgName);
+              uniquePkgs.push(pkg);
+            }
+          }
+          if (uniquePkgs.length !== pkgs.length) {
+             await runQuery('UPDATE services SET packages = ? WHERE id = ?', [JSON.stringify(uniquePkgs), kept.id]);
+             updatedPackages++;
+          }
+        }
+      } catch(e) {
+        console.error("Error parsing packages for service", kept.id, e.message);
+      }
+    }
+
+    // Delete duplicate services
+    if (list.length > 1) {
+      for (let i = 1; i < list.length; i++) {
+        const dup = list[i];
+        // Update orders to point to the kept service
+        await runQuery('UPDATE orders SET service_id = ? WHERE service_id = ?', [kept.id, dup.id]);
+        
+        await runQuery('DELETE FROM services WHERE id = ?', [dup.id]);
+        deletedSrvs++;
+      }
+    }
+  }
+  console.log(`Deleted ${deletedSrvs} duplicate services.`);
+  console.log(`Deduplicated packages in ${updatedPackages} services.`);
+  
+  console.log("Cleanup completed successfully.");
+  process.exit(0);
+}
+
+removeDuplicates().catch(e => {
+  console.error(e);
+  process.exit(1);
+});
