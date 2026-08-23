@@ -481,8 +481,8 @@ async function processCallbackQuery(callbackQuery) {
     await tgRequest('editMessageText', {
       chat_id: chatId,
       message_id: callbackQuery.message.message_id,
-      text: `✏️ لقد اخترت باقة *${selectedPkg.name}*\n\nالرجاء إرسال **${fields[0].name}** في رسالة الآن:\n\n_(أو أرسل /cancel للإلغاء)_`,
-      parse_mode: 'Markdown'
+      text: `✏️ لقد اخترت باقة <b>${selectedPkg.name}</b>\n\nالرجاء إرسال <b>${fields[0].name}</b> في رسالة الآن:\n\n<i>(أو أرسل /cancel للإلغاء)</i>`,
+      parse_mode: 'HTML'
     });
     await answerCallbackQuery(cbId);
     return;
@@ -762,7 +762,7 @@ async function processUpdate(update) {
     if (data.current_field_index < data.fields.length) {
        setUserState(chatId, 'AWAITING_ORDER_FIELD', data);
        const nextField = data.fields[data.current_field_index];
-       return sendMessage(chatId, `✏️ الرجاء إرسال **${nextField.name}**:\n\n_(أرسل /cancel للإلغاء)_`, {parse_mode: 'Markdown'});
+       return sendMessage(chatId, `✏️ الرجاء إرسال <b>${nextField.name}</b>:\n\n<i>(أرسل /cancel للإلغاء)</i>`, {parse_mode: 'HTML'});
     } else {
        let playerId = '';
        let customFields = {};
@@ -779,11 +779,11 @@ async function processUpdate(update) {
        setUserState(chatId, 'CONFIRM_ORDER', data);
        
        let fieldsStr = data.collected_fields.map(f => `${f.name}: ${f.value}`).join('\n');
-       const summary = `🧾 *مراجعة الطلب النهائي*\n\n` +
-         `الخدمة: *${data.service_name}*\n` +
-         `الباقة: *${data.package_name}*\n` +
-         `السعر: *${data.package_price}*\n\n` +
-         `*بيانات الطلب:*\n${fieldsStr}\n\n` +
+       const summary = `🧾 <b>مراجعة الطلب النهائي</b>\n\n` +
+         `الخدمة: <b>${data.service_name}</b>\n` +
+         `الباقة: <b>${data.package_name}</b>\n` +
+         `السعر: <b>${data.package_price}</b>\n\n` +
+         `<b>بيانات الطلب:</b>\n${fieldsStr}\n\n` +
          `سيتم الخصم من رصيد محفظتك. هل أنت متأكد؟`;
    
        return sendMessage(chatId, summary, {
