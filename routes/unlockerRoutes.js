@@ -1086,8 +1086,6 @@ async function checkAndUpdateOrder(orderId) {
   if (responseData.ERROR && !remoteOrder) {
     const errorMsg = getDhruErrorMessage(responseData);
     throw new Error(`فشل التحقق من الحالة: ${errorMsg}`);
-  }
-  
   if (!remoteOrder) {
     throw new Error('تعذر العثور على تفاصيل الطلب من الخادم الخارجي (تم الفحص عبر IMEI و Server و Remote).');
   }
@@ -1113,27 +1111,45 @@ async function checkAndUpdateOrder(orderId) {
   console.log(`[Check Order #${orderId}] Raw provider response:`, JSON.stringify(remoteOrder));
   console.log(`[Check Order #${orderId}] STATUS=${JSON.stringify(statusVal)} | CODE=${JSON.stringify(unlockCode)}`);
 
-  // Dhru Fusion status codes:
-  // 0 = Pending (NOT rejected! Some providers use 0 for new/pending orders)
-  // 1 = Pending
-  // 2 = In Process  
-  // 3 = Completed
-  // 4 = Rejected/Cancelled
-  // 'rejected', 'cancel', 'fail', 'error' = explicit rejection
+  // Explicit rejection: only status 4, or clear rejection keywords
+  const isRejected = statusVal === '4' || statusVal === 4
+    || statusStr === 'rejected'
+    || statusStr === 'cancelled'
+    || statusStr === 'canceled'
+    || statusStr === 'failed'
+    || statusStr === 'invalid'
+    || statusStr === 'refund'
+    || statusStr === 'error'
+    || (statusStr.includes('reject') && !statusStr.includes('not'))
+    || (statusStr.includes('cancel') && !statusStr.includes('not'));
 
+  if (isRejected) {
+    await runQuery(
+      "UPDATE orders SET api_status = 'Rejected' WHERE id = ?",
+      [orderId]
+    );
+    return {
+      success: true,
+      status: order.status,
+      api_status: 'Rejected',
+      message: `تم رفض الطلب من المزود (حالة المزود: ${statusVal}).`
+    };
+  }
+
+  // Dhru Fusion status codes:
+  // 3 = Completed
   const isCompleted = statusVal === '3' || statusVal === 3
     || statusStr.includes('complete')
     || statusStr.includes('success')
     || statusStr.includes('accept')
     || statusStr.includes('done')
-    || (unlockCode && unlockCode.trim() !== ''); // If we have a code, the order is done
-  
+    || (unlockCode && unlockCode.trim() !== '' && statusVal !== '0' && statusVal !== 0 && statusVal !== '1' && statusVal !== 1 && statusVal !== '2' && statusVal !== 2 && statusVal !== 'pending' && statusVal !== 'in process'); 
+
   if (isCompleted) {
     const finalCode = unlockCode || 'تم التنفيذ (مباشر)';
     const updateFields = "UPDATE orders SET status = 'completed', api_status = 'Completed', code = ? WHERE id = ?";
     await runQuery(updateFields, [finalCode, orderId]);
 
-    // Notify customer!
     try {
       const notificationHelper = require('../utils/notificationHelper');
       await notificationHelper.notifyCustomerOfOrderUpdate(orderId, 'completed', unlockCode || '', order.download_link || '', order.download_link_title || '');
@@ -1150,30 +1166,6 @@ async function checkAndUpdateOrder(orderId) {
     };
   }
 
-  // Explicit rejection: only status 4, or clear rejection keywords
-  // NOTE: status 0 is NOT rejection — it means Pending at many providers
-  const isRejected = statusVal === '4' || statusVal === 4
-    || statusStr === 'rejected'
-    || statusStr === 'cancelled'
-    || statusStr === 'canceled'
-    || statusStr === 'failed'
-    || statusStr === 'invalid'
-    || (statusStr.includes('reject') && !statusStr.includes('not'))
-    || (statusStr.includes('cancel') && !statusStr.includes('not'));
-
-  if (isRejected) {
-    await runQuery(
-      "UPDATE orders SET api_status = 'Rejected' WHERE id = ?",
-      [orderId]
-    );
-    return {
-      success: true,
-      status: order.status,
-      api_status: 'Rejected',
-      message: `تم رفض الطلب من المزود (حالة المزود: ${statusVal}).`
-    };
-  }
-  
   // Still processing: 0, 1, 2 or any other pending/process status
   const isInProcess = statusVal === '2' || statusVal === 2
     || statusStr.includes('process')
@@ -1189,6 +1181,7 @@ async function checkAndUpdateOrder(orderId) {
     message: `الطلب لا يزال قيد المعالجة لدى المزود (حالة: ${statusVal}).`
   };
 }
+
 
 // Auto-submit helper function for external API orders
 async function autoSubmitUnlockerOrder(orderId) {
