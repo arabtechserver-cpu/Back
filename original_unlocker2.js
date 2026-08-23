@@ -1113,31 +1113,6 @@ async function checkAndUpdateOrder(orderId) {
   console.log(`[Check Order #${orderId}] Raw provider response:`, JSON.stringify(remoteOrder));
   console.log(`[Check Order #${orderId}] STATUS=${JSON.stringify(statusVal)} | CODE=${JSON.stringify(unlockCode)}`);
 
-  // Explicit rejection: only status 4, or clear rejection keywords
-  // NOTE: status 0 is NOT rejection — it means Pending at many providers
-  const isRejected = statusVal === '4' || statusVal === 4
-    || statusStr === 'rejected'
-    || statusStr === 'cancelled'
-    || statusStr === 'canceled'
-    || statusStr === 'failed'
-    || statusStr === 'invalid'
-    || statusStr === 'refund'
-    || (statusStr.includes('reject') && !statusStr.includes('not'))
-    || (statusStr.includes('cancel') && !statusStr.includes('not'));
-
-  if (isRejected) {
-    await runQuery(
-      "UPDATE orders SET api_status = 'Rejected' WHERE id = ?",
-      [orderId]
-    );
-    return {
-      success: true,
-      status: order.status,
-      api_status: 'Rejected',
-      message: `تم رفض الطلب من المزود (حالة المزود: ${statusVal}).`
-    };
-  }
-
   // Dhru Fusion status codes:
   // 0 = Pending (NOT rejected! Some providers use 0 for new/pending orders)
   // 1 = Pending
@@ -1151,8 +1126,7 @@ async function checkAndUpdateOrder(orderId) {
     || statusStr.includes('success')
     || statusStr.includes('accept')
     || statusStr.includes('done')
-    || (unlockCode && unlockCode.trim() !== '' && statusVal !== '0' && statusVal !== 0 && statusVal !== '1' && statusVal !== 1 && statusVal !== '2' && statusVal !== 2 && statusVal !== 'pending' && statusVal !== 'in process'); 
-    // If we have a code and it's not pending/processing/rejected, it's done.
+    || (unlockCode && unlockCode.trim() !== ''); // If we have a code, the order is done
   
   if (isCompleted) {
     const finalCode = unlockCode || 'تم التنفيذ (مباشر)';
@@ -1173,6 +1147,30 @@ async function checkAndUpdateOrder(orderId) {
       api_status: 'Completed',
       code: unlockCode || '',
       message: `اكتمل الطلب لدى المزود ${unlockCode ? '— كود الفتح: ' + unlockCode : ''}`
+    };
+  }
+
+  // Explicit rejection: only status 4, or clear rejection keywords
+  // NOTE: status 0 is NOT rejection — it means Pending at many providers
+  const isRejected = statusVal === '4' || statusVal === 4
+    || statusStr === 'rejected'
+    || statusStr === 'cancelled'
+    || statusStr === 'canceled'
+    || statusStr === 'failed'
+    || statusStr === 'invalid'
+    || (statusStr.includes('reject') && !statusStr.includes('not'))
+    || (statusStr.includes('cancel') && !statusStr.includes('not'));
+
+  if (isRejected) {
+    await runQuery(
+      "UPDATE orders SET api_status = 'Rejected' WHERE id = ?",
+      [orderId]
+    );
+    return {
+      success: true,
+      status: order.status,
+      api_status: 'Rejected',
+      message: `تم رفض الطلب من المزود (حالة المزود: ${statusVal}).`
     };
   }
   
