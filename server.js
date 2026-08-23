@@ -230,6 +230,17 @@ const server = app.listen(PORT, HOST, () => {
     console.error('[Auto-Convert] Failed to start image conversion:', e.message);
   }
 
+  // Automatically deduplicate database on startup and every 6 hours
+  setTimeout(() => {
+    const { removeDuplicates } = require('./remove_duplicates');
+    removeDuplicates().catch(err => console.error('[Auto Clean] Error deduplicating on startup:', err.message));
+  }, 10000); // 10 seconds after startup to ensure DB is connected
+
+  setInterval(() => {
+    const { removeDuplicates } = require('./remove_duplicates');
+    removeDuplicates().catch(err => console.error('[Auto Clean] Error deduplicating:', err.message));
+  }, 6 * 60 * 60 * 1000); // every 6 hours
+
   // ── Telegram bot migration: ensure telegram_chat_id column exists ──────────
   (async () => {
     try {

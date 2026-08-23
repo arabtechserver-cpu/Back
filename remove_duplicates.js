@@ -1,7 +1,7 @@
 const { allQuery, runQuery } = require('./db');
 
 async function removeDuplicates() {
-  console.log("Starting deduplication...");
+  console.log("[Auto Clean] Starting deduplication...");
   
   // 1. Deduplicate Categories
   const categories = await allQuery('SELECT * FROM categories ORDER BY id ASC');
@@ -19,21 +19,17 @@ async function removeDuplicates() {
       const kept = list[0];
       for (let i = 1; i < list.length; i++) {
         const dup = list[i];
-        // Move services to the kept category
         await runQuery('UPDATE services SET category_id = ? WHERE category_id = ?', [kept.id, dup.id]);
-        // Delete duplicate category
         await runQuery('DELETE FROM categories WHERE id = ?', [dup.id]);
         deletedCats++;
       }
     }
   }
-  console.log(`Deleted ${deletedCats} duplicate categories.`);
 
   // 2. Deduplicate Services
   const services = await allQuery('SELECT * FROM services ORDER BY id ASC');
   const srvGroups = {};
   for (const srv of services) {
-    // Group by category_id and name
     const key = `${srv.category_id}_${(srv.name || '').trim().toLowerCase()}`;
     if (!srvGroups[key]) srvGroups[key] = [];
     srvGroups[key].push(srv);
@@ -66,30 +62,33 @@ async function removeDuplicates() {
           }
         }
       } catch(e) {
-        console.error("Error parsing packages for service", kept.id, e.message);
+        console.error("[Auto Clean] Error parsing packages for service", kept.id, e.message);
       }
     }
 
-    // Delete duplicate services
     if (list.length > 1) {
       for (let i = 1; i < list.length; i++) {
         const dup = list[i];
-        // Update orders to point to the kept service
         await runQuery('UPDATE orders SET service_id = ? WHERE service_id = ?', [kept.id, dup.id]);
-        
         await runQuery('DELETE FROM services WHERE id = ?', [dup.id]);
         deletedSrvs++;
       }
     }
   }
-  console.log(`Deleted ${deletedSrvs} duplicate services.`);
-  console.log(`Deduplicated packages in ${updatedPackages} services.`);
   
-  console.log("Cleanup completed successfully.");
-  process.exit(0);
+  if (deletedCats > 0 || deletedSrvs > 0 || updatedPackages > 0) {
+    console.log(`[Auto Clean] Deleted ${deletedCats} duplicate categories, ${deletedSrvs} duplicate services, deduplicated packages in ${updatedPackages} services.`);
+  } else {
+    console.log(`[Auto Clean] No duplicates found.`);
+  }
 }
 
-removeDuplicates().catch(e => {
-  console.error(e);
-  process.exit(1);
-});
+module.exports = { removeDuplicates };
+
+// If run directly
+if (require.main === module) {
+  removeDuplicates().then(() => process.exit(0)).catch(e => {
+    console.error(e);
+    process.exit(1);
+  });
+}
