@@ -26,11 +26,11 @@ async function removeDuplicates() {
     }
   }
 
-  // 2. Deduplicate Services
+  // 2. Deduplicate Services (Globally by name)
   const services = await allQuery('SELECT * FROM services ORDER BY id ASC');
   const srvGroups = {};
   for (const srv of services) {
-    const key = `${srv.category_id}_${(srv.name || '').trim().toLowerCase()}`;
+    const key = (srv.name || '').trim().toLowerCase();
     if (!srvGroups[key]) srvGroups[key] = [];
     srvGroups[key].push(srv);
   }
