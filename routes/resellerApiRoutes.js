@@ -89,7 +89,14 @@ router.post('/', verifyApiAccess, async (req, res) => {
     });
   }
 
-  if (action === 'imeiservicelist') {
+  const targetTypeMap = {
+    'imeiservicelist': 'imei',
+    'serverservicelist': 'server',
+    'remoteservicelist': 'remote'
+  };
+
+  if (targetTypeMap[action]) {
+    const targetType = targetTypeMap[action];
     try {
       const services = await allQuery('SELECT * FROM services');
       const categories = await allQuery('SELECT * FROM categories');
@@ -110,20 +117,85 @@ router.post('/', verifyApiAccess, async (req, res) => {
         for (const s of catServices) {
           if (blockedServices.includes(s.id)) continue;
           
-          let basePrice = Number(s.price || 0);
-          let finalPrice = basePrice + (basePrice * (markup / 100)); // Apply markup percentage
-          if (s.price_type === 'per_thousand') {
-             finalPrice = Number(s.price_per_thousand || 0);
-             finalPrice = finalPrice + (finalPrice * (markup / 100));
-          }
+          const svcType = s.api_service_type || 'imei';
+          if (svcType !== targetType) continue;
 
-          serviceGroup.SERVICES.push({
-            SERVICEID: s.id,
-            SERVICENAME: s.name,
-            CREDIT: finalPrice.toFixed(2),
-            TIME: '1-24 Hours',
-            INFO: s.description || ''
-          });
+          let packages = [];
+          try {
+             if (s.packages) packages = JSON.parse(s.packages);
+          } catch(e) {}
+          
+          if (packages && packages.length > 0) {
+             for (const pkg of packages) {
+                let pkgPrice = Number(pkg.price || 0);
+                pkgPrice = pkgPrice + (pkgPrice * (markup / 100));
+
+                let requiresCustom = undefined;
+                if (pkg.fields && pkg.fields.length > 0) {
+                   requiresCustom = {};
+                   pkg.fields.forEach((f, idx) => {
+                      const fId = f.field_id || String(idx + 1);
+                      requiresCustom[fId] = {
+                         reqid: fId,
+                         fieldname: f.fieldname || f.name || 'Field',
+                         fieldtype: f.fieldtype || 'text',
+                         required: f.required ? "1" : "0",
+                         description: f.description || "",
+                         fieldoptions: f.fieldoptions || ""
+                      };
+                   });
+                }
+
+                // Generate composite ID: s.id * 100000 + pkg.id
+                const compositeId = (Math.floor(s.id) * 100000) + Math.floor(pkg.id);
+
+                serviceGroup.SERVICES.push({
+                   SERVICEID: compositeId,
+                   SERVICENAME: pkg.name || s.name,
+                   CREDIT: pkgPrice.toFixed(2),
+                   TIME: s.api_delivery_time || '1-24 Hours',
+                   INFO: s.description || '',
+                   "Requires.Custom": requiresCustom
+                });
+             }
+          } else {
+            let basePrice = Number(s.price || 0);
+            let finalPrice = basePrice + (basePrice * (markup / 100)); 
+            if (s.price_type === 'per_thousand') {
+               finalPrice = Number(s.price_per_thousand || 0);
+               finalPrice = finalPrice + (finalPrice * (markup / 100));
+            }
+  
+            let requiresCustom = undefined;
+            let fields = [];
+            try {
+               if (s.fields) fields = JSON.parse(s.fields);
+            } catch(e) {}
+  
+            if (fields && fields.length > 0) {
+               requiresCustom = {};
+               fields.forEach((f, idx) => {
+                  const fId = f.field_id || String(idx + 1);
+                  requiresCustom[fId] = {
+                     reqid: fId,
+                     fieldname: f.fieldname || f.name || 'Field',
+                     fieldtype: f.fieldtype || 'text',
+                     required: f.required ? "1" : "0",
+                     description: f.description || "",
+                     fieldoptions: f.fieldoptions || ""
+                  };
+               });
+            }
+  
+            serviceGroup.SERVICES.push({
+              SERVICEID: s.id,
+              SERVICENAME: s.name,
+              CREDIT: finalPrice.toFixed(2),
+              TIME: s.api_delivery_time || '1-24 Hours',
+              INFO: s.description || '',
+              "Requires.Custom": requiresCustom
+            });
+          }
         }
 
         if (serviceGroup.SERVICES.length > 0) {
@@ -133,28 +205,46 @@ router.post('/', verifyApiAccess, async (req, res) => {
 
       return sendResponse({ SUCCESS: [{ LIST: result }] });
     } catch (e) {
+      console.error(e);
       return sendError('Database error retrieving services');
     }
   }
 
-  if (action === 'placeimeiorder') {
+  const placeOrderActions = ['placeimeiorder', 'placeserverorder', 'placeremoteorder'];
+  if (placeOrderActions.includes(action)) {
     try {
-      const serviceId = req.body.parameters?.SERVICEID || req.body.SERVICEID;
+      let inputServiceId = Number(req.body.parameters?.SERVICEID || req.body.SERVICEID);
       const imei = req.body.parameters?.IMEI || req.body.IMEI || '';
       
-      if (!serviceId) return sendError('SERVICEID is required');
+      if (!inputServiceId) return sendError('SERVICEID is required');
+
+      let dbServiceId = inputServiceId;
+      let dbPackageId = null;
+      if (inputServiceId > 100000) {
+         dbPackageId = inputServiceId % 100000;
+         dbServiceId = Math.floor(inputServiceId / 100000);
+      }
 
       const blockedServices = customer.api_blocked_services ? JSON.parse(customer.api_blocked_services) : [];
-      if (blockedServices.includes(Number(serviceId))) {
+      if (blockedServices.includes(dbServiceId)) {
         return sendError('This service is not available for your account');
       }
 
-      const service = await getQuery('SELECT * FROM services WHERE id = ?', [serviceId]);
+      const service = await getQuery('SELECT * FROM services WHERE id = ?', [dbServiceId]);
       if (!service) return sendError('Service not found');
 
+      let targetPkg = null;
+      if (dbPackageId) {
+         try {
+            const pkgs = JSON.parse(service.packages || '[]');
+            targetPkg = pkgs.find(p => Number(p.id) === dbPackageId);
+         } catch(e) {}
+         if (!targetPkg) return sendError('Package not found inside service');
+      }
+
       const markup = Number(customer.api_markup || 0);
-      let basePrice = Number(service.price || 0);
-      if (service.price_type === 'per_thousand') basePrice = Number(service.price_per_thousand || 0);
+      let basePrice = targetPkg ? Number(targetPkg.price || 0) : Number(service.price || 0);
+      if (!targetPkg && service.price_type === 'per_thousand') basePrice = Number(service.price_per_thousand || 0);
       let finalPrice = basePrice + (basePrice * (markup / 100));
 
       const balanceBefore = Number(customer.balance || 0);
@@ -168,12 +258,22 @@ router.post('/', verifyApiAccess, async (req, res) => {
         return sendError('Insufficient balance (Race condition detected)');
       }
 
+      let extractedFields = {};
+      if (imei) extractedFields.IMEI = imei;
+      if (req.body.parameters && typeof req.body.parameters === 'object') {
+         Object.keys(req.body.parameters).forEach(k => {
+            if (k !== 'SERVICEID' && k !== 'IMEI') {
+               extractedFields[k] = req.body.parameters[k];
+            }
+         });
+      }
+
       const orderData = {
         customer_id: customer.id,
         customer_username: customer.username,
         service_id: service.id,
         service_name: service.name,
-        package_name: 'API Order',
+        package_name: targetPkg ? targetPkg.name : 'API Order',
         price: finalPrice,
         status: 'pending',
         payment_method: 'wallet',
@@ -182,7 +282,7 @@ router.post('/', verifyApiAccess, async (req, res) => {
         payment_status: 'paid',
         is_api_order: true,
         api_reseller_id: customer.id,
-        custom_fields: JSON.stringify({ IMEI: imei }),
+        custom_fields: JSON.stringify(extractedFields),
         api_source: service.api_source || '',
         api_service_id: service.api_service_id || ''
       };
