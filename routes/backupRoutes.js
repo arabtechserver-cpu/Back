@@ -66,8 +66,6 @@ router.post('/create', authMiddleware, async (req, res) => {
     const mode = getDatabaseMode();
     const tables = {};
 
-    // Retrieve database tables
-    // Include every database table automatically except the live catalog.
     const tableNames = await getBackupTableNames(mode);
 
     if (mode.fallbackMode) {
@@ -88,7 +86,7 @@ router.post('/create', authMiddleware, async (req, res) => {
         try {
           tables[table] = table === 'settings'
             ? await allQuery('SELECT * FROM settings')
-            : await allQuery(`SELECT * FROM ${table} ORDER BY id ASC`); // Sort by ID so they restore in order
+            : await allQuery(`SELECT * FROM ${table} ORDER BY id ASC`);
         } catch (error) {
           console.error(`Backup table ${table} error:`, error.message);
           tables[table] = [];
@@ -101,6 +99,7 @@ router.post('/create', authMiddleware, async (req, res) => {
     
     function getFilesRecursively(dir) {
       let results = [];
+      if (!fs.existsSync(dir)) return results;
       const list = fs.readdirSync(dir);
       list.forEach(file => {
         const fullPath = path.join(dir, file);
@@ -140,7 +139,6 @@ router.post('/create', authMiddleware, async (req, res) => {
 
     fs.writeFileSync(backupPath, JSON.stringify(backupSnapshot, null, 2));
     
-    // Send the backup file to administrators on both configured channels.
     await Promise.all([
       sendBackupViaWhatsApp(backupPath, 'manual'),
       sendBackupViaTelegram(backupPath, 'manual'),
@@ -154,6 +152,192 @@ router.post('/create', authMiddleware, async (req, res) => {
   } catch (error) {
     console.error('Create backup error:', error);
     res.status(500).json({ message: 'حدث خطأ أثناء إنشاء النسخة الاحتياطية.' });
+  }
+});
+
+// 2b. Trigger a FULL manual backup (including services, categories, packages, fields, api_providers)
+router.post('/create-full', authMiddleware, async (req, res) => {
+  try {
+    const mode = getDatabaseMode();
+    const tables = {};
+
+    // Retrieve database tables (include EVERYTHING)
+    const tableNames = await getBackupTableNames(mode, true);
+
+    if (mode.fallbackMode) {
+      const dbPath = path.join(__dirname, '..', 'database.json');
+      if (fs.existsSync(dbPath)) {
+        const { readDb } = require('../db');
+        const dbData = readDb();
+        tableNames.forEach(table => {
+          tables[table] = dbData[table] || [];
+        });
+      } else {
+        tableNames.forEach(table => {
+          tables[table] = [];
+        });
+      }
+    } else {
+      for (const table of tableNames) {
+        try {
+          tables[table] = table === 'settings'
+            ? await allQuery('SELECT * FROM settings')
+            : await allQuery(`SELECT * FROM "${table}" ORDER BY id ASC`);
+        } catch (error) {
+          console.error(`Backup full table ${table} error:`, error.message);
+          tables[table] = [];
+        }
+      }
+    }
+
+    // Retrieve uploaded files recursively and encode them to Base64
+    const uploads = {};
+    function getFilesRecursively(dir) {
+      let results = [];
+      if (!fs.existsSync(dir)) return results;
+      const list = fs.readdirSync(dir);
+      list.forEach(file => {
+        const fullPath = path.join(dir, file);
+        const stat = fs.statSync(fullPath);
+        if (stat && stat.isDirectory()) {
+          results = results.concat(getFilesRecursively(fullPath));
+        } else {
+          results.push(fullPath);
+        }
+      });
+      return results;
+    }
+
+    if (fs.existsSync(UPLOADS_DIR)) {
+      const files = getFilesRecursively(UPLOADS_DIR);
+      files.forEach(filePath => {
+        try {
+          const relativePath = path.relative(UPLOADS_DIR, filePath).replace(/\\/g, '/');
+          const fileData = fs.readFileSync(filePath);
+          uploads[relativePath] = fileData.toString('base64');
+        } catch (e) {
+          console.error(`Failed to read upload file ${filePath}:`, e);
+        }
+      });
+    }
+
+    const backupSnapshot = {
+      isFullBackup: true,
+      created_at: new Date().toISOString(),
+      fallbackMode: mode.fallbackMode,
+      tables,
+      uploads
+    };
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const fileName = `full-backup-${timestamp}.json`;
+    const backupPath = path.join(BACKUP_ROOT, fileName);
+
+    fs.writeFileSync(backupPath, JSON.stringify(backupSnapshot, null, 2));
+    
+    // Send the backup file to administrators on configured channels
+    await Promise.all([
+      sendBackupViaWhatsApp(backupPath, 'manual-full'),
+      sendBackupViaTelegram(backupPath, 'manual-full'),
+    ]);
+
+    res.json({
+      message: 'تم إنشاء النسخة الاحتياطية الشاملة (بما فيها الخدمات والباقات والحقول) بنجاح وحفظها وإرسالها للأدمن.',
+      filename: fileName,
+      createdAt: new Date()
+    });
+  } catch (error) {
+    console.error('Create full backup error:', error);
+    res.status(500).json({ message: 'حدث خطأ أثناء إنشاء النسخة الاحتياطية الشاملة.' });
+  }
+});
+
+// Direct Export & Download Full Backup JSON
+router.get(['/export-full-download', '/download-full'], async (req, res) => {
+  try {
+    const token = req.query.token || (req.headers['authorization'] ? req.headers['authorization'].split(' ')[1] : null);
+    if (!token) {
+      return res.status(401).json({ message: 'رمز التوثيق غير موجود.' });
+    }
+
+    const jwt = require('jsonwebtoken');
+    const { getJwtSecret } = require('../utils/security');
+    const decoded = jwt.verify(token, getJwtSecret());
+    if (!decoded) {
+      return res.status(403).json({ message: 'رمز التوثيق غير صالح.' });
+    }
+
+    const mode = getDatabaseMode();
+    const tables = {};
+
+    const tableNames = await getBackupTableNames(mode, true);
+
+    if (mode.fallbackMode) {
+      const { readDb } = require('../db');
+      const dbData = readDb();
+      tableNames.forEach(table => {
+        tables[table] = dbData[table] || [];
+      });
+    } else {
+      for (const table of tableNames) {
+        try {
+          tables[table] = table === 'settings'
+            ? await allQuery('SELECT * FROM settings')
+            : await allQuery(`SELECT * FROM "${table}" ORDER BY id ASC`);
+        } catch (error) {
+          console.error(`Export full backup table ${table} error:`, error.message);
+          tables[table] = [];
+        }
+      }
+    }
+
+    const uploads = {};
+    if (fs.existsSync(UPLOADS_DIR)) {
+      function getFilesRecursively(dir) {
+        let results = [];
+        if (!fs.existsSync(dir)) return results;
+        const list = fs.readdirSync(dir);
+        list.forEach(file => {
+          const fullPath = path.join(dir, file);
+          const stat = fs.statSync(fullPath);
+          if (stat && stat.isDirectory()) {
+            results = results.concat(getFilesRecursively(fullPath));
+          } else {
+            results.push(fullPath);
+          }
+        });
+        return results;
+      }
+      const files = getFilesRecursively(UPLOADS_DIR);
+      files.forEach(filePath => {
+        try {
+          const relativePath = path.relative(UPLOADS_DIR, filePath).replace(/\\/g, '/');
+          const fileData = fs.readFileSync(filePath);
+          uploads[relativePath] = fileData.toString('base64');
+        } catch (e) {
+          console.error(`Failed to read upload file ${filePath}:`, e);
+        }
+      });
+    }
+
+    const fullBackupSnapshot = {
+      isFullBackup: true,
+      created_at: new Date().toISOString(),
+      fallbackMode: mode.fallbackMode,
+      tables,
+      uploads
+    };
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `full-database-${timestamp}.json`;
+
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(JSON.stringify(fullBackupSnapshot, null, 2));
+
+  } catch (error) {
+    console.error('Export full backup download error:', error);
+    res.status(500).json({ message: 'حدث خطأ أثناء تصدير ملف النسخة الاحتياطية الشاملة.' });
   }
 });
 
@@ -265,13 +449,17 @@ async function restoreSnapshot(backupData) {
     throw new Error('بيانات النسخ الاحتياطي غير صالحة. لا تحتوي على جداول.');
   }
 
+  const isFullBackup = Boolean(backupData.isFullBackup || tables.categories || tables.services || tables.api_providers);
+
   if (mode.fallbackMode) {
-    // 2a. Fallback Mode - merge restored data while preserving the live catalog.
+    // 2a. Fallback Mode - restore data
     const dbPath = path.join(__dirname, '..', 'database.json');
     const { readDb } = require('../db');
     const newDb = readDb();
     Object.keys(tables).forEach(table => {
-      if (table !== 'categories' && table !== 'services') newDb[table] = tables[table] || [];
+      if (isFullBackup || (table !== 'categories' && table !== 'services')) {
+        newDb[table] = tables[table] || [];
+      }
     });
     
     const tmpPath = `${dbPath}.tmp`;
@@ -285,36 +473,44 @@ async function restoreSnapshot(backupData) {
     try {
       await client.query('BEGIN');
 
-      // Truncate tables in dependency order
-      await client.query(`
-        TRUNCATE TABLE 
-          customer_otps,
-          api_logs,
-          reviews,
-          user_memberships,
-          membership_discounts,
-          membership_tiers,
-          customer_discounts, 
-          wallet_transactions, 
-          wallet_requests, 
-          orders, 
-          user_passkeys,
-          customers, 
-          banners, 
-          settings, 
-          users 
-        RESTART IDENTITY CASCADE;
-      `);
+      const allPossibleTables = [
+        'customer_otps',
+        'api_logs',
+        'reviews',
+        'user_memberships',
+        'membership_discounts',
+        'membership_tiers',
+        'customer_discounts', 
+        'wallet_transactions', 
+        'wallet_requests', 
+        'orders', 
+        'user_passkeys',
+        'customers', 
+        'banners', 
+        'settings', 
+        'users'
+      ];
+      if (isFullBackup) {
+        allPossibleTables.unshift('services', 'categories', 'api_providers');
+      }
 
-      const tableNames = [
-        'users', 'settings', 'customers', 'membership_tiers',
+      const tablesToTruncate = allPossibleTables.filter(t => tables[t] !== undefined || !isFullBackup);
+
+      if (tablesToTruncate.length > 0) {
+        await client.query(`
+          TRUNCATE TABLE ${tablesToTruncate.map(t => `"${t}"`).join(', ')} RESTART IDENTITY CASCADE;
+        `);
+      }
+
+      const tableNamesOrder = [
+        'users', 'settings', 'api_providers', 'categories', 'services', 'customers', 'membership_tiers',
         'user_passkeys', 'banners', 'reviews',
         'customer_discounts', 'membership_discounts', 'user_memberships',
         'api_logs', 'customer_otps', 'wallet_requests', 'wallet_transactions',
         'orders'
       ];
 
-      for (const tableName of tableNames) {
+      for (const tableName of tableNamesOrder) {
         const rows = tables[tableName];
         if (!rows || !Array.isArray(rows) || rows.length === 0) continue;
 

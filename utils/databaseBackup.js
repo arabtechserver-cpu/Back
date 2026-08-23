@@ -103,13 +103,13 @@ async function sendBackupViaTelegram(backupPath, reason = 'scheduled') {
   }
 }
 
-async function getBackupTableNames(mode) {
+async function getBackupTableNames(mode, includeAll = false) {
   if (mode.fallbackMode) {
     const { readDb } = require('../db');
-    return Object.keys(readDb()).filter(name => !EXCLUDED_TABLES.has(name));
+    return Object.keys(readDb()).filter(name => includeAll || !EXCLUDED_TABLES.has(name));
   }
   const rows = await allQuery(`SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE' ORDER BY table_name`);
-  return rows.map(row => row.table_name).filter(name => !EXCLUDED_TABLES.has(name));
+  return rows.map(row => row.table_name).filter(name => includeAll || !EXCLUDED_TABLES.has(name));
 }
 
 async function sendAdminAlert(message) {
