@@ -450,9 +450,13 @@ async function processCallbackQuery(callbackQuery) {
     
     let fields = [];
     try {
-      const category = await getQuery('SELECT fields FROM categories WHERE id = ?', [service.category_id]);
-      if (category && category.fields) {
-        fields = typeof category.fields === 'string' ? JSON.parse(category.fields) : category.fields;
+      if (service.fields) {
+        fields = typeof service.fields === 'string' ? JSON.parse(service.fields) : service.fields;
+      } else {
+        const category = await getQuery('SELECT fields FROM categories WHERE id = ?', [service.category_id]);
+        if (category && category.fields) {
+          fields = typeof category.fields === 'string' ? JSON.parse(category.fields) : category.fields;
+        }
       }
     } catch(e) {}
     
@@ -536,7 +540,7 @@ async function processCallbackQuery(callbackQuery) {
         orderData.download_link,
         orderData.download_link_title,
         orderData.api_source,
-        '{}'
+        orderData.custom_fields || '{}'
       ]);
 
       const orderId = result.lastID;
@@ -760,7 +764,20 @@ async function processUpdate(update) {
        const nextField = data.fields[data.current_field_index];
        return sendMessage(chatId, `✏️ الرجاء إرسال **${nextField.name}**:\n\n_(أرسل /cancel للإلغاء)_`, {parse_mode: 'Markdown'});
     } else {
+       let playerId = '';
+       let customFields = {};
+       
+       data.collected_fields.forEach(f => {
+         customFields[f.id || f.name] = f.value;
+       });
+       if (data.collected_fields.length > 0) {
+          playerId = data.collected_fields[0].value;
+       }
+       
+       data.player_id = playerId;
+       data.custom_fields = JSON.stringify(customFields);
        setUserState(chatId, 'CONFIRM_ORDER', data);
+       
        let fieldsStr = data.collected_fields.map(f => `${f.name}: ${f.value}`).join('\n');
        const summary = `🧾 *مراجعة الطلب النهائي*\n\n` +
          `الخدمة: *${data.service_name}*\n` +
