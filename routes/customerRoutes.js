@@ -1593,9 +1593,73 @@ router.post('/dev-settings/test', customerAuth, async (req, res) => {
     if (!customer?.api_enabled || !customer.api_key) return res.status(403).json({ success: false, message: 'API الحساب غير مفعل.' });
     const action = String(req.body?.action || 'accountinfo');
     if (action === 'accountinfo') return res.json({ success: true, action, response: { SUCCESS: [{ AccountInfo: { credit: String(customer.balance || 0), currency: 'USD' } }] } });
-    if (action === 'imeiservicelist') {
-      const services = await allQuery('SELECT id, name, price FROM services ORDER BY id DESC LIMIT 20');
-      return res.json({ success: true, action, response: { SUCCESS: [{ LIST: services || [] }] } });
+    if (action === 'imeiservicelist' || action === 'serverservicelist' || action === 'remoteservicelist') {
+      const targetType = action === 'serverservicelist' ? 'server' : (action === 'remoteservicelist' ? 'remote' : 'imei');
+      const services = await allQuery('SELECT * FROM services');
+      const categories = await allQuery('SELECT * FROM categories');
+      const blockedServices = customer.api_blocked_services ? JSON.parse(customer.api_blocked_services) : [];
+      const markup = Number(customer.api_markup || 0);
+      const result = [];
+
+      for (const cat of categories) {
+        const catServices = services.filter(s => Number(s.category_id) === Number(cat.id));
+        if (catServices.length === 0) continue;
+        const serviceGroup = { GROUPNAME: cat.name, SERVICES: [] };
+
+        for (const s of catServices) {
+          if (blockedServices.includes(s.id)) continue;
+          if ((s.api_service_type || 'imei') !== targetType) continue;
+
+          let packages = [];
+          try { if (s.packages) packages = JSON.parse(s.packages); } catch(e) {}
+          
+          if (packages && packages.length > 0) {
+             for (const pkg of packages) {
+                let pkgPrice = Number(pkg.price || 0);
+                pkgPrice = pkgPrice + (pkgPrice * (markup / 100));
+                let requiresCustom = undefined;
+                if (pkg.fields && pkg.fields.length > 0) {
+                   requiresCustom = {};
+                   pkg.fields.forEach((f, idx) => {
+                      const fId = f.field_id || String(idx + 1);
+                      requiresCustom[fId] = {
+                         reqid: fId, fieldname: f.fieldname || f.name || 'Field', fieldtype: f.fieldtype || 'text',
+                         required: f.required ? "1" : "0", description: f.description || "", fieldoptions: f.fieldoptions || ""
+                      };
+                   });
+                }
+                const compositeId = (Math.floor(s.id) * 100000) + Math.floor(pkg.id);
+                serviceGroup.SERVICES.push({
+                   SERVICEID: compositeId, SERVICENAME: pkg.name || s.name, CREDIT: pkgPrice.toFixed(2),
+                   TIME: s.api_delivery_time || '1-24 Hours', INFO: s.description || '', "Requires.Custom": requiresCustom
+                });
+             }
+          } else {
+            let basePrice = Number(s.price || 0);
+            let finalPrice = basePrice + (basePrice * (markup / 100)); 
+            if (s.price_type === 'per_thousand') finalPrice = Number(s.price_per_thousand || 0) * (1 + markup / 100);
+            let requiresCustom = undefined;
+            let fields = [];
+            try { if (s.fields) fields = JSON.parse(s.fields); } catch(e) {}
+            if (fields && fields.length > 0) {
+               requiresCustom = {};
+               fields.forEach((f, idx) => {
+                  const fId = f.field_id || String(idx + 1);
+                  requiresCustom[fId] = {
+                     reqid: fId, fieldname: f.fieldname || f.name || 'Field', fieldtype: f.fieldtype || 'text',
+                     required: f.required ? "1" : "0", description: f.description || "", fieldoptions: f.fieldoptions || ""
+                  };
+               });
+            }
+            serviceGroup.SERVICES.push({
+              SERVICEID: s.id, SERVICENAME: s.name, CREDIT: finalPrice.toFixed(2),
+              TIME: s.api_delivery_time || '1-24 Hours', INFO: s.description || '', "Requires.Custom": requiresCustom
+            });
+          }
+        }
+        if (serviceGroup.SERVICES.length > 0) result.push(serviceGroup);
+      }
+      return res.json({ success: true, action, response: { SUCCESS: [{ LIST: result }] } });
     }
     return res.status(400).json({ success: false, message: 'العملية غير مدعومة للاختبار.' });
   } catch (error) {
