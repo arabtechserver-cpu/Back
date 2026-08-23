@@ -378,32 +378,7 @@ async function sendCustomerAuthOtpEmail(toEmail, { code, username, actionLabel }
   if (!toEmail) return false;
   const siteName = 'عرب تك سيرفر';
 
-  // 1. Try standard SMTP first (More reliable and instant)
-  const transporter = await getTransporter();
-  if (transporter) {
-    const title = `كود التحقق (OTP) - ${siteName}`;
-    const content = getCustomerEmailTemplate({
-       siteName,
-       username: username || 'عزيزنا العميل',
-       title,
-       messageBody: `لقد تم طلب كود تحقق الأمان من أجل ${actionLabel || 'تفعيل وإتمام الدخول لحسابك'}.`,
-       otpCode: code
-    });
-    try {
-      const info = await transporter.sendMail({
-        from: `"${siteName}" <${transporter.options.auth.user}>`,
-        to: toEmail,
-        subject: title,
-        html: content
-      });
-      console.log(`[Email Service] Customer Auth OTP email sent via SMTP to ${toEmail} ✓`);
-      return true;
-    } catch(err) {
-      console.warn(`[Email Service] Failed to send OTP via SMTP to ${toEmail}:`, err.message);
-    }
-  }
-
-  // 2. Fallback to Loops API
+  // 1. Send via Loops API (User requested primary)
   const { loopsTransactionalIdOtp } = await getLoopsConfig();
   const transactionalId = loopsTransactionalIdOtp || 'cmrv2rlz301lp0j2pig1clc4n';
 
@@ -422,7 +397,32 @@ async function sendCustomerAuthOtpEmail(toEmail, { code, username, actionLabel }
     return true;
   }
 
-  console.error(`[Email Service] Failed to send Auth OTP email via both SMTP and Loops to ${toEmail}`);
+  // 2. Fallback to SMTP if Loops fails
+  const transporter = await getTransporter();
+  if (transporter) {
+    const title = `كود التحقق (OTP) - ${siteName}`;
+    const content = getCustomerEmailTemplate({
+       siteName,
+       username: username || 'عزيزنا العميل',
+       title,
+       messageBody: `لقد تم طلب كود تحقق الأمان من أجل ${actionLabel || 'تفعيل وإتمام الدخول لحسابك'}.`,
+       otpCode: code
+    });
+    try {
+      const info = await transporter.sendMail({
+        from: `"${siteName}" <${transporter.options.auth.user}>`,
+        to: toEmail,
+        subject: title,
+        html: content
+      });
+      console.log(`[Email Service] Customer Auth OTP email sent via SMTP fallback to ${toEmail} ✓`);
+      return true;
+    } catch(err) {
+      console.warn(`[Email Service] Failed to send OTP via SMTP fallback to ${toEmail}:`, err.message);
+    }
+  }
+
+  console.error(`[Email Service] Failed to send Auth OTP email via both Loops and SMTP to ${toEmail}`);
   return false;
 }
 
@@ -433,32 +433,7 @@ async function sendPasswordResetEmail(toEmail, { username, resetUrl }) {
   if (!toEmail) return false;
   const siteName = 'عرب تك سيرفر';
 
-  // 1. Try standard SMTP first
-  const transporter = await getTransporter();
-  if (transporter) {
-    const title = `إعادة تعيين كلمة المرور - ${siteName}`;
-    const content = getCustomerEmailTemplate({
-       siteName,
-       username: username || 'عزيزنا العميل',
-       title,
-       messageBody: 'لقد استلمنا طلباً لإعادة تعيين كلمة المرور الخاصة بحسابك.',
-       resetUrl: resetUrl
-    });
-    try {
-      const info = await transporter.sendMail({
-        from: `"${siteName}" <${transporter.options.auth.user}>`,
-        to: toEmail,
-        subject: title,
-        html: content
-      });
-      console.log(`[Email Service] Password reset email sent via SMTP to ${toEmail} ✓`);
-      return true;
-    } catch(err) {
-      console.warn(`[Email Service] Failed to send Reset Email via SMTP to ${toEmail}:`, err.message);
-    }
-  }
-
-  // 2. Fallback to Loops API
+  // 1. Send via Loops API (User requested primary)
   const { loopsTransactionalIdReset, loopsTransactionalIdOtp } = await getLoopsConfig();
   const transactionalId = loopsTransactionalIdReset || loopsTransactionalIdOtp || 'cmrv2rlz301lp0j2pig1clc4n';
 
@@ -477,7 +452,32 @@ async function sendPasswordResetEmail(toEmail, { username, resetUrl }) {
     return true;
   }
 
-  console.error(`[Email Service] Failed to send Password Reset email via both SMTP and Loops to ${toEmail}`);
+  // 2. Fallback to SMTP if Loops fails
+  const transporter = await getTransporter();
+  if (transporter) {
+    const title = `إعادة تعيين كلمة المرور - ${siteName}`;
+    const content = getCustomerEmailTemplate({
+       siteName,
+       username: username || 'عزيزنا العميل',
+       title,
+       messageBody: 'لقد استلمنا طلباً لإعادة تعيين كلمة المرور الخاصة بحسابك.',
+       resetUrl: resetUrl
+    });
+    try {
+      const info = await transporter.sendMail({
+        from: `"${siteName}" <${transporter.options.auth.user}>`,
+        to: toEmail,
+        subject: title,
+        html: content
+      });
+      console.log(`[Email Service] Password reset email sent via SMTP fallback to ${toEmail} ✓`);
+      return true;
+    } catch(err) {
+      console.warn(`[Email Service] Failed to send Reset Email via SMTP fallback to ${toEmail}:`, err.message);
+    }
+  }
+
+  console.error(`[Email Service] Failed to send Password Reset email via both Loops and SMTP to ${toEmail}`);
   return false;
 }
 
