@@ -3,7 +3,7 @@ const test = require('node:test');
 
 const { buildStoredCustomField, parseDhruServices } = require('../services/dhruClient');
 
-test('keeps only the custom fields returned by the provider', () => {
+test('keeps provider custom fields and adds provider-required imei metadata field', () => {
   const result = parseDhruServices({
     SUCCESS: [{
       LIST: {
@@ -23,7 +23,7 @@ test('keeps only the custom fields returned by the provider', () => {
     }]
   }, 'imei');
 
-  assert.deepEqual(result[0].customFields.map((field) => field.fieldname), ['SN']);
+  assert.deepEqual(result[0].customFields.map((field) => field.fieldname), ['IMEI', 'SN']);
 });
 
 test('does not infer fields from a service name when the provider returns none', () => {
@@ -46,6 +46,30 @@ test('does not infer fields from a service name when the provider returns none',
   }, 'server');
 
   assert.deepEqual(result[0].customFields, []);
+});
+
+test('adds an imei field when the provider metadata requires imei even without custom fields', () => {
+  const result = parseDhruServices({
+    SUCCESS: [{
+      LIST: {
+        'Provider Group': {
+          GROUPNAME: 'Provider Group',
+          SERVICES: {
+            3: {
+              SERVICEID: 3,
+              SERVICETYPE: 'IMEI',
+              SERVICENAME: 'iCloud Clean Removal',
+              'Requires.Custom': '',
+              REQUIRES: { IMEI: '1' }
+            }
+          }
+        }
+      }
+    }]
+  }, 'imei');
+
+  assert.equal(result[0].requires_imei, true);
+  assert.deepEqual(result[0].customFields.map((field) => field.fieldname), ['IMEI']);
 });
 
 test('keeps explicitly optional provider fields optional even when required flag is missing', () => {

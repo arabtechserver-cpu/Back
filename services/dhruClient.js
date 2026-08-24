@@ -155,6 +155,12 @@ function isRequiredField(value) {
   return ['1', 'true', 'yes', 'on', 'required'].includes(String(value ?? '').trim().toLowerCase());
 }
 
+function isImeiLikeFieldName(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return false;
+  return normalized === 'imei' || normalized === 'custom_imei' || normalized.includes('imei');
+}
+
 function isOptionalFieldText(...values) {
   const text = values
     .map(value => String(value || '').trim().toLowerCase())
@@ -350,6 +356,19 @@ function buildStoredCustomField(cf) {
   };
 }
 
+function buildProviderRequiredImeiField() {
+  return {
+    field_id: 'IMEI',
+    fieldname: 'IMEI',
+    fieldtype: 'text',
+    required: true,
+    description: '',
+    fieldoptions: [],
+    regexpr: '',
+    adminonly: false
+  };
+}
+
 function parseDhruServices(data, serviceType = 'imei') {
   let rawServices = [];
   if (!data) return [];
@@ -380,6 +399,12 @@ function parseDhruServices(data, serviceType = 'imei') {
       time: s.TIME || '',
       customFields: (() => {
         const extractedFields = extractCustomFields(s).map(normalizeCustomField).filter(Boolean);
+        const hasExplicitImeiField = extractedFields.some((field) => (
+          isImeiLikeFieldName(field?.fieldname) || isImeiLikeFieldName(field?.field_id)
+        ));
+        if (requiresImei && !hasExplicitImeiField) {
+          extractedFields.unshift(buildProviderRequiredImeiField());
+        }
         return extractedFields;
       })(),
       min_quantity: parseInt(s.MIN || s.min || s.Min || s.QNT_MIN || s.qnt_min || s.Qnt_Min || s.MIN_QNT || s.min_qnt || s.Min_Qnt || s.QNT || s.qnt || s.Qnt || 1) || 1,
