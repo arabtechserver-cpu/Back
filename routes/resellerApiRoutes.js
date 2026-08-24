@@ -132,9 +132,16 @@ router.post('/', verifyApiAccess, async (req, res) => {
                 pkgPrice = pkgPrice + (pkgPrice * (markup / 100));
 
                 let requiresCustom = undefined;
-                if (pkg.fields && pkg.fields.length > 0) {
+                let activeFields = pkg.fields && pkg.fields.length > 0 ? pkg.fields : null;
+                if (!activeFields) {
+                   try {
+                      if (s.fields) activeFields = JSON.parse(s.fields);
+                   } catch(e) {}
+                }
+
+                if (activeFields && activeFields.length > 0) {
                    requiresCustom = {};
-                   pkg.fields.forEach((f, idx) => {
+                   activeFields.forEach((f, idx) => {
                       const fId = f.field_id || String(idx + 1);
                       requiresCustom[fId] = {
                          reqid: fId,

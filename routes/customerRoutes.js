@@ -730,7 +730,7 @@ router.get('/admin/customers', authMiddleware, async (req, res) => {
              CASE WHEN password IS NULL OR password = '' THEN 0 ELSE 1 END as has_password,
              is_vip,
              last_order_at, api_key, api_enabled, api_markup,
-             api_blocked_services, api_allowed_ips
+             api_blocked_services, api_allowed_ips, api_payment_mode
       FROM customers
       ORDER BY id DESC
       LIMIT ?
@@ -780,6 +780,7 @@ router.get('/admin/customers', authMiddleware, async (req, res) => {
         api_key: customer.api_key || '',
         api_enabled: Boolean(customer.api_enabled),
         api_markup: Number(customer.api_markup || 0),
+        api_payment_mode: customer.api_payment_mode || 'prepaid',
         api_blocked_services: customer.api_blocked_services ? JSON.parse(customer.api_blocked_services) : [],
         api_allowed_ips: customer.api_allowed_ips ? JSON.parse(customer.api_allowed_ips) : []
       };
