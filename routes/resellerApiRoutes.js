@@ -354,7 +354,7 @@ router.post('/', verifyApiAccess, async (req, res) => {
     }
   }
 
-  if (action === 'getimeiorder') {
+  if (action === 'getimeiorder' || action === 'getserverorder') {
     try {
       const orderId = req.body.parameters?.ID || req.body.ID;
       if (!orderId) return sendError('ID is required');
