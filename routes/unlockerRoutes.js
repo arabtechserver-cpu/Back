@@ -1113,9 +1113,9 @@ async function checkAndUpdateOrder(orderId) {
   console.log(`[Check Order #${orderId}] Raw provider response:`, JSON.stringify(remoteOrder));
   console.log(`[Check Order #${orderId}] STATUS=${JSON.stringify(statusVal)} | CODE=${JSON.stringify(unlockCode)}`);
 
-  // Explicit rejection: only status 4, or clear rejection keywords
+  // Explicit rejection: statuses 2, 3, or clear rejection keywords
   // NOTE: status 0 is NOT rejection — it means Pending at many providers
-  const isRejected = statusVal === '4' || statusVal === 4
+  const isRejected = statusVal === '2' || statusVal === 2 || statusVal === '3' || statusVal === 3
     || statusStr === 'rejected'
     || statusStr === 'cancelled'
     || statusStr === 'canceled'
@@ -1140,13 +1140,13 @@ async function checkAndUpdateOrder(orderId) {
 
   // Dhru Fusion status codes:
   // 0 = Pending (NOT rejected! Some providers use 0 for new/pending orders)
-  // 1 = Pending
-  // 2 = In Process  
-  // 3 = Completed
-  // 4 = Rejected/Cancelled
+  // 1 = In Process
+  // 2 = Rejected
+  // 3 = Rejected / Not Found
+  // 4 = Success / Completed
   // 'rejected', 'cancel', 'fail', 'error' = explicit rejection
 
-  const isCompleted = statusVal === '3' || statusVal === 3
+  const isCompleted = statusVal === '4' || statusVal === 4
     || statusStr.includes('complete')
     || statusStr.includes('success')
     || statusStr.includes('accept')
@@ -1369,8 +1369,18 @@ async function autoSubmitUnlockerOrder(orderId) {
     } else if (targetServiceType === 'server' || targetServiceType === 'remote') {
       // ── Server Order (primary) ─────────────────────────────────────────────
       const serverFields = { ...customFields };
-      if (trimmedPlayerId && !serverFields.PlayerID && !serverFields.player_id && !serverFields.PLAYER_ID) {
-         serverFields.PlayerID = trimmedPlayerId;
+      if (trimmedPlayerId) {
+        const hasKey = Object.keys(serverFields).some(k => k.toLowerCase().includes('player') || k.toLowerCase().includes('id') || k.toLowerCase().includes('imei'));
+        if (!hasKey) {
+          const targetFields = selectedPackageFields.length > 0 ? selectedPackageFields : storedServiceFields;
+          const primaryField = targetFields.find(f => String(f.name || f.api_name || f.field_id || '').toLowerCase().includes('player')) || targetFields[0];
+          if (primaryField) {
+             const apiName = String(primaryField.api_name || primaryField.label || primaryField.field_id || primaryField.name || '').trim();
+             serverFields[apiName || 'PlayerID'] = trimmedPlayerId;
+          } else {
+             serverFields.PlayerID = trimmedPlayerId;
+          }
+        }
       }
       const serverCustom = buildCustomField(serverFields);
       const serverPayload = {
@@ -1394,8 +1404,8 @@ async function autoSubmitUnlockerOrder(orderId) {
         };
         responseData = await callDhruApi(apiUrl, apiUser, apiKey, 'placeimeiorder', imeiPayload).catch(e => ({ ERROR: e.message }));
         
-        if (responseData.ERROR && (getDhruErrorMessage(responseData).includes("Command Not Found") || getDhruErrorMessage(responseData).includes("Action Not Found"))) {
-          // Restore original error if fallback action doesn't exist
+        if (responseData.ERROR && (getDhruErrorMessage(responseData).includes("Command Not Found") || getDhruErrorMessage(responseData).includes("Action Not Found") || getDhruErrorMessage(responseData).includes("Service Not Active") || getDhruErrorMessage(responseData).includes("Action is not allowed"))) {
+          // Restore original error if fallback action doesn't exist or service not active for it
           responseData = firstError;
         }
       }
@@ -1416,14 +1426,24 @@ async function autoSubmitUnlockerOrder(orderId) {
         let firstError = responseData;
         console.warn(`[Auto Place Order #${orderId}] placeimeiorder failed (${getDhruErrorMessage(firstError)}), trying placeserverorder as fallback...`);
         const serverFields = { ...customFields };
-        if (trimmedPlayerId && !serverFields.PlayerID && !serverFields.player_id && !serverFields.PLAYER_ID) {
-           serverFields.PlayerID = trimmedPlayerId;
+        if (trimmedPlayerId) {
+          const hasKey = Object.keys(serverFields).some(k => k.toLowerCase().includes('player') || k.toLowerCase().includes('id') || k.toLowerCase().includes('imei'));
+          if (!hasKey) {
+            const targetFields = selectedPackageFields.length > 0 ? selectedPackageFields : storedServiceFields;
+            const primaryField = targetFields.find(f => String(f.name || f.api_name || f.field_id || '').toLowerCase().includes('player')) || targetFields[0];
+            if (primaryField) {
+               const apiName = String(primaryField.api_name || primaryField.label || primaryField.field_id || primaryField.name || '').trim();
+               serverFields[apiName || 'PlayerID'] = trimmedPlayerId;
+            } else {
+               serverFields.PlayerID = trimmedPlayerId;
+            }
+          }
         }
         const serverCustom = buildCustomField(serverFields);
         const serverPayload = { ID: targetApiServiceId, QNT: targetApiQuantity, REFERENCE: order.id.toString(), ...(serverCustom ? { CUSTOMFIELD: serverCustom } : {}) };
         responseData = await callDhruApi(apiUrl, apiUser, apiKey, 'placeserverorder', serverPayload).catch(e => ({ ERROR: e.message }));
         
-        if (responseData.ERROR && (getDhruErrorMessage(responseData).includes("Command Not Found") || getDhruErrorMessage(responseData).includes("Action Not Found"))) {
+        if (responseData.ERROR && (getDhruErrorMessage(responseData).includes("Command Not Found") || getDhruErrorMessage(responseData).includes("Action Not Found") || getDhruErrorMessage(responseData).includes("Service Not Active") || getDhruErrorMessage(responseData).includes("Action is not allowed"))) {
           responseData = firstError;
         }
       }

@@ -296,6 +296,21 @@ router.post('/', verifyApiAccess, async (req, res) => {
                extractedFields[k] = req.body.parameters[k];
             }
          });
+      } else {
+         if (req.body.CUSTOMFIELD) {
+             try {
+                 const decoded = Buffer.from(req.body.CUSTOMFIELD, 'base64').toString('utf8');
+                 const customFieldsJson = JSON.parse(decoded);
+                 Object.assign(extractedFields, customFieldsJson);
+             } catch(e) {
+                 console.warn("Failed to decode CUSTOMFIELD from reseller API (root body):", e.message);
+             }
+         }
+         Object.keys(req.body).forEach(k => {
+            if (k !== 'SERVICEID' && k !== 'IMEI' && k !== 'QNT' && k !== 'CUSTOMFIELD' && k !== 'action' && k !== 'username' && k !== 'apiaccesskey' && k !== 'requestformat') {
+               extractedFields[k] = req.body[k];
+            }
+         });
       }
 
       const orderData = {
