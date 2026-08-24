@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { parseDhruServices } = require('../services/dhruClient');
+const { buildStoredCustomField, parseDhruServices } = require('../services/dhruClient');
 
 test('keeps only the custom fields returned by the provider', () => {
   const result = parseDhruServices({
@@ -46,4 +46,25 @@ test('does not infer fields from a service name when the provider returns none',
   }, 'server');
 
   assert.deepEqual(result[0].customFields, []);
+});
+
+test('keeps explicitly optional provider fields optional even when required flag is missing', () => {
+  const storedField = buildStoredCustomField({
+    fieldname: 'Owner Info (Optional)',
+    description: 'Optional, but highly recommended for higher success rate.'
+  });
+
+  assert.equal(storedField.required, false);
+});
+
+test('normalizes provider fields with options into select inputs', () => {
+  const storedField = buildStoredCustomField({
+    fieldname: 'FMI Status',
+    fieldtype: 'text',
+    fieldoptions: 'Clean|Lost',
+    description: 'Lost not supported!'
+  });
+
+  assert.equal(storedField.type, 'select');
+  assert.deepEqual(storedField.options, ['Clean', 'Lost']);
 });

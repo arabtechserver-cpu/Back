@@ -155,6 +155,24 @@ function isRequiredField(value) {
   return ['1', 'true', 'yes', 'on', 'required'].includes(String(value ?? '').trim().toLowerCase());
 }
 
+function isOptionalFieldText(...values) {
+  const text = values
+    .map(value => String(value || '').trim().toLowerCase())
+    .filter(Boolean)
+    .join(' ');
+
+  if (!text) return false;
+
+  return (
+    text.includes('(optional)') ||
+    text.includes('[optional]') ||
+    text.includes(' optional') ||
+    text.includes('اختياري') ||
+    text.includes('غير إجباري') ||
+    text.includes('not required')
+  );
+}
+
 // Helper: extract customFields from all possible Dhru Fusion / Omar-server field formats
 function extractCustomFields(service) {
   const s = service || {};
@@ -281,7 +299,7 @@ function extractCustomFields(service) {
 // Helper: normalize one provider field and preserve the original API field name.
 function normalizeCustomField(cf) {
   const field = cf || {};
-  const name = String(field.customname || field.fieldname || field.FIELDNAME || field.field_name || field.name || field.NAME || '').trim();
+  const name = stripHtml(String(field.customname || field.fieldname || field.FIELDNAME || field.field_name || field.name || field.NAME || '').trim());
   if (!name) return null;
 
   const lowerName = name.toLowerCase();
@@ -294,13 +312,20 @@ function normalizeCustomField(cf) {
   ) {
     return null;
   }
+  const description = stripHtml(String(field.description || field.DESCRIPTION || field.placeholder || '').trim());
+  const fieldoptions = normalizeFieldOptions(field.fieldoptions ?? field.FIELDOPTIONS ?? field.options);
+  const hasExplicitRequired = field.required !== undefined || field.REQUIRED !== undefined;
+  const normalizedType = normalizeFieldType(field.fieldtype || field.FIELDTYPE || field.type);
+
   return {
     field_id: String(field.field_id || field.reqid || field.REQID || field.id || field.ID || name).trim(),
     fieldname: name,
-    fieldtype: normalizeFieldType(field.fieldtype || field.FIELDTYPE || field.type),
-    required: isRequiredField(field.required ?? field.REQUIRED ?? 'on'),
-    description: String(field.description || field.DESCRIPTION || field.placeholder || '').trim(),
-    fieldoptions: normalizeFieldOptions(field.fieldoptions ?? field.FIELDOPTIONS ?? field.options),
+    fieldtype: fieldoptions.length > 0 && normalizedType === 'text' ? 'select' : normalizedType,
+    required: hasExplicitRequired
+      ? isRequiredField(field.required ?? field.REQUIRED)
+      : !isOptionalFieldText(name, description),
+    description,
+    fieldoptions,
     regexpr: String(field.regexpr || field.REGEXPR || '').trim(),
     adminonly: isRequiredField(field.adminonly ?? field.ADMINONLY)
   };
