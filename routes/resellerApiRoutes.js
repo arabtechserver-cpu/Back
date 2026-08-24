@@ -272,9 +272,27 @@ router.post('/', verifyApiAccess, async (req, res) => {
 
       let extractedFields = {};
       if (imei) extractedFields.IMEI = imei;
+      
+      let qnty = 1;
+      if (req.body.parameters && req.body.parameters.QNT) {
+          qnty = Number(req.body.parameters.QNT);
+      } else if (req.body.QNT) {
+          qnty = Number(req.body.QNT);
+      }
+      if (isNaN(qnty) || qnty < 1) qnty = 1;
+
       if (req.body.parameters && typeof req.body.parameters === 'object') {
+         if (req.body.parameters.CUSTOMFIELD) {
+             try {
+                 const decoded = Buffer.from(req.body.parameters.CUSTOMFIELD, 'base64').toString('utf8');
+                 const customFieldsJson = JSON.parse(decoded);
+                 Object.assign(extractedFields, customFieldsJson);
+             } catch(e) {
+                 console.warn("Failed to decode CUSTOMFIELD from reseller API:", e.message);
+             }
+         }
          Object.keys(req.body.parameters).forEach(k => {
-            if (k !== 'SERVICEID' && k !== 'IMEI') {
+            if (k !== 'SERVICEID' && k !== 'IMEI' && k !== 'QNT' && k !== 'CUSTOMFIELD') {
                extractedFields[k] = req.body.parameters[k];
             }
          });
@@ -297,12 +315,13 @@ router.post('/', verifyApiAccess, async (req, res) => {
         custom_fields: JSON.stringify(extractedFields),
         player_id: imei,
         api_source: service.api_source || '',
-        api_service_id: service.api_service_id || ''
+        api_service_id: service.api_service_id || '',
+        quantity: qnty
       };
 
       const result = await runQuery(
-        'INSERT INTO orders (customer_id, service_id, service_name, package_name, package_price, status, payment_method, is_api_order, api_reseller_id, custom_fields, player_id, api_source, api_service_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [orderData.customer_id, orderData.service_id, orderData.service_name, orderData.package_name, orderData.price, orderData.status, orderData.payment_method, true, customer.id, orderData.custom_fields, orderData.player_id, orderData.api_source, orderData.api_service_id]
+        'INSERT INTO orders (customer_id, service_id, service_name, package_name, package_price, status, payment_method, is_api_order, api_reseller_id, custom_fields, player_id, api_source, api_service_id, quantity) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [orderData.customer_id, orderData.service_id, orderData.service_name, orderData.package_name, orderData.price, orderData.status, orderData.payment_method, true, customer.id, orderData.custom_fields, orderData.player_id, orderData.api_source, orderData.api_service_id, orderData.quantity]
       );
 
       // Log wallet transaction only if prepaid

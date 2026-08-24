@@ -1312,6 +1312,19 @@ async function autoSubmitUnlockerOrder(orderId) {
     if (order.custom_fields) {
       try {
         const parsed = typeof order.custom_fields === 'string' ? JSON.parse(order.custom_fields) : order.custom_fields;
+        
+        // Backward compatibility for old orders where CUSTOMFIELD was saved as base64 string
+        if (parsed && typeof parsed === 'object' && parsed.CUSTOMFIELD) {
+            try {
+                const decoded = Buffer.from(parsed.CUSTOMFIELD, 'base64').toString('utf8');
+                const innerJson = JSON.parse(decoded);
+                Object.assign(parsed, innerJson);
+                delete parsed.CUSTOMFIELD;
+            } catch(e) {
+                console.warn('[Auto Place Order] Failed to decode old CUSTOMFIELD:', e.message);
+            }
+        }
+
         for (const [k, v] of Object.entries(parsed)) {
           const rawKey = k.startsWith('custom_') ? k.replace('custom_', '') : k;
           const providerKey = providerFieldNames.get(String(k).toLowerCase())
@@ -1355,7 +1368,10 @@ async function autoSubmitUnlockerOrder(orderId) {
       }
     } else if (targetServiceType === 'server' || targetServiceType === 'remote') {
       // ── Server Order (primary) ─────────────────────────────────────────────
-      const serverFields = Object.keys(customFields).length > 0 ? customFields : (trimmedPlayerId ? { PlayerID: trimmedPlayerId } : {});
+      const serverFields = { ...customFields };
+      if (trimmedPlayerId && !serverFields.PlayerID && !serverFields.player_id && !serverFields.PLAYER_ID) {
+         serverFields.PlayerID = trimmedPlayerId;
+      }
       const serverCustom = buildCustomField(serverFields);
       const serverPayload = {
         ID: targetApiServiceId,
@@ -1399,7 +1415,10 @@ async function autoSubmitUnlockerOrder(orderId) {
       if (responseData.ERROR) {
         let firstError = responseData;
         console.warn(`[Auto Place Order #${orderId}] placeimeiorder failed (${getDhruErrorMessage(firstError)}), trying placeserverorder as fallback...`);
-        const serverFields = Object.keys(customFields).length > 0 ? customFields : (trimmedPlayerId ? { PlayerID: trimmedPlayerId } : {});
+        const serverFields = { ...customFields };
+        if (trimmedPlayerId && !serverFields.PlayerID && !serverFields.player_id && !serverFields.PLAYER_ID) {
+           serverFields.PlayerID = trimmedPlayerId;
+        }
         const serverCustom = buildCustomField(serverFields);
         const serverPayload = { ID: targetApiServiceId, QNT: targetApiQuantity, REFERENCE: order.id.toString(), ...(serverCustom ? { CUSTOMFIELD: serverCustom } : {}) };
         responseData = await callDhruApi(apiUrl, apiUser, apiKey, 'placeserverorder', serverPayload).catch(e => ({ ERROR: e.message }));
