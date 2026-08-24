@@ -829,6 +829,7 @@ async function createTables() {
       ALTER TABLE customers ADD COLUMN IF NOT EXISTS api_markup NUMERIC(5,2) DEFAULT 0;
       ALTER TABLE customers ADD COLUMN IF NOT EXISTS api_blocked_services TEXT DEFAULT '[]';
       ALTER TABLE customers ADD COLUMN IF NOT EXISTS api_allowed_ips TEXT DEFAULT '[]';
+      ALTER TABLE customers ADD COLUMN IF NOT EXISTS api_payment_mode VARCHAR(20) DEFAULT 'prepaid';
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS is_api_order BOOLEAN DEFAULT false;
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS api_reseller_id INT REFERENCES customers(id) ON DELETE SET NULL;
       ALTER TABLE banners ADD COLUMN IF NOT EXISTS link TEXT DEFAULT '';

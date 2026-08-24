@@ -772,7 +772,7 @@ router.get('/admin/customers', authMiddleware, async (req, res) => {
         balance: Number(customer.balance || 0),
         balances: customer.balances ? (typeof customer.balances === 'string' ? JSON.parse(customer.balances) : customer.balances) : {},
         has_password: Boolean(customer.has_password),
-        password_masked: '********',
+        password_masked: customer.has_password ? '********' : 'مسجل بجوجل',
         customer_level: computedLevel,
         is_vip: customer.is_vip === true || customer.is_vip === 'true' || customer.is_vip === 1,
         total_orders: orderInfo.count,
