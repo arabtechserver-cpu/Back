@@ -1340,14 +1340,8 @@ async function autoSubmitUnlockerOrder(orderId) {
       }
     }
 
-    // Dhru Fusion API requires CUSTOMFIELD as a Base64-encoded JSON string.
-    // Format: parameters[CUSTOMFIELD] = base64(JSON.stringify({FieldID: "value"}))
-    const buildCustomField = (fields) => {
-      if (!fields || Object.keys(fields).length === 0) return undefined;
-      return Buffer.from(JSON.stringify(fields)).toString('base64');
-    };
-
-    const customFieldEncoded = buildCustomField(customFields);
+    // Dhru Fusion API requires custom fields spread into parameters payload natively.
+    // So we don't need a custom field builder, we just spread the object directly.
 
     // ── Order Placement Logic ─────────────────────────────────────────────
     console.log(`[Auto Place Order #${orderId}] ServiceType=${targetServiceType} | ServiceID=${targetApiServiceId} | IMEI=${trimmedPlayerId} | CustomFields=${JSON.stringify(customFields)}`);
@@ -1382,12 +1376,11 @@ async function autoSubmitUnlockerOrder(orderId) {
           }
         }
       }
-      const serverCustom = buildCustomField(serverFields);
       const serverPayload = {
         ID: targetApiServiceId,
         QNT: targetApiQuantity,
         REFERENCE: order.id.toString(),
-        ...(serverCustom ? { CUSTOMFIELD: serverCustom } : {})
+        ...serverFields
       };
       console.log(`[Auto Place Order #${orderId}] Trying placeserverorder | QNT=${targetApiQuantity}`);
       responseData = await callDhruApi(apiUrl, apiUser, apiKey, 'placeserverorder', serverPayload).catch(e => ({ ERROR: e.message }));
@@ -1400,7 +1393,7 @@ async function autoSubmitUnlockerOrder(orderId) {
           ID: targetApiServiceId,
           IMEI: fallbackImei,
           REFERENCE: order.id.toString(),
-          ...(customFieldEncoded ? { CUSTOMFIELD: customFieldEncoded } : {})
+          ...customFields
         };
         responseData = await callDhruApi(apiUrl, apiUser, apiKey, 'placeimeiorder', imeiPayload).catch(e => ({ ERROR: e.message }));
         
@@ -1416,7 +1409,7 @@ async function autoSubmitUnlockerOrder(orderId) {
         ID: targetApiServiceId,
         IMEI: fallbackImei,
         REFERENCE: order.id.toString(),
-        ...(customFieldEncoded ? { CUSTOMFIELD: customFieldEncoded } : {})
+        ...customFields
       };
       console.log(`[Auto Place Order #${orderId}] Trying placeimeiorder | IMEI=${fallbackImei}`);
       responseData = await callDhruApi(apiUrl, apiUser, apiKey, 'placeimeiorder', imeiPayload).catch(e => ({ ERROR: e.message }));
@@ -1439,8 +1432,7 @@ async function autoSubmitUnlockerOrder(orderId) {
             }
           }
         }
-        const serverCustom = buildCustomField(serverFields);
-        const serverPayload = { ID: targetApiServiceId, QNT: targetApiQuantity, REFERENCE: order.id.toString(), ...(serverCustom ? { CUSTOMFIELD: serverCustom } : {}) };
+        const serverPayload = { ID: targetApiServiceId, QNT: targetApiQuantity, REFERENCE: order.id.toString(), ...serverFields };
         responseData = await callDhruApi(apiUrl, apiUser, apiKey, 'placeserverorder', serverPayload).catch(e => ({ ERROR: e.message }));
         
         if (responseData.ERROR && (getDhruErrorMessage(responseData).includes("Command Not Found") || getDhruErrorMessage(responseData).includes("Action Not Found") || getDhruErrorMessage(responseData).includes("Service Not Active") || getDhruErrorMessage(responseData).includes("Action is not allowed"))) {
