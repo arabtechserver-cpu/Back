@@ -795,7 +795,7 @@ router.get('/admin/customers', authMiddleware, async (req, res) => {
 // Admin: update customer profile and optionally reset password
 router.put('/admin/:id', authMiddleware, async (req, res) => {
   const { id } = req.params;
-    const { username, email, phone, balance, balances, new_password, api_enabled, api_markup, api_blocked_services, api_allowed_ips, regenerate_api_key } = req.body;
+    const { username, email, phone, balance, balances, new_password, api_enabled, api_markup, api_payment_mode, api_blocked_services, api_allowed_ips, regenerate_api_key } = req.body;
 
   try {
     const customer = await getQuery('SELECT * FROM customers WHERE id = ?', [id]);
@@ -839,8 +839,9 @@ router.put('/admin/:id', authMiddleware, async (req, res) => {
     const nextApiMarkup = api_markup !== undefined ? Number(api_markup) : Number(customer.api_markup || 0);
     const nextApiBlocked = api_blocked_services ? JSON.stringify(api_blocked_services) : (customer.api_blocked_services || '[]');
     const nextApiIps = api_allowed_ips ? JSON.stringify(api_allowed_ips) : (customer.api_allowed_ips || '[]');
+    const nextApiPaymentMode = api_payment_mode || customer.api_payment_mode || 'prepaid';
 
-    await runQuery('UPDATE customers SET username = ?, email = ?, phone = ?, balance = ?, total_deposited = ?, balances = ?, api_enabled = ?, api_markup = ?, api_blocked_services = ?, api_allowed_ips = ? WHERE id = ?', [
+    await runQuery('UPDATE customers SET username = ?, email = ?, phone = ?, balance = ?, total_deposited = ?, balances = ?, api_enabled = ?, api_markup = ?, api_payment_mode = ?, api_blocked_services = ?, api_allowed_ips = ? WHERE id = ?', [
       nextUsername,
       nextEmail,
       nextPhone,
@@ -849,6 +850,7 @@ router.put('/admin/:id', authMiddleware, async (req, res) => {
       nextBalances,
       nextApiEnabled,
       nextApiMarkup,
+      nextApiPaymentMode,
       nextApiBlocked,
       nextApiIps,
       id
@@ -880,6 +882,7 @@ router.put('/admin/:id', authMiddleware, async (req, res) => {
         api_key: updated.api_key || '',
         api_enabled: Boolean(updated.api_enabled),
         api_markup: Number(updated.api_markup || 0),
+        api_payment_mode: updated.api_payment_mode || 'prepaid',
         api_blocked_services: updated.api_blocked_services ? JSON.parse(updated.api_blocked_services) : [],
         api_allowed_ips: updated.api_allowed_ips ? JSON.parse(updated.api_allowed_ips) : []
       }

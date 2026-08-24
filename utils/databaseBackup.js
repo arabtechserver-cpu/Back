@@ -171,25 +171,72 @@ async function writeBackupSnapshot(reason = 'scheduled') {
 
   let fileWritten = false;
 
+
+async function sendAdminAlert(message) {
+  const signature = message;
+  const now = Date.now();
+  if (signature === lastAlertSignature && now < alertCooldownUntil) {
+    return;
+  }
+
+  lastAlertSignature = signature;
+  alertCooldownUntil = now + 10 * 60 * 1000;
+
+  console.warn(`[DB Alert] ${message}`);
+
+  try {
+    if (wa.getStatus() !== 'ready') {
+      return;
+    }
+
+    const settings = await readSettingsMap();
+    const numbersRaw = settings.whatsapp_numbers;
+    if (!numbersRaw) {
+      return;
+    }
+
+    let numbers = [];
+    try {
+      numbers = JSON.parse(numbersRaw);
+    } catch {
+      numbers = [];
+    }
+
+    if (!Array.isArray(numbers) || numbers.length === 0) {
+      return;
+    }
+
+    await wa.sendMessage(numbers, `⚠️ تنبيه قاعدة البيانات:\n${message}`);
+  } catch (error) {
+    console.warn('[DB Alert] Failed to send WhatsApp notification:', error.message);
+  }
+}
+
+async function writeBackupSnapshot(reason = 'scheduled') {
+  ensureDir(BACKUP_DIR);
+  ensureDir(FALLBACK_COPY_DIR);
+
+  const mode = getDatabaseMode();
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const fileName = `${timestamp}-${reason}.json`;
+  const targetDir = mode.fallbackMode ? FALLBACK_COPY_DIR : BACKUP_DIR;
+  const backupPath = path.join(targetDir, fileName);
+
+  const snapshot = {
+    created_at: new Date().toISOString(),
+    reason,
+    fallbackMode: mode.fallbackMode,
+    tables: {},
+  };
+
+  let fileWritten = false;
+
   if (mode.fallbackMode) {
     const { readDb } = require('../db');
     const dbData = readDb();
     for (const table of await getBackupTableNames(mode)) snapshot.tables[table] = dbData[table] || [];
   } else {
     for (const table of await getBackupTableNames(mode)) {
-      try {
-        snapshot.tables[table] = table === 'settings'
-          ? await allQuery('SELECT * FROM settings')
-          : await allQuery(`SELECT * FROM ${table} ORDER BY id DESC`);
-      } catch (error) {
-        snapshot.tables[table] = { error: error.message };
-      }
-    }
-  }
-
-  if (!fileWritten) {
-    fs.writeFileSync(backupPath, JSON.stringify(snapshot, null, 2));
-  }
 
   // Prune old backups (keep only latest 5)
   try {

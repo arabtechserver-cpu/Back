@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { getQuery, allQuery, runQuery } = require('../db');
+const telegram = require('../utils/telegramService');
 
 // Middleware to verify API key and IP address
 async function verifyApiAccess(req, res, next) {
@@ -137,7 +138,7 @@ router.post('/', verifyApiAccess, async (req, res) => {
                       const fId = f.field_id || String(idx + 1);
                       requiresCustom[fId] = {
                          reqid: fId,
-                         fieldname: f.fieldname || f.name || 'Field',
+                         fieldname: (f.fieldname || f.name || 'Field').replace(/^أدخل\s*/, '').replace(/\.\.\.$/, '').trim(),
                          fieldtype: f.fieldtype || 'text',
                          required: f.required ? "1" : "0",
                          description: f.description || "",
@@ -178,7 +179,7 @@ router.post('/', verifyApiAccess, async (req, res) => {
                   const fId = f.field_id || String(idx + 1);
                   requiresCustom[fId] = {
                      reqid: fId,
-                     fieldname: f.fieldname || f.name || 'Field',
+                     fieldname: (f.fieldname || f.name || 'Field').replace(/^أدخل\s*/, '').replace(/\.\.\.$/, '').trim(),
                      fieldtype: f.fieldtype || 'text',
                      required: f.required ? "1" : "0",
                      description: f.description || "",
@@ -248,14 +249,18 @@ router.post('/', verifyApiAccess, async (req, res) => {
       let finalPrice = basePrice + (basePrice * (markup / 100));
 
       const balanceBefore = Number(customer.balance || 0);
-      if (balanceBefore < finalPrice) {
-        return sendError('Insufficient balance');
-      }
+      const isPostpaid = customer.api_payment_mode === 'postpaid';
+      
+      if (!isPostpaid) {
+        if (balanceBefore < finalPrice) {
+          return sendError('Insufficient balance');
+        }
 
-      // Deduct atomically
-      const updRes = await runQuery('UPDATE customers SET balance = balance - ? WHERE id = ? AND balance >= ?', [finalPrice, customer.id, finalPrice]);
-      if (updRes && updRes.changes === 0 && updRes.rowCount === 0) {
-        return sendError('Insufficient balance (Race condition detected)');
+        // Deduct atomically
+        const updRes = await runQuery('UPDATE customers SET balance = balance - ? WHERE id = ? AND balance >= ?', [finalPrice, customer.id, finalPrice]);
+        if (updRes && updRes.changes === 0 && updRes.rowCount === 0) {
+          return sendError('Insufficient balance (Race condition detected)');
+        }
       }
 
       let extractedFields = {};
@@ -292,11 +297,46 @@ router.post('/', verifyApiAccess, async (req, res) => {
         [orderData.customer_id, orderData.service_id, orderData.service_name, orderData.package_name, orderData.price, orderData.status, orderData.payment_method, true, customer.id, orderData.custom_fields, orderData.api_source, orderData.api_service_id]
       );
 
-      // Log wallet transaction
-      await runQuery(
-        'INSERT INTO wallet_transactions (customer_id, customer_username, type, amount, balance_before, balance_after, reference_type, reference_id, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [customer.id, customer.username, 'debit', finalPrice, balanceBefore, balanceBefore - finalPrice, 'order', result.lastID, `API Order - ${service.name}`]
-      );
+      // Log wallet transaction only if prepaid
+      if (!isPostpaid) {
+        await runQuery(
+          'INSERT INTO wallet_transactions (customer_id, customer_username, type, amount, balance_before, balance_after, reference_type, reference_id, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [customer.id, customer.username, 'debit', finalPrice, balanceBefore, balanceBefore - finalPrice, 'order', result.lastID, `API Order - ${service.name}`]
+        );
+      }
+
+      // Send Telegram notification to admin
+      ;(async () => {
+        try {
+          const adminChatIds = await telegram.getAdminChatIds();
+          if (adminChatIds.length > 0) {
+            const payLabel = isPostpaid ? 'آجل (يحتاج موافقة)' : 'خصم من المحفظة (API)';
+            const tgMsg = [
+              `🛒 *طلب API جديد #${result.lastID}*`,
+              `🎮 الخدمة: *${service.name}*`,
+              `📦 الباقة: *${targetPkg ? targetPkg.name : 'API Order'}* — *${finalPrice}*`,
+              imei ? `📱 IMEI: \`${imei}\`` : null,
+              `👤 موزع API: *${customer.username}*`,
+              `💳 نظام الدفع: ${payLabel}`,
+              `\n🔗 راجع الطلب ووافق عليه من لوحة التحكم`
+            ].filter(Boolean).join('\n');
+            
+            for (const chatId of adminChatIds) {
+              let keyboard = null;
+              if (orderData.api_service_id || orderData.api_source) {
+                keyboard = {
+                  inline_keyboard: [
+                    [{ text: 'موافقة وإرسال للمزود', callback_data: `approve_api_${result.lastID}` }]
+                  ]
+                };
+              }
+              await telegram.sendMessage(String(chatId), tgMsg, keyboard).catch(() => {});
+            }
+          }
+        } catch (notifyErr) {
+          console.warn('[Admin Notify] Failed to send admin API notification:', notifyErr.message);
+        }
+      })();
 
       return sendResponse({ SUCCESS: [{ REFERENCEID: result.lastID }] });
 
