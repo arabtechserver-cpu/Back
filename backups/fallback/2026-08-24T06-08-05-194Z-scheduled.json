@@ -1,6 +1,6 @@
 {
-  "created_at": "2026-08-21T03:18:15.450Z",
-  "reason": "fallback-switch",
+  "created_at": "2026-08-24T06:08:05.194Z",
+  "reason": "scheduled",
   "fallbackMode": true,
   "tables": {
     "users": [
@@ -62,6 +62,13 @@
         "id": 21796,
         "key": "exchange_rates",
         "value": "{\"USD\":1}"
+      },
+      {
+        "id": 21797,
+        "key": "[\"5996399400\"]"
+      },
+      {
+        "id": 21798
       }
     ],
     "customer_discounts": [],

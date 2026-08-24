@@ -619,6 +619,12 @@ async function createTables() {
       download_link_title VARCHAR(255) DEFAULT ''
     );
 
+    ALTER TABLE orders ADD COLUMN IF NOT EXISTS is_api_order BOOLEAN DEFAULT false;
+    ALTER TABLE orders ADD COLUMN IF NOT EXISTS api_reseller_id INT REFERENCES customers(id) ON DELETE SET NULL;
+    ALTER TABLE orders ADD COLUMN IF NOT EXISTS custom_fields TEXT DEFAULT '';
+    ALTER TABLE orders ADD COLUMN IF NOT EXISTS api_source VARCHAR(100) DEFAULT '';
+    ALTER TABLE orders ADD COLUMN IF NOT EXISTS api_service_id VARCHAR(100) DEFAULT '';
+
     CREATE TABLE IF NOT EXISTS complaints (
       id SERIAL PRIMARY KEY,
       customer_id INT REFERENCES customers(id) ON DELETE SET NULL,
