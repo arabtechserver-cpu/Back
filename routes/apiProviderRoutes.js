@@ -4,6 +4,17 @@ const { runQuery, allQuery, getQuery } = require('../db');
 const authMiddleware = require('../middleware/auth');
 const { callDhruApi, parseDhruServices, buildStoredCustomField } = require('../services/dhruClient');
 const { fetchDynamicServices } = require('../services/dynamicClient');
+const { normalizeDbMoney, normalizeQuantity } = require('../utils/providerNumeric');
+
+function normalizeMoneyForProvider(rawValue, contextLabel, fallback = 0) {
+  const result = normalizeDbMoney(rawValue, { fallback });
+  if (result.invalid) {
+    console.warn(`[Provider Numeric Guard] Invalid ${contextLabel}:`, rawValue);
+  } else if (result.clamped) {
+    console.warn(`[Provider Numeric Guard] Clamped ${contextLabel}:`, rawValue, '->', result.value);
+  }
+  return result.value;
+}
 
 // Get all API Providers (Admin Protected)
 router.get('/', authMiddleware, async (req, res) => {
@@ -172,7 +183,12 @@ async function performProviderSync(providerId, customRate, customMarkup, customS
     const balanceData = await callDhruApi(provider.api_url, provider.username, provider.api_key, 'accountinfo');
     if (balanceData && balanceData.SUCCESS && Array.isArray(balanceData.SUCCESS)) {
       apiCurrency = balanceData.SUCCESS[0]?.AccountInfo?.currency || 'USD';
-      await runQuery('UPDATE api_providers SET balance = ?, currency = ? WHERE id = ?', [parseFloat(balanceData.SUCCESS[0].AccountInfo.creditraw), apiCurrency, provider.id]);
+      const safeBalance = normalizeMoneyForProvider(
+        balanceData.SUCCESS[0]?.AccountInfo?.creditraw,
+        `provider balance for ${provider.name}`,
+        0
+      );
+      await runQuery('UPDATE api_providers SET balance = ?, currency = ? WHERE id = ?', [safeBalance, apiCurrency, provider.id]);
     }
   } catch (e) {
     console.warn('Failed to fetch provider currency, defaulting to USD');
@@ -229,10 +245,20 @@ async function performProviderSync(providerId, customRate, customMarkup, customS
       if (apiCurrency === 'EGP') multiplier = 1 / rate;
 
       groupServices.forEach((s, idx) => {
-        const apiPriceUsd = parseFloat(s.price) || 0;
-        const localPrice = parseFloat((apiPriceUsd * multiplier * (1 + markup / 100)).toFixed(2));
+        const apiPriceUsd = normalizeMoneyForProvider(
+          s.price,
+          `api price for provider ${provider.name} service ${s.id} (${s.name || 'unnamed'})`,
+          0
+        );
+        const localPrice = normalizeMoneyForProvider(
+          apiPriceUsd * multiplier * (1 + markup / 100),
+          `local price for provider ${provider.name} service ${s.id} (${s.name || 'unnamed'})`,
+          0
+        );
         const cleanPkgName = s.name || 'تفعيل فوري تلقائي';
-        const isDynamicPkg = (s.max_quantity > 1 && s.max_quantity !== s.min_quantity) || (s.min_quantity > 1 && s.max_quantity === 0) || s.requires_quantity;
+        const minQuantity = normalizeQuantity(s.min_quantity, 1);
+        const maxQuantity = normalizeQuantity(s.max_quantity, 0);
+        const isDynamicPkg = (maxQuantity > 1 && maxQuantity !== minQuantity) || (minQuantity > 1 && maxQuantity === 0) || s.requires_quantity;
 
         const packageFields = [];
         if (s.customFields && s.customFields.length > 0) {
@@ -255,14 +281,18 @@ async function performProviderSync(providerId, customRate, customMarkup, customS
           api_service_type: s.serviceType || 'imei',
           status: "Available",
           discount: 0,
-          min_quantity: s.min_quantity || 1,
-          max_quantity: s.max_quantity || 0,
+          min_quantity: minQuantity,
+          max_quantity: maxQuantity,
           requires_quantity: isDynamicPkg,
           fields: effectivePackageFields
         });
       });
 
-      const minPrice = mergedPackages.length > 0 ? Math.min(...mergedPackages.map(p => p.price)) : 0;
+      const minPrice = normalizeMoneyForProvider(
+        mergedPackages.length > 0 ? Math.min(...mergedPackages.map(p => p.price)) : 0,
+        `group min price for provider ${provider.name} group ${cleanGroupName}`,
+        0
+      );
       const packagesJson = JSON.stringify(mergedPackages);
       const fieldsJson = JSON.stringify(combinedFields);
 
@@ -316,17 +346,31 @@ async function performProviderSync(providerId, customRate, customMarkup, customS
       let multiplier = 1;
       if (apiCurrency === 'EGP') multiplier = 1 / rate;
 
-      const apiPriceUsd = parseFloat(s.price) || 0;
-      const localPrice = parseFloat((apiPriceUsd * multiplier * (1 + markup / 100)).toFixed(2));
+      const apiPriceUsd = normalizeMoneyForProvider(
+        s.price,
+        `api price for provider ${provider.name} service ${s.id} (${s.name || 'unnamed'})`,
+        0
+      );
+      const localPrice = normalizeMoneyForProvider(
+        apiPriceUsd * multiplier * (1 + markup / 100),
+        `local price for provider ${provider.name} service ${s.id} (${s.name || 'unnamed'})`,
+        0
+      );
       const cleanServiceName = s.name || 'تفعيل فوري تلقائي';
       const svcType = s.serviceType || 'imei';
 
-      const minQty = s.min_quantity || 1;
-      const maxQty = s.max_quantity || 0;
+      const minQty = normalizeQuantity(s.min_quantity, 1);
+      const maxQty = normalizeQuantity(s.max_quantity, 0);
       const isDynamic = (maxQty > 1 && maxQty !== minQty) || (minQty > 1 && maxQty === 0) || s.requires_quantity;
 
       const priceType = isDynamic ? 'dynamic' : 'fixed';
-      const pricePerThousand = isDynamic ? localPrice * 1000 : 0;
+      const pricePerThousand = isDynamic
+        ? normalizeMoneyForProvider(
+            localPrice * 1000,
+            `price_per_thousand for provider ${provider.name} service ${s.id} (${cleanServiceName})`,
+            0
+          )
+        : 0;
 
       const packagesJson = isDynamic ? '[]' : JSON.stringify([{ id: 1, name: "تفعيل فوري تلقائي", price: localPrice, usd_price: localPrice, api_service_id: s.id.toString(), api_service_type: svcType, status: "Available", discount: 0, fields: serviceFields }]);
       const fieldsJson = JSON.stringify(serviceFields);
@@ -501,19 +545,41 @@ router.post('/:id/import-services', authMiddleware, async (req, res) => {
         if (apiCurrency === 'EGP') multiplier = 1 / rate;
 
         groupServices.forEach((s, idx) => {
-          let apiPriceUsd = parseFloat(s.price) || 0;
+          let apiPriceUsd = normalizeMoneyForProvider(
+            s.price,
+            `import api price for provider ${provider.name} service ${s.id} (${s.name || 'unnamed'})`,
+            0
+          );
           if (s.custom_price !== null && s.custom_price !== undefined) {
-            apiPriceUsd = parseFloat(s.custom_price);
+            apiPriceUsd = normalizeMoneyForProvider(
+              s.custom_price,
+              `import custom api price for provider ${provider.name} service ${s.id} (${s.name || 'unnamed'})`,
+              apiPriceUsd
+            );
           }
-          let localPrice = parseFloat((apiPriceUsd * multiplier * (1 + markup / 100)).toFixed(2));
+          let localPrice = normalizeMoneyForProvider(
+            apiPriceUsd * multiplier * (1 + markup / 100),
+            `import local price for provider ${provider.name} service ${s.id} (${s.name || 'unnamed'})`,
+            0
+          );
           let discount = 0;
           if (s.custom_discount !== null && s.custom_discount !== undefined) {
-            discount = parseFloat(s.custom_discount);
-            localPrice = parseFloat((apiPriceUsd * multiplier * (1 + markup / 100)) - discount).toFixed(2);
+            discount = normalizeMoneyForProvider(
+              s.custom_discount,
+              `import discount for provider ${provider.name} service ${s.id} (${s.name || 'unnamed'})`,
+              0
+            );
+            localPrice = normalizeMoneyForProvider(
+              (apiPriceUsd * multiplier * (1 + markup / 100)) - discount,
+              `import discounted local price for provider ${provider.name} service ${s.id} (${s.name || 'unnamed'})`,
+              0
+            );
           }
 
           const cleanPkgName = s.name || 'تفعيل فوري تلقائي';
-          const isDynamicPkg = (s.max_quantity > 1 && s.max_quantity !== s.min_quantity) || (s.min_quantity > 1 && s.max_quantity === 0) || s.requires_quantity;
+          const minQuantity = normalizeQuantity(s.min_quantity, 1);
+          const maxQuantity = normalizeQuantity(s.max_quantity, 0);
+          const isDynamicPkg = (maxQuantity > 1 && maxQuantity !== minQuantity) || (minQuantity > 1 && maxQuantity === 0) || s.requires_quantity;
 
           const packageFields = [];
           if (s.customFields && s.customFields.length > 0) {
@@ -526,14 +592,14 @@ router.post('/:id/import-services', authMiddleware, async (req, res) => {
           mergedPackages.push({
             id: idx + 1,
             name: cleanPkgName,
-            price: parseFloat(localPrice) > 0 ? parseFloat(localPrice) : 0,
-            usd_price: parseFloat(localPrice) > 0 ? parseFloat(localPrice) : 0,
+            price: localPrice > 0 ? localPrice : 0,
+            usd_price: localPrice > 0 ? localPrice : 0,
             api_service_id: s.id.toString(),
             api_service_type: s.serviceType || 'imei',
             status: "Available",
             discount: discount,
-            min_quantity: s.min_quantity || 1,
-            max_quantity: s.max_quantity || 0,
+            min_quantity: minQuantity,
+            max_quantity: maxQuantity,
             requires_quantity: isDynamicPkg,
             api_delivery_time: s.time || '',
             fields: packageFields
@@ -547,7 +613,11 @@ router.post('/:id/import-services', authMiddleware, async (req, res) => {
         let existingSvc = await getQuery("SELECT id FROM services WHERE name = ? AND api_provider_id = ? AND api_service_id = 'grouped'", [cleanGroupName, provider.id]);
 
         if (!existingSvc) {
-          const minPrice = mergedPackages.length > 0 ? Math.min(...mergedPackages.map(p => p.price)) : 0;
+          const minPrice = normalizeMoneyForProvider(
+            mergedPackages.length > 0 ? Math.min(...mergedPackages.map(p => p.price)) : 0,
+            `import group min price for provider ${provider.name} group ${cleanGroupName}`,
+            0
+          );
           await runQuery(
             "INSERT INTO services (category_id, name, description, price, image, packages, fields, price_type, price_per_thousand, fields_title, api_service_id, api_source, api_provider_id, api_price, min_quantity, max_quantity, api_service_type, api_delivery_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [categoryId, cleanGroupName, `باقات وتفعيل خدمات ${cleanGroupName}`, minPrice, 'default', JSON.stringify(mergedPackages), fieldsJson, 'fixed', 0, 'بيانات الخدمة', 'grouped', 'api_provider', provider.id, 0, 1, 0, dominantType, '']
@@ -568,7 +638,11 @@ router.post('/:id/import-services', authMiddleware, async (req, res) => {
             }
           });
 
-          const newMinPrice = existingPackages.length > 0 ? Math.min(...existingPackages.map(p => p.price)) : 0;
+          const newMinPrice = normalizeMoneyForProvider(
+            existingPackages.length > 0 ? Math.min(...existingPackages.map(p => p.price)) : 0,
+            `import merged group min price for provider ${provider.name} group ${cleanGroupName}`,
+            0
+          );
           await runQuery(
             "UPDATE services SET price = ?, packages = ?, fields = ?, category_id = ?, api_service_type = ?, api_delivery_time = ? WHERE id = ?",
             [newMinPrice, JSON.stringify(existingPackages), fieldsJson, categoryId, dominantType, '', existingSvc.id]
@@ -607,26 +681,52 @@ router.post('/:id/import-services', authMiddleware, async (req, res) => {
         let multiplier = 1;
         if (apiCurrency === 'EGP') multiplier = 1 / rate;
 
-        let apiPriceUsd = parseFloat(s.price) || 0;
+        let apiPriceUsd = normalizeMoneyForProvider(
+          s.price,
+          `import api price for provider ${provider.name} service ${s.id} (${s.name || 'unnamed'})`,
+          0
+        );
         if (s.custom_price !== null && s.custom_price !== undefined) {
-          apiPriceUsd = parseFloat(s.custom_price);
+          apiPriceUsd = normalizeMoneyForProvider(
+            s.custom_price,
+            `import custom api price for provider ${provider.name} service ${s.id} (${s.name || 'unnamed'})`,
+            apiPriceUsd
+          );
         }
 
-        let localPrice = parseFloat((apiPriceUsd * multiplier * (1 + markup / 100)).toFixed(2));
+        let localPrice = normalizeMoneyForProvider(
+          apiPriceUsd * multiplier * (1 + markup / 100),
+          `import local price for provider ${provider.name} service ${s.id} (${s.name || 'unnamed'})`,
+          0
+        );
         let discount = 0;
         if (s.custom_discount !== null && s.custom_discount !== undefined) {
-          discount = parseFloat(s.custom_discount);
-          localPrice = parseFloat((apiPriceUsd * multiplier * (1 + markup / 100)) - discount).toFixed(2);
+          discount = normalizeMoneyForProvider(
+            s.custom_discount,
+            `import discount for provider ${provider.name} service ${s.id} (${s.name || 'unnamed'})`,
+            0
+          );
+          localPrice = normalizeMoneyForProvider(
+            (apiPriceUsd * multiplier * (1 + markup / 100)) - discount,
+            `import discounted local price for provider ${provider.name} service ${s.id} (${s.name || 'unnamed'})`,
+            0
+          );
         }
 
         const cleanServiceName = s.name || 'تفعيل فوري تلقائي';
         const svcType = s.serviceType || 'imei';
-        const minQty = s.min_quantity || 1;
-        const maxQty = s.max_quantity || 0;
+        const minQty = normalizeQuantity(s.min_quantity, 1);
+        const maxQty = normalizeQuantity(s.max_quantity, 0);
         const isDynamic = (maxQty > 1 && maxQty !== minQty) || (minQty > 1 && maxQty === 0) || s.requires_quantity;
 
         const priceType = isDynamic ? 'dynamic' : 'fixed';
-        const pricePerThousand = isDynamic ? localPrice * 1000 : 0;
+        const pricePerThousand = isDynamic
+          ? normalizeMoneyForProvider(
+              localPrice * 1000,
+              `import price_per_thousand for provider ${provider.name} service ${s.id} (${cleanServiceName})`,
+              0
+            )
+          : 0;
 
         const packagesJson = isDynamic ? '[]' : JSON.stringify([{ id: 1, name: "تفعيل فوري تلقائي", price: localPrice, usd_price: localPrice, api_service_id: s.id.toString(), api_service_type: svcType, status: "Available", discount: discount, fields: serviceFields }]);
         const fieldsJson = JSON.stringify(serviceFields);
