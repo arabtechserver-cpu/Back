@@ -1499,25 +1499,25 @@ async function autoSubmitUnlockerOrder(orderId) {
       }
     } else if (targetServiceType === 'server' || targetServiceType === 'remote') {
       // ── Server Order (primary) ─────────────────────────────────────────────
-        const serverFields = { ...customFields };
-        if (trimmedPlayerId) {
-          const hasKey = Object.keys(serverFields).some(k => k.toLowerCase().includes('player') || k.toLowerCase().includes('id') || k.toLowerCase().includes('imei'));
-          if (!hasKey) {
-            const primaryField = targetProviderFields.find(f => String(f.name || f.fieldname || f.api_name || f.field_id || '').toLowerCase().includes('player')) || targetProviderFields[0];
-            if (primaryField) {
-             const apiName = String(primaryField.field_id || primaryField.api_name || primaryField.label || primaryField.fieldname || primaryField.name || '').trim();
-             serverFields[apiName || 'PlayerID'] = trimmedPlayerId;
+      const serverFields = { ...customFields };
+      if (trimmedPlayerId) {
+        const hasKey = Object.keys(serverFields).some(k => k.toLowerCase().includes('player') || k.toLowerCase().includes('id') || k.toLowerCase().includes('imei'));
+        if (!hasKey) {
+          const primaryField = targetProviderFields.find(f => String(f.name || f.fieldname || f.api_name || f.field_id || '').toLowerCase().includes('player')) || targetProviderFields[0];
+          if (primaryField) {
+            const apiName = String(primaryField.field_id || primaryField.api_name || primaryField.label || primaryField.fieldname || primaryField.name || '').trim();
+            serverFields[apiName || 'PlayerID'] = trimmedPlayerId;
           } else {
-             serverFields.PlayerID = trimmedPlayerId;
+            serverFields.PlayerID = trimmedPlayerId;
           }
         }
       }
+      const serverCustomFieldEncoded = buildCustomField(serverFields);
       const serverPayload = {
         ID: targetApiServiceId,
         QNT: targetApiQuantity,
         REFERENCE: order.id.toString(),
-        ...(customFieldEncoded ? { CUSTOMFIELD: customFieldEncoded } : {}),
-        ...serverFields
+        ...(serverCustomFieldEncoded ? { CUSTOMFIELD: serverCustomFieldEncoded } : {})
       };
       console.log(`[Auto Place Order #${orderId}] Trying placeserverorder | QNT=${targetApiQuantity}`);
       responseData = await callDhruApi(apiUrl, apiUser, apiKey, 'placeserverorder', serverPayload).catch(e => ({ ERROR: e.message }));
@@ -1530,8 +1530,7 @@ async function autoSubmitUnlockerOrder(orderId) {
           ID: targetApiServiceId,
           IMEI: fallbackImei,
           REFERENCE: order.id.toString(),
-          ...(customFieldEncoded ? { CUSTOMFIELD: customFieldEncoded } : {}),
-          ...customFields
+          ...(customFieldEncoded ? { CUSTOMFIELD: customFieldEncoded } : {})
         };
         responseData = await callDhruApi(apiUrl, apiUser, apiKey, 'placeimeiorder', imeiPayload).catch(e => ({ ERROR: e.message }));
         
@@ -1547,8 +1546,7 @@ async function autoSubmitUnlockerOrder(orderId) {
         ID: targetApiServiceId,
         IMEI: fallbackImei,
         REFERENCE: order.id.toString(),
-        ...(customFieldEncoded ? { CUSTOMFIELD: customFieldEncoded } : {}),
-        ...customFields
+        ...(customFieldEncoded ? { CUSTOMFIELD: customFieldEncoded } : {})
       };
       console.log(`[Auto Place Order #${orderId}] Trying placeimeiorder | IMEI=${fallbackImei}`);
       responseData = await callDhruApi(apiUrl, apiUser, apiKey, 'placeimeiorder', imeiPayload).catch(e => ({ ERROR: e.message }));
@@ -1570,10 +1568,13 @@ async function autoSubmitUnlockerOrder(orderId) {
             }
           }
         }
-        const serverPayload = { ID: targetApiServiceId, QNT: targetApiQuantity, REFERENCE: order.id.toString(), ...serverFields };
-        if (customFieldEncoded) {
-          serverPayload.CUSTOMFIELD = customFieldEncoded;
-        }
+        const serverCustomFieldEncoded = buildCustomField(serverFields);
+        const serverPayload = {
+          ID: targetApiServiceId,
+          QNT: targetApiQuantity,
+          REFERENCE: order.id.toString(),
+          ...(serverCustomFieldEncoded ? { CUSTOMFIELD: serverCustomFieldEncoded } : {})
+        };
         responseData = await callDhruApi(apiUrl, apiUser, apiKey, 'placeserverorder', serverPayload).catch(e => ({ ERROR: e.message }));
         
         if (responseData.ERROR && (getDhruErrorMessage(responseData).includes("Command Not Found") || getDhruErrorMessage(responseData).includes("Action Not Found") || getDhruErrorMessage(responseData).includes("Service Not Active") || getDhruErrorMessage(responseData).includes("Action is not allowed"))) {
