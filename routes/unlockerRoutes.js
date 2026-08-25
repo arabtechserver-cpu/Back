@@ -13,6 +13,63 @@ const submittingOrders = new Set();
 const { callDhruApi, stripHtml, getDhruErrorMessage, extractCustomFields, normalizeCustomField, parseDhruServices, buildStoredCustomField } = require('../services/dhruClient');
 const { placeDynamicOrder } = require('../services/dynamicClient');
 
+function findDhruServiceInResponse(data, serviceId) {
+  const targetId = String(serviceId || '').trim();
+  if (!targetId || !data) return null;
+
+  if (data.SUCCESS === true && Array.isArray(data.RESULT)) {
+    for (const group of data.RESULT) {
+      if (Array.isArray(group?.SERVICES)) {
+        const found = group.SERVICES.find((service) => String(service?.SERVICEID || '').trim() === targetId);
+        if (found) return found;
+      }
+    }
+  }
+
+  if (Array.isArray(data.SUCCESS)) {
+    const first = data.SUCCESS[0];
+    if (first?.LIST && typeof first.LIST === 'object') {
+      for (const categoryKey of Object.keys(first.LIST)) {
+        const categoryValue = first.LIST[categoryKey];
+        if (Array.isArray(categoryValue)) {
+          const found = categoryValue.find((service) => String(service?.SERVICEID || '').trim() === targetId);
+          if (found) return found;
+          continue;
+        }
+
+        if (categoryValue && typeof categoryValue === 'object') {
+          const servicesObj = categoryValue.SERVICES;
+          if (Array.isArray(servicesObj)) {
+            const found = servicesObj.find((service) => String(service?.SERVICEID || '').trim() === targetId);
+            if (found) return found;
+          } else if (servicesObj && typeof servicesObj === 'object') {
+            for (const serviceKey of Object.keys(servicesObj)) {
+              const service = servicesObj[serviceKey];
+              if (String(service?.SERVICEID || '').trim() === targetId) return service;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+async function fetchLiveDhruStoredFields(apiUrl, apiUser, apiKey, serviceId, serviceType) {
+  const action = serviceType === 'server'
+    ? 'serverservicelist'
+    : (serviceType === 'remote' ? 'remoteservicelist' : 'imeiservicelist');
+
+  const response = await callDhruApi(apiUrl, apiUser, apiKey, action);
+  const rawService = findDhruServiceInResponse(response, serviceId);
+  if (!rawService) return [];
+
+  return extractCustomFields(rawService)
+    .map((field) => buildStoredCustomField(field))
+    .filter(Boolean);
+}
+
 // 1. Get Settings (Admin Protected or Public fallback)
 router.get('/settings', async (req, res) => {
   try {
@@ -1294,6 +1351,16 @@ async function autoSubmitUnlockerOrder(orderId) {
       selectedPackageFields = [];
     }
 
+    let liveProviderFields = [];
+    try {
+      liveProviderFields = await fetchLiveDhruStoredFields(apiUrl, apiUser, apiKey, targetApiServiceId, targetServiceType);
+      if (liveProviderFields.length > 0) {
+        console.log(`[Auto Place Order #${orderId}] Loaded ${liveProviderFields.length} live provider fields for service ${targetApiServiceId}.`);
+      }
+    } catch (e) {
+      console.warn(`[Auto Place Order #${orderId}] Failed to fetch live provider fields: ${e.message}`);
+    }
+
     const normalizeProviderFieldLookupKey = (value) => String(value || '')
       .trim()
       .toLowerCase()
@@ -1302,13 +1369,15 @@ async function autoSubmitUnlockerOrder(orderId) {
       .replace(/\s+/g, ' ')
       .trim();
 
-    const targetProviderFields = selectedPackageFields.length > 0 ? selectedPackageFields : storedServiceFields;
+    const targetProviderFields = liveProviderFields.length > 0
+      ? liveProviderFields
+      : (selectedPackageFields.length > 0 ? selectedPackageFields : storedServiceFields);
     const providerFieldNames = new Map();
     const providerFieldDefinitions = targetProviderFields.map((field) => {
-      const apiName = String(field.api_name || field.label || field.field_id || field.name || '').trim();
+      const apiName = String(field.api_name || field.label || field.fieldname || field.field_id || field.name || '').trim();
       const fieldId = String(field.field_id || field.id || apiName).trim();
       const outboundKey = fieldId || apiName;
-      const aliases = [field.id, field.name, field.field_id, field.label, apiName]
+      const aliases = [field.id, field.name, field.fieldname, field.field_id, field.label, apiName]
         .map((value) => String(value || '').trim())
         .filter(Boolean);
 
@@ -1328,7 +1397,7 @@ async function autoSubmitUnlockerOrder(orderId) {
 
     const isPrimaryImeiField = (field) => {
       const combined = String(
-        field?.api_name || field?.label || field?.field_id || field?.name || ''
+        field?.api_name || field?.label || field?.fieldname || field?.field_id || field?.name || ''
       )
         .trim()
         .toLowerCase();
@@ -1430,14 +1499,13 @@ async function autoSubmitUnlockerOrder(orderId) {
       }
     } else if (targetServiceType === 'server' || targetServiceType === 'remote') {
       // ── Server Order (primary) ─────────────────────────────────────────────
-      const serverFields = { ...customFields };
-      if (trimmedPlayerId) {
-        const hasKey = Object.keys(serverFields).some(k => k.toLowerCase().includes('player') || k.toLowerCase().includes('id') || k.toLowerCase().includes('imei'));
-        if (!hasKey) {
-          const targetFields = selectedPackageFields.length > 0 ? selectedPackageFields : storedServiceFields;
-          const primaryField = targetFields.find(f => String(f.name || f.api_name || f.field_id || '').toLowerCase().includes('player')) || targetFields[0];
-          if (primaryField) {
-             const apiName = String(primaryField.api_name || primaryField.label || primaryField.field_id || primaryField.name || '').trim();
+        const serverFields = { ...customFields };
+        if (trimmedPlayerId) {
+          const hasKey = Object.keys(serverFields).some(k => k.toLowerCase().includes('player') || k.toLowerCase().includes('id') || k.toLowerCase().includes('imei'));
+          if (!hasKey) {
+            const primaryField = targetProviderFields.find(f => String(f.name || f.fieldname || f.api_name || f.field_id || '').toLowerCase().includes('player')) || targetProviderFields[0];
+            if (primaryField) {
+             const apiName = String(primaryField.field_id || primaryField.api_name || primaryField.label || primaryField.fieldname || primaryField.name || '').trim();
              serverFields[apiName || 'PlayerID'] = trimmedPlayerId;
           } else {
              serverFields.PlayerID = trimmedPlayerId;
@@ -1493,10 +1561,9 @@ async function autoSubmitUnlockerOrder(orderId) {
         if (trimmedPlayerId) {
           const hasKey = Object.keys(serverFields).some(k => k.toLowerCase().includes('player') || k.toLowerCase().includes('id') || k.toLowerCase().includes('imei'));
           if (!hasKey) {
-            const targetFields = selectedPackageFields.length > 0 ? selectedPackageFields : storedServiceFields;
-            const primaryField = targetFields.find(f => String(f.name || f.api_name || f.field_id || '').toLowerCase().includes('player')) || targetFields[0];
+            const primaryField = targetProviderFields.find(f => String(f.name || f.fieldname || f.api_name || f.field_id || '').toLowerCase().includes('player')) || targetProviderFields[0];
             if (primaryField) {
-               const apiName = String(primaryField.api_name || primaryField.label || primaryField.field_id || primaryField.name || '').trim();
+               const apiName = String(primaryField.field_id || primaryField.api_name || primaryField.label || primaryField.fieldname || primaryField.name || '').trim();
                serverFields[apiName || 'PlayerID'] = trimmedPlayerId;
             } else {
                serverFields.PlayerID = trimmedPlayerId;
