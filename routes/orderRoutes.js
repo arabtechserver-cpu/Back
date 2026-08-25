@@ -483,7 +483,7 @@ router.get('/', authMiddleware, async (req, res) => {
 // Update order status and code (Admin Protected)
 router.put('/:id', authMiddleware, async (req, res) => {
   const { id } = req.params;
-  const { status, code, download_link, download_link_title } = req.body; // pending, completed, cancelled
+  const { status, code, download_link, download_link_title, player_id, custom_fields } = req.body; // pending, completed, cancelled
 
   if (status && !['pending', 'completed', 'cancelled'].includes(status)) {
     return res.status(400).json({ message: 'حالة الطلب غير صالحة.' });
@@ -499,6 +499,10 @@ router.put('/:id', authMiddleware, async (req, res) => {
     const nextCode = code !== undefined ? code : (order.code || '');
     const nextDownloadLink = download_link !== undefined ? download_link : (order.download_link || '');
     const nextDownloadLinkTitle = download_link_title !== undefined ? download_link_title : (order.download_link_title || '');
+    const nextPlayerId = player_id !== undefined ? String(player_id || '').trim() : String(order.player_id || '').trim();
+    const nextCustomFields = custom_fields !== undefined
+      ? JSON.stringify(custom_fields || {})
+      : (order.custom_fields || '{}');
 
     // Refund wallet if status changes to cancelled and wasn't already cancelled
     if (nextStatus === 'cancelled' && order.status !== 'cancelled' && order.payment_method === 'wallet' && order.customer_id) {
@@ -555,7 +559,10 @@ router.put('/:id', authMiddleware, async (req, res) => {
       }
     }
 
-    await runQuery('UPDATE orders SET status = ?, code = ?, download_link = ?, download_link_title = ? WHERE id = ?', [nextStatus, nextCode, nextDownloadLink, nextDownloadLinkTitle, id]);
+    await runQuery(
+      'UPDATE orders SET status = ?, code = ?, download_link = ?, download_link_title = ?, player_id = ?, custom_fields = ? WHERE id = ?',
+      [nextStatus, nextCode, nextDownloadLink, nextDownloadLinkTitle, nextPlayerId, nextCustomFields, id]
+    );
 
     // Send WhatsApp + Gmail notification to customer if status/code changes
     if ((order.phone || order.customer_id) && (nextStatus !== order.status || nextCode !== (order.code || '') || nextDownloadLink !== (order.download_link || ''))) {
@@ -568,7 +575,18 @@ router.put('/:id', authMiddleware, async (req, res) => {
       })();
     }
 
-    res.json({ message: 'تم تحديث الطلب بنجاح.', id, status: nextStatus, code: nextCode, download_link: nextDownloadLink, download_link_title: nextDownloadLinkTitle });
+    res.json({
+      message: 'تم تحديث الطلب بنجاح.',
+      id,
+      status: nextStatus,
+      code: nextCode,
+      download_link: nextDownloadLink,
+      download_link_title: nextDownloadLinkTitle,
+      player_id: nextPlayerId,
+      custom_fields: custom_fields !== undefined ? (custom_fields || {}) : (() => {
+        try { return typeof order.custom_fields === 'string' ? JSON.parse(order.custom_fields || '{}') : (order.custom_fields || {}); } catch { return {}; }
+      })()
+    });
   } catch (error) {
     console.error('Update order error:', error);
     res.status(500).json({ message: 'حدث خطأ أثناء تحديث الطلب.' });
