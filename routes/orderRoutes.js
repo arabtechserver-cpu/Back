@@ -143,7 +143,7 @@ router.post('/', async (req, res) => {
   try {
     // Verify service and get parent category name and download link
     const serviceInfo = await getQuery(`
-      SELECT s.name as service_name, s.download_link, s.download_link_title, s.api_source, s.api_provider_id, c.name as category_name 
+      SELECT s.name as service_name, s.download_link, s.download_link_title, s.api_source, s.api_provider_id, s.api_service_id, s.api_service_type, s.packages, s.fields, c.name as category_name 
       FROM services s 
       JOIN categories c ON s.category_id = c.id 
       WHERE s.id = ?
@@ -217,9 +217,55 @@ router.post('/', async (req, res) => {
       }
     }
 
+    const parseJsonArray = (value) => {
+      if (Array.isArray(value)) return value;
+      if (typeof value !== 'string' || !value.trim()) return [];
+      try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    };
+
+    const storedPackages = parseJsonArray(serviceInfo.packages);
+    const storedFields = parseJsonArray(serviceInfo.fields);
+    let matchedPackage = null;
+
+    if (package_name) {
+      const normalizedPackageName = String(package_name).trim().toLowerCase();
+      matchedPackage = storedPackages.find((pkg) => (
+        String(pkg?.name || '').trim().toLowerCase() === normalizedPackageName
+      )) || storedPackages.find((pkg) => (
+        String(pkg?.name || '').trim().toLowerCase().includes(normalizedPackageName)
+        || normalizedPackageName.includes(String(pkg?.name || '').trim().toLowerCase())
+      )) || null;
+    }
+
+    const resolvedApiServiceId = String(
+      matchedPackage?.api_service_id || serviceInfo.api_service_id || ''
+    ).trim();
+    const resolvedApiServiceType = String(
+      matchedPackage?.api_service_type || serviceInfo.api_service_type || 'imei'
+    ).trim();
+    const resolvedFieldSnapshot = Array.isArray(matchedPackage?.fields) && matchedPackage.fields.length > 0
+      ? matchedPackage.fields
+      : storedFields;
+    const serviceSnapshot = {
+      service_id: service_id,
+      api_service_id: resolvedApiServiceId,
+      api_service_type: resolvedApiServiceType,
+      api_source: serviceInfo.api_source || '',
+      api_provider_id: serviceInfo.api_provider_id || null,
+      package_name: package_name || '',
+      service_fields: storedFields,
+      selected_package: matchedPackage || null,
+      resolved_fields: resolvedFieldSnapshot
+    };
+
     const result = await runQuery(`
-      INSERT INTO orders (service_id, service_name, category_name, player_id, phone, package_name, package_price, customer_id, payment_method, sender_phone, transfer_to, quantity, receipt_image, transfer_amount, download_link, download_link_title, api_source, custom_fields)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO orders (service_id, service_name, category_name, player_id, phone, package_name, package_price, customer_id, payment_method, sender_phone, transfer_to, quantity, receipt_image, transfer_amount, download_link, download_link_title, api_source, api_service_id, api_service_type, api_provider_id, custom_fields, service_snapshot)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
       service_id, 
       serviceInfo.service_name, 
@@ -238,7 +284,11 @@ router.post('/', async (req, res) => {
       serviceInfo.download_link || '',
       serviceInfo.download_link_title || '',
       serviceInfo.api_source || '',
-      JSON.stringify(custom_fields || {})
+      resolvedApiServiceId,
+      resolvedApiServiceType,
+      serviceInfo.api_provider_id || null,
+      JSON.stringify(custom_fields || {}),
+      JSON.stringify(serviceSnapshot)
     ]);
 
     if (customerId && customer && normalizedPaymentMethod === 'wallet') {

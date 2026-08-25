@@ -1272,19 +1272,51 @@ async function autoSubmitUnlockerOrder(orderId) {
     // allowing admin force-retries. The auto-trigger path (order approval)
     // should still skip to avoid hammering the provider on duplicate events.
     
+    const parseJsonArray = (value) => {
+      if (Array.isArray(value)) return value;
+      if (typeof value !== 'string' || !value.trim()) return [];
+      try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch (e) {
+        return [];
+      }
+    };
+
+    const parseJsonObject = (value) => {
+      if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+      if (typeof value !== 'string' || !value.trim()) return null;
+      try {
+        const parsed = JSON.parse(value);
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+      } catch (e) {
+        return null;
+      }
+    };
+
+    const serviceSnapshot = parseJsonObject(order.service_snapshot);
     const service = await getQuery("SELECT api_service_id, api_source, api_service_type, packages, fields, api_provider_id FROM services WHERE id = ?", [order.service_id]);
-    if (!service) {
+    if (!service && !serviceSnapshot) {
       throw new Error('الخدمة غير موجودة.');
     }
 
-    let targetApiServiceId = service.api_service_id;
+    const serviceRecord = service || {
+      api_service_id: serviceSnapshot?.api_service_id || order.api_service_id || '',
+      api_source: serviceSnapshot?.api_source || order.api_source || '',
+      api_service_type: serviceSnapshot?.api_service_type || order.api_service_type || 'imei',
+      packages: JSON.stringify(serviceSnapshot?.selected_package ? [serviceSnapshot.selected_package] : []),
+      fields: JSON.stringify(serviceSnapshot?.service_fields || serviceSnapshot?.resolved_fields || []),
+      api_provider_id: serviceSnapshot?.api_provider_id || order.api_provider_id || null
+    };
+
+    let targetApiServiceId = serviceRecord.api_service_id || order.api_service_id || serviceSnapshot?.api_service_id || '';
     // Default service type from the service row, may be overridden by package
-    let targetServiceType = service.api_service_type || 'imei';
+    let targetServiceType = serviceRecord.api_service_type || order.api_service_type || serviceSnapshot?.api_service_type || 'imei';
     let targetApiQuantity = order.quantity ? parseInt(order.quantity) : 1;
 
     if (order.package_name) {
       try {
-        const pkgs = typeof service.packages === 'string' ? JSON.parse(service.packages) : (service.packages || []);
+        const pkgs = parseJsonArray(serviceRecord.packages);
         let matchingPkg = pkgs.find(p => String(p.name).trim().toLowerCase() === String(order.package_name).trim().toLowerCase());
         
         if (!matchingPkg) {
@@ -1315,7 +1347,7 @@ async function autoSubmitUnlockerOrder(orderId) {
       throw new Error('تعذر تحديد معرّف الخدمة الخارجي (API Service ID) لهذه الحزمة.');
     }
     
-    const provider = await resolveApiProvider(service.api_provider_id, service.api_source);
+    const provider = await resolveApiProvider(serviceRecord.api_provider_id || order.api_provider_id, serviceRecord.api_source || order.api_source);
     if (!provider) {
       throw new Error('مزود الـ API المرتبط بهذا الطلب غير موجود.');
     }
@@ -1326,27 +1358,16 @@ async function autoSubmitUnlockerOrder(orderId) {
     
     const trimmedPlayerId = (order.player_id || '').trim();
 
-    const parseStoredFields = (value) => {
-      if (Array.isArray(value)) return value;
-      if (typeof value !== 'string' || !value.trim()) return [];
-      try {
-        const parsed = JSON.parse(value);
-        return Array.isArray(parsed) ? parsed : [];
-      } catch (e) {
-        return [];
-      }
-    };
-
-    const storedServiceFields = parseStoredFields(service.fields);
+    const storedServiceFields = parseJsonArray(serviceSnapshot?.resolved_fields?.length ? serviceSnapshot.resolved_fields : serviceRecord.fields);
     let selectedPackageFields = [];
     try {
-      const storedPackages = typeof service.packages === 'string' ? JSON.parse(service.packages) : (service.packages || []);
+      const storedPackages = parseJsonArray(serviceRecord.packages);
       const selectedPackage = storedPackages.find(pkg =>
         String(pkg.name || '').trim().toLowerCase() === String(order.package_name || '').trim().toLowerCase()
       ) || storedPackages.find(pkg =>
         String(pkg.name || '').trim().toLowerCase().includes(String(order.package_name || '').trim().toLowerCase())
       );
-      selectedPackageFields = parseStoredFields(selectedPackage?.fields);
+      selectedPackageFields = parseJsonArray(selectedPackage?.fields);
     } catch (e) {
       selectedPackageFields = [];
     }

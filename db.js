@@ -624,6 +624,8 @@ async function createTables() {
     ALTER TABLE orders ADD COLUMN IF NOT EXISTS custom_fields TEXT DEFAULT '';
     ALTER TABLE orders ADD COLUMN IF NOT EXISTS api_source VARCHAR(100) DEFAULT '';
     ALTER TABLE orders ADD COLUMN IF NOT EXISTS api_service_id VARCHAR(100) DEFAULT '';
+    ALTER TABLE orders ADD COLUMN IF NOT EXISTS api_service_type VARCHAR(20) DEFAULT '';
+    ALTER TABLE orders ADD COLUMN IF NOT EXISTS service_snapshot TEXT DEFAULT '';
 
     CREATE TABLE IF NOT EXISTS complaints (
       id SERIAL PRIMARY KEY,
@@ -800,8 +802,10 @@ async function createTables() {
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS download_link_title VARCHAR(255) DEFAULT '';
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS api_order_id VARCHAR(100);
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS api_source VARCHAR(100);
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS api_service_type VARCHAR(20) DEFAULT '';
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS api_status VARCHAR(255);
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS custom_fields TEXT;
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS service_snapshot TEXT DEFAULT '';
       ALTER TABLE services ADD COLUMN IF NOT EXISTS min_quantity INT DEFAULT 100;
       ALTER TABLE services ADD COLUMN IF NOT EXISTS max_quantity INT DEFAULT 0;
       ALTER TABLE services ADD COLUMN IF NOT EXISTS is_popular BOOLEAN DEFAULT false;
