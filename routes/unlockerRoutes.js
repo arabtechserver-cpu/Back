@@ -1302,16 +1302,29 @@ async function autoSubmitUnlockerOrder(orderId) {
       .replace(/\s+/g, ' ')
       .trim();
 
+    const targetProviderFields = selectedPackageFields.length > 0 ? selectedPackageFields : storedServiceFields;
     const providerFieldNames = new Map();
-    for (const field of (selectedPackageFields.length > 0 ? selectedPackageFields : storedServiceFields)) {
+    const providerFieldDefinitions = targetProviderFields.map((field) => {
       const apiName = String(field.api_name || field.label || field.field_id || field.name || '').trim();
-      if (!apiName) continue;
-      for (const key of [field.id, field.name, field.field_id, field.label, apiName]) {
-        if (!key) continue;
-        providerFieldNames.set(String(key).toLowerCase(), apiName);
-        providerFieldNames.set(normalizeProviderFieldLookupKey(key), apiName);
+      const fieldId = String(field.field_id || field.id || apiName).trim();
+      const outboundKey = fieldId || apiName;
+      const aliases = [field.id, field.name, field.field_id, field.label, apiName]
+        .map((value) => String(value || '').trim())
+        .filter(Boolean);
+
+      for (const key of aliases) {
+        providerFieldNames.set(String(key).toLowerCase(), outboundKey);
+        providerFieldNames.set(normalizeProviderFieldLookupKey(key), outboundKey);
       }
-    }
+
+      return {
+        field,
+        apiName,
+        fieldId,
+        outboundKey,
+        aliases
+      };
+    });
 
     const isPrimaryImeiField = (field) => {
       const combined = String(
@@ -1331,6 +1344,7 @@ async function autoSubmitUnlockerOrder(orderId) {
     // the Dhru Fusion provider registered in their service definition.
     const SKIP_FIELDS = new Set(['player_id', 'phone', 'tel', 'sender_phone']);
     let customFields = {};
+    const matchedProviderOutboundKeys = new Set();
     if (order.custom_fields) {
       try {
         const parsed = typeof order.custom_fields === 'string' ? JSON.parse(order.custom_fields) : order.custom_fields;
@@ -1360,25 +1374,34 @@ async function autoSubmitUnlockerOrder(orderId) {
           if (SKIP_FIELDS.has(rawKey.toLowerCase()) || SKIP_FIELDS.has(k.toLowerCase()) || SKIP_FIELDS.has(providerKey.toLowerCase())) continue;
           if (v === null || v === undefined || String(v).trim() === '') continue;
           customFields[providerKey] = String(v).trim();
+          matchedProviderOutboundKeys.add(String(providerKey).trim());
         }
       } catch (e) {
         console.warn('[Auto Place Order] Failed to parse custom fields:', e.message);
       }
     }
 
-    const requiredProviderFields = (selectedPackageFields.length > 0 ? selectedPackageFields : storedServiceFields)
-      .filter((field) => field && field.required !== false)
-      .filter((field) => !isPrimaryImeiField(field))
-      .map((field) => String(field.api_name || field.label || field.field_id || field.name || '').trim())
-      .filter(Boolean);
+    const requiredProviderFields = providerFieldDefinitions
+      .filter(({ field }) => field && field.required !== false)
+      .filter(({ field }) => !isPrimaryImeiField(field))
+      .filter(({ outboundKey }) => !matchedProviderOutboundKeys.has(String(outboundKey).trim()))
+      .map(({ apiName, fieldId, outboundKey, aliases }) => ({
+        label: apiName || fieldId || outboundKey,
+        outboundKey,
+        aliases
+      }));
 
-    const missingProviderFields = requiredProviderFields.filter((fieldName) => {
-      const lookupKey = normalizeProviderFieldLookupKey(fieldName);
-      return !Object.keys(customFields).some((existingKey) => normalizeProviderFieldLookupKey(existingKey) === lookupKey && String(customFields[existingKey] || '').trim());
+    const missingProviderFields = requiredProviderFields.filter(({ outboundKey, aliases }) => {
+      if (matchedProviderOutboundKeys.has(String(outboundKey).trim())) return false;
+      return !Object.keys(customFields).some((existingKey) => {
+        if (!String(customFields[existingKey] || '').trim()) return false;
+        const existingLookup = normalizeProviderFieldLookupKey(existingKey);
+        return aliases.some((alias) => normalizeProviderFieldLookupKey(alias) === existingLookup);
+      });
     });
 
     if (missingProviderFields.length > 0) {
-      throw new Error(`الحقول المطلوبة للمزود ناقصة: ${missingProviderFields.join('، ')}`);
+      throw new Error(`الحقول المطلوبة للمزود ناقصة: ${missingProviderFields.map((field) => field.label).join('، ')}`);
     }
 
     const buildCustomField = (fields) => {
