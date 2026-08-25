@@ -1313,6 +1313,18 @@ async function autoSubmitUnlockerOrder(orderId) {
       }
     }
 
+    const isPrimaryImeiField = (field) => {
+      const combined = String(
+        field?.api_name || field?.label || field?.field_id || field?.name || ''
+      )
+        .trim()
+        .toLowerCase();
+
+      if (!combined) return false;
+      if (/(link|url|http|https|screenshot|hint)/i.test(combined)) return false;
+      return combined.includes('imei') || combined.includes('ecid') || combined.includes('serial number') || /\bsn\b/.test(combined);
+    };
+
     // Build custom fields object from order.custom_fields
     // IMPORTANT: Exclude standard fields (player_id, phone) — they are sent as IMEI/QNT directly.
     // Use the field_id (stripped of 'custom_' prefix) as the API key, since that is what
@@ -1354,8 +1366,27 @@ async function autoSubmitUnlockerOrder(orderId) {
       }
     }
 
-    // Dhru Fusion API requires custom fields spread into parameters payload natively.
-    // So we don't need a custom field builder, we just spread the object directly.
+    const requiredProviderFields = (selectedPackageFields.length > 0 ? selectedPackageFields : storedServiceFields)
+      .filter((field) => field && field.required !== false)
+      .filter((field) => !isPrimaryImeiField(field))
+      .map((field) => String(field.api_name || field.label || field.field_id || field.name || '').trim())
+      .filter(Boolean);
+
+    const missingProviderFields = requiredProviderFields.filter((fieldName) => {
+      const lookupKey = normalizeProviderFieldLookupKey(fieldName);
+      return !Object.keys(customFields).some((existingKey) => normalizeProviderFieldLookupKey(existingKey) === lookupKey && String(customFields[existingKey] || '').trim());
+    });
+
+    if (missingProviderFields.length > 0) {
+      throw new Error(`الحقول المطلوبة للمزود ناقصة: ${missingProviderFields.join('، ')}`);
+    }
+
+    const buildCustomField = (fields) => {
+      if (!fields || Object.keys(fields).length === 0) return undefined;
+      return Buffer.from(JSON.stringify(fields)).toString('base64');
+    };
+
+    const customFieldEncoded = buildCustomField(customFields);
 
     // ── Order Placement Logic ─────────────────────────────────────────────
     console.log(`[Auto Place Order #${orderId}] ServiceType=${targetServiceType} | ServiceID=${targetApiServiceId} | IMEI=${trimmedPlayerId} | CustomFields=${JSON.stringify(customFields)}`);
@@ -1394,6 +1425,7 @@ async function autoSubmitUnlockerOrder(orderId) {
         ID: targetApiServiceId,
         QNT: targetApiQuantity,
         REFERENCE: order.id.toString(),
+        ...(customFieldEncoded ? { CUSTOMFIELD: customFieldEncoded } : {}),
         ...serverFields
       };
       console.log(`[Auto Place Order #${orderId}] Trying placeserverorder | QNT=${targetApiQuantity}`);
@@ -1407,6 +1439,7 @@ async function autoSubmitUnlockerOrder(orderId) {
           ID: targetApiServiceId,
           IMEI: fallbackImei,
           REFERENCE: order.id.toString(),
+          ...(customFieldEncoded ? { CUSTOMFIELD: customFieldEncoded } : {}),
           ...customFields
         };
         responseData = await callDhruApi(apiUrl, apiUser, apiKey, 'placeimeiorder', imeiPayload).catch(e => ({ ERROR: e.message }));
@@ -1423,6 +1456,7 @@ async function autoSubmitUnlockerOrder(orderId) {
         ID: targetApiServiceId,
         IMEI: fallbackImei,
         REFERENCE: order.id.toString(),
+        ...(customFieldEncoded ? { CUSTOMFIELD: customFieldEncoded } : {}),
         ...customFields
       };
       console.log(`[Auto Place Order #${orderId}] Trying placeimeiorder | IMEI=${fallbackImei}`);
@@ -1447,6 +1481,9 @@ async function autoSubmitUnlockerOrder(orderId) {
           }
         }
         const serverPayload = { ID: targetApiServiceId, QNT: targetApiQuantity, REFERENCE: order.id.toString(), ...serverFields };
+        if (customFieldEncoded) {
+          serverPayload.CUSTOMFIELD = customFieldEncoded;
+        }
         responseData = await callDhruApi(apiUrl, apiUser, apiKey, 'placeserverorder', serverPayload).catch(e => ({ ERROR: e.message }));
         
         if (responseData.ERROR && (getDhruErrorMessage(responseData).includes("Command Not Found") || getDhruErrorMessage(responseData).includes("Action Not Found") || getDhruErrorMessage(responseData).includes("Service Not Active") || getDhruErrorMessage(responseData).includes("Action is not allowed"))) {
