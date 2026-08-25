@@ -1294,12 +1294,22 @@ async function autoSubmitUnlockerOrder(orderId) {
       selectedPackageFields = [];
     }
 
+    const normalizeProviderFieldLookupKey = (value) => String(value || '')
+      .trim()
+      .toLowerCase()
+      .replace(/^custom_/, '')
+      .replace(/[.\-_]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
     const providerFieldNames = new Map();
     for (const field of (selectedPackageFields.length > 0 ? selectedPackageFields : storedServiceFields)) {
       const apiName = String(field.api_name || field.label || field.field_id || field.name || '').trim();
       if (!apiName) continue;
-      for (const key of [field.id, field.name, field.field_id]) {
-        if (key) providerFieldNames.set(String(key).toLowerCase(), apiName);
+      for (const key of [field.id, field.name, field.field_id, field.label, apiName]) {
+        if (!key) continue;
+        providerFieldNames.set(String(key).toLowerCase(), apiName);
+        providerFieldNames.set(normalizeProviderFieldLookupKey(key), apiName);
       }
     }
 
@@ -1327,8 +1337,12 @@ async function autoSubmitUnlockerOrder(orderId) {
 
         for (const [k, v] of Object.entries(parsed)) {
           const rawKey = k.startsWith('custom_') ? k.replace('custom_', '') : k;
+          const normalizedLookupKey = normalizeProviderFieldLookupKey(k);
+          const normalizedRawLookupKey = normalizeProviderFieldLookupKey(rawKey);
           const providerKey = providerFieldNames.get(String(k).toLowerCase())
             || providerFieldNames.get(String(rawKey).toLowerCase())
+            || providerFieldNames.get(normalizedLookupKey)
+            || providerFieldNames.get(normalizedRawLookupKey)
             || rawKey;
           // Skip standard/system fields and empty values
           if (SKIP_FIELDS.has(rawKey.toLowerCase()) || SKIP_FIELDS.has(k.toLowerCase()) || SKIP_FIELDS.has(providerKey.toLowerCase())) continue;
