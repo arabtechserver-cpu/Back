@@ -1499,10 +1499,37 @@ async function autoSubmitUnlockerOrder(orderId) {
       return Buffer.from(JSON.stringify(fields)).toString('base64');
     };
 
+    // Find real IMEI / SN from order.custom_fields, customFields, or order.player_id
+    let extractedImei = '';
+    if (order.custom_fields) {
+      try {
+        const parsed = typeof order.custom_fields === 'string' ? JSON.parse(order.custom_fields) : order.custom_fields;
+        for (const [k, v] of Object.entries(parsed || {})) {
+          const cleanK = String(k).toLowerCase().replace(/^custom_/, '').trim();
+          if ((cleanK === 'imei' || cleanK === 'sn' || cleanK === 'serial' || cleanK === 'serial_number' || cleanK === 'ecid') && v && String(v).trim()) {
+            extractedImei = String(v).trim();
+            break;
+          }
+        }
+      } catch (e) {}
+    }
+    if (!extractedImei) {
+      for (const [k, v] of Object.entries(customFields || {})) {
+        const cleanK = String(k).toLowerCase().replace(/^custom_/, '').trim();
+        if ((cleanK === 'imei' || cleanK === 'sn' || cleanK === 'serial' || cleanK === 'serial_number' || cleanK === 'ecid') && v && String(v).trim()) {
+          extractedImei = String(v).trim();
+          break;
+        }
+      }
+    }
+    if (!extractedImei && trimmedPlayerId && !/^(undefined|null|000000000000000)$/i.test(trimmedPlayerId)) {
+      extractedImei = trimmedPlayerId;
+    }
+
     const customFieldEncoded = buildCustomField(customFields);
 
     // ── Order Placement Logic ─────────────────────────────────────────────
-    console.log(`[Auto Place Order #${orderId}] ServiceType=${targetServiceType} | ServiceID=${targetApiServiceId} | IMEI=${trimmedPlayerId} | CustomFields=${JSON.stringify(customFields)}`);
+    console.log(`[Auto Place Order #${orderId}] ServiceType=${targetServiceType} | ServiceID=${targetApiServiceId} | IMEI=${extractedImei || trimmedPlayerId} | CustomFields=${JSON.stringify(customFields)}`);
 
     let responseData = null;
 
@@ -1546,7 +1573,7 @@ async function autoSubmitUnlockerOrder(orderId) {
       if (responseData.ERROR) {
         let firstError = responseData;
         console.warn(`[Auto Place Order #${orderId}] placeserverorder failed (${getDhruErrorMessage(firstError)}), trying placeimeiorder as fallback...`);
-        const fallbackImei = trimmedPlayerId || '000000000000000';
+        const fallbackImei = extractedImei || trimmedPlayerId || '000000000000000';
         const imeiPayload = {
           ID: targetApiServiceId,
           IMEI: fallbackImei,
@@ -1554,15 +1581,10 @@ async function autoSubmitUnlockerOrder(orderId) {
           ...(customFieldEncoded ? { CUSTOMFIELD: customFieldEncoded } : {})
         };
         responseData = await callDhruApi(apiUrl, apiUser, apiKey, 'placeimeiorder', imeiPayload).catch(e => ({ ERROR: e.message }));
-        
-        if (responseData.ERROR && (getDhruErrorMessage(responseData).includes("Command Not Found") || getDhruErrorMessage(responseData).includes("Action Not Found") || getDhruErrorMessage(responseData).includes("Service Not Active") || getDhruErrorMessage(responseData).includes("Action is not allowed"))) {
-          // Restore original error if fallback action doesn't exist or service not active for it
-          responseData = firstError;
-        }
       }
     } else {
       // ── IMEI Order (primary, default) ─────────────────────────────────────
-      const fallbackImei = trimmedPlayerId || '000000000000000';
+      const fallbackImei = extractedImei || trimmedPlayerId || '000000000000000';
       const imeiPayload = {
         ID: targetApiServiceId,
         IMEI: fallbackImei,
