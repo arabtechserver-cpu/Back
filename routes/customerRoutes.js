@@ -728,6 +728,7 @@ router.get('/admin/customers', authMiddleware, async (req, res) => {
     const customers = (await allQuery(`
       SELECT id, username, email, phone, balance, balances,
              CASE WHEN password IS NULL OR password = '' THEN 0 ELSE 1 END as has_password,
+             google_id,
              is_vip,
              last_order_at, api_key, api_enabled, api_markup,
              api_blocked_services, api_allowed_ips, api_payment_mode
@@ -772,7 +773,8 @@ router.get('/admin/customers', authMiddleware, async (req, res) => {
         balance: Number(customer.balance || 0),
         balances: customer.balances ? (typeof customer.balances === 'string' ? JSON.parse(customer.balances) : customer.balances) : {},
         has_password: Boolean(customer.has_password),
-        password_masked: customer.has_password ? '********' : 'مسجل بجوجل',
+        google_id: customer.google_id || null,
+        password_masked: customer.google_id ? 'مسجل بجوجل' : (customer.has_password ? '********' : 'غير مسجل'),
         customer_level: computedLevel,
         is_vip: customer.is_vip === true || customer.is_vip === 'true' || customer.is_vip === 1,
         total_orders: orderInfo.count,
