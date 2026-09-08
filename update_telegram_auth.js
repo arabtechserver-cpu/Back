@@ -18,7 +18,7 @@ code = code.replace(
     const customer = await getQuery('SELECT * FROM customers WHERE telegram_chat_id = ?', [chatId]);
     const buttons = [[{ text: '🛒 تصفح الخدمات والأسعار', callback_data: 'browse_cats' }]];
     
-    let welcomeMsg = \`👋 مرحباً بك في بوت *عرب تك سيرفر*!\\n\\n📌 *قائمة الأوامر المتاحة:*\\n🔎 \\\`/track 1005\\\` - لتتبع طلب محدد برقمه\\n🔗 \\\`/unlink\\\` - لإلغاء ربط حسابك بهذا البوت\\n\\n\`;
+    let welcomeMsg = \`👋 مرحباً بك في بوت *سيرفر الوفاق (Al-Wefaq)*!\\n\\n📌 *قائمة الأوامر المتاحة:*\\n🔎 \\\`/track 1005\\\` - لتتبع طلب محدد برقمه\\n🔗 \\\`/unlink\\\` - لإلغاء ربط حسابك بهذا البوت\\n\\n\`;
     
     if (!customer) {
       welcomeMsg += \`⚠️ *أول مرة هنا؟* يجب عليك تسجيل الدخول أولاً لتتمكن من الشراء ومتابعة طلباتك.\\n\\nالرجاء اختيار طريقة تسجيل الدخول أو الربط من الأزرار بالأسفل:\`;

@@ -9,7 +9,7 @@ router.get('/', authMiddleware, async (req, res) => {
   try {
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
     const requests = await allQuery(`
-      SELECT id, customer_id, customer_username, amount, currency, sender_phone,
+      SELECT id, customer_id, customer_username, amount, currency, sender_phone, payment_method,
              notes, status, admin_note, created_at, processed_at
       FROM wallet_requests
       ORDER BY id DESC
@@ -136,8 +136,8 @@ router.post('/paypal/create-order', customerAuth, async (req, res) => {
       return res.status(400).json({ message: 'الحد الأدنى للشحن عبر PayPal هو 1 دولار.' });
     }
 
-    const returnUrl = `${process.env.PAYPAL_RETURN_URL || 'https://arab-tech1.online/wallet'}?paypal=success`;
-    const cancelUrl = `${process.env.PAYPAL_CANCEL_URL || 'https://arab-tech1.online/wallet'}?paypal=cancel`;
+    const returnUrl = `${process.env.PAYPAL_RETURN_URL || 'https://al-wefaq.center/wallet'}?paypal=success`;
+    const cancelUrl = `${process.env.PAYPAL_CANCEL_URL || 'https://al-wefaq.center/wallet'}?paypal=cancel`;
 
     const order = await paypal.createOrder(parsedAmount, returnUrl, cancelUrl);
 

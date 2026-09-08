@@ -3,7 +3,7 @@ const test = require('node:test');
 
 const { buildStoredCustomField, parseDhruServices } = require('../services/dhruClient');
 
-test('keeps provider custom fields and adds provider-required imei metadata field', () => {
+test('keeps provider custom fields and adds imei only when provider explicitly requires it in metadata', () => {
   const result = parseDhruServices({
     SUCCESS: [{
       LIST: {
@@ -14,6 +14,7 @@ test('keeps provider custom fields and adds provider-required imei metadata fiel
               SERVICEID: 1,
               SERVICETYPE: 'IMEI',
               SERVICENAME: 'Honor FRP',
+              Requires: 'IMEI,SN',
               CUSTOM: { customname: 'SN', custominfo: '' },
               'Requires.Custom': ''
             }
@@ -24,6 +25,30 @@ test('keeps provider custom fields and adds provider-required imei metadata fiel
   }, 'imei');
 
   assert.deepEqual(result[0].customFields.map((field) => field.fieldname), ['IMEI', 'SN']);
+});
+
+test('does not add imei field when provider only requires SN or other custom fields', () => {
+  const result = parseDhruServices({
+    SUCCESS: [{
+      LIST: {
+        'Honor Frp - Direct Source Services': {
+          GROUPNAME: 'Honor Frp - Direct Source Services',
+          SERVICES: {
+            1: {
+              SERVICEID: 1,
+              SERVICETYPE: 'IMEI',
+              SERVICENAME: 'Honor FRP',
+              Requires: 'SN',
+              CUSTOM: { customname: 'SN', custominfo: '' },
+              'Requires.Custom': ''
+            }
+          }
+        }
+      }
+    }]
+  }, 'imei');
+
+  assert.deepEqual(result[0].customFields.map((field) => field.fieldname), ['SN']);
 });
 
 test('does not infer fields from a service name when the provider returns none', () => {

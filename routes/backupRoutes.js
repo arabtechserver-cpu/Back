@@ -397,7 +397,7 @@ router.get('/download/:filename', (req, res) => {
     res.download(filePath, safeFilename);
   } catch (error) {
     console.error('Download auth error:', error);
-    return res.status(403).json({ message: 'رمز التوثيق غير صالح أو منتهي الصلاحية.' });
+    res.status(401).json({ message: 'رمز التوثيق غير صالح أو منتهي الصلاحية.' });
   }
 });
 
@@ -599,12 +599,12 @@ router.post('/restore/file', authMiddleware, async (req, res) => {
 
 // 6. Restore a backup by uploading JSON directly
 router.post('/restore/upload', authMiddleware, async (req, res) => {
-  try {
-    const { backupData } = req.body;
-    if (!backupData || !backupData.tables) {
-      return res.status(400).json({ message: 'بيانات النسخة الاحتياطية غير صالحة.' });
-    }
+  const { backupData } = req.body;
+  if (!backupData || typeof backupData !== 'object') {
+    return res.status(400).json({ message: 'بيانات النسخ الاحتياطي غير صالحة.' });
+  }
 
+  try {
     await restoreSnapshot(backupData);
     res.json({ message: 'تم استرجاع النسخة الاحتياطية بنجاح!' });
   } catch (error) {

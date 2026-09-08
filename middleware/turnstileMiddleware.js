@@ -1,7 +1,5 @@
 // middleware/turnstileMiddleware.js
 
-// middleware/turnstileMiddleware.js
-
 module.exports = async function turnstileMiddleware(req, res, next) {
   const secret = process.env.TURNSTILE_SECRET;
   
@@ -10,7 +8,7 @@ module.exports = async function turnstileMiddleware(req, res, next) {
     return next();
   }
 
-  const token = req.body['cf-turnstile-response'];
+  const token = req.body?.['cf-turnstile-response'] || req.body?.turnstileToken || req.headers?.['cf-turnstile-response'];
   const clientIp = req.headers['x-forwarded-for'] || req.socket?.remoteAddress;
 
   if (!token) {

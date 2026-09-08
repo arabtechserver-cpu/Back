@@ -7,7 +7,7 @@ async function test() {
     formData.append('action', 'provider_services');
 
     console.log("Sending request to live server...");
-    const res = await axios.post('https://arab-tech1.online/api/reseller/action', formData, {
+    const res = await axios.post('https://api.al-wefaq.center/api/reseller/action', formData, {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
     });
 

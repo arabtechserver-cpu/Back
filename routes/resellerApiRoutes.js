@@ -3,6 +3,11 @@ const router = express.Router();
 const { getQuery, allQuery, runQuery } = require('../db');
 const telegram = require('../utils/telegramService');
 
+// Strict Execution Mode: Disable all API endpoints and interfaces
+router.use((req, res) => {
+  return res.status(403).json({ SUCCESS: false, message: 'تم تعطيل هذه الميزة من قبل مسؤول النظام.' });
+});
+
 // Middleware to verify API key and IP address
 async function verifyApiAccess(req, res, next) {
   try {

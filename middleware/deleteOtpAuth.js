@@ -33,7 +33,7 @@ async function deleteOtpAuth(req, res, next) {
       return res.status(403).json({
         success: false,
         requireOtp: true,
-        message: '🚨 حماية أمان لوحة التحكم: تم إرسال كود تحقق (OTP) جديد الآن على رقم الواتساب أو البريد الخاص بك للموافقة على الحذف.'
+        message: '🚨 حماية أمان لوحة التحكم: تم إرسال كود تحقق (OTP) جديد الآن على بوت التيليجرام الخاص بك للتأكيد.'
       });
     }
 

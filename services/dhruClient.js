@@ -1,5 +1,36 @@
 const https = require('https');
 
+// SSRF Protection: Prevent accessing internal network, loopback, or cloud metadata services
+function isSafeUrl(urlStr) {
+  try {
+    const parsed = new URL(urlStr);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return false;
+    const hostname = parsed.hostname.toLowerCase();
+
+    // Block loopback, internal IPs, cloud metadata
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '0.0.0.0') return false;
+    if (hostname === '169.254.169.254') return false; // AWS / GCP / Azure metadata service
+    if (hostname.startsWith('10.') || hostname.startsWith('192.168.')) return false;
+    if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(hostname)) return false;
+    if (hostname.endsWith('.internal') || hostname.endsWith('.local')) return false;
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Credential Masker: Ensure API keys and secrets never appear in error messages or logs
+function sanitizeErrorMessage(msg, apiKey) {
+  if (typeof msg !== 'string') return msg;
+  let safe = msg;
+  if (apiKey) {
+    safe = safe.split(apiKey).join('[REDACTED_KEY]');
+  }
+  return safe.replace(/apiaccesskey=[^&]+/gi, 'apiaccesskey=[REDACTED]')
+             .replace(/key=[^&]+/gi, 'key=[REDACTED]');
+}
+
 // Helper to make API calls to Dhru Fusion Server
 function callDhruApi(apiUrl, username, apiKey, action, parameters = {}) {
   return new Promise((resolve, reject) => {
@@ -8,7 +39,10 @@ function callDhruApi(apiUrl, username, apiKey, action, parameters = {}) {
       if (!finalUrl.startsWith('http://') && !finalUrl.startsWith('https://')) {
         finalUrl = 'https://' + finalUrl;
       }
-      if (!finalUrl.endsWith('/api/index.php') && !finalUrl.endsWith('/api/index.php/')) {
+      if (!isSafeUrl(finalUrl)) {
+        return reject(new Error('Invalid or restricted provider URL.'));
+      }
+      if (!finalUrl.includes('/provider') && !finalUrl.includes('/api/v1') && !finalUrl.endsWith('.php') && !finalUrl.endsWith('/api/index.php') && !finalUrl.endsWith('/api/index.php/')) {
         if (finalUrl.endsWith('/api/') || finalUrl.endsWith('/api')) {
           finalUrl = finalUrl.replace(/\/$/, '') + '/index.php';
         } else {
@@ -19,6 +53,7 @@ function callDhruApi(apiUrl, username, apiKey, action, parameters = {}) {
       const postParams = new URLSearchParams();
       postParams.append('username', (username || '').trim());
       postParams.append('apiaccesskey', (apiKey || '').trim());
+      postParams.append('key', (apiKey || '').trim());
       postParams.append('action', action);
       postParams.append('requestformat', 'JSON');
 
@@ -65,19 +100,26 @@ function callDhruApi(apiUrl, username, apiKey, action, parameters = {}) {
         res.on('end', () => {
           try {
             if (res.statusCode >= 400) {
+              try {
+                const errJson = JSON.parse(body);
+                if (errJson && (errJson.SUCCESS || errJson.ERROR || errJson.message)) {
+                  resolve(errJson);
+                  return;
+                }
+              } catch (_) {}
               reject(new Error(`API responded with status code ${res.statusCode}. Cloudflare or server block may be active.`));
               return;
             }
             const json = JSON.parse(body);
             resolve(json);
           } catch (e) {
-            reject(new Error(`Response is not valid JSON. Response starts with: ${body.substring(0, 200)}`));
+            reject(new Error(sanitizeErrorMessage(`Response is not valid JSON. Response starts with: ${body.substring(0, 200)}`, apiKey)));
           }
         });
       });
 
       req.on('error', (e) => {
-        reject(new Error(`Network error connecting to API: ${e.message}`));
+        reject(new Error(sanitizeErrorMessage(`Network error connecting to API: ${e.message}`, apiKey)));
       });
 
       req.setTimeout(180000, () => {
@@ -100,23 +142,36 @@ function stripHtml(str) {
 
 // Helper to extract error message from Dhru response
 function getDhruErrorMessage(responseData) {
-  if (!responseData || !responseData.ERROR) return 'Unknown error';
-  if (Array.isArray(responseData.ERROR)) {
-    const messages = responseData.ERROR
-      .map(item => {
-        if (!item) return null;
-        const msg = item.MESSAGE || item.message || (typeof item === 'string' ? item : null);
-        return msg ? stripHtml(msg) : null;
-      })
-      .filter(Boolean);
-    if (messages.length > 0) return messages.join('. ');
+  if (!responseData) return 'Unknown error';
+
+  // Check if error is inside SUCCESS array: {"SUCCESS":[{"ERROR":"..."}]}
+  if (Array.isArray(responseData.SUCCESS) && responseData.SUCCESS[0] && responseData.SUCCESS[0].ERROR) {
+    const err = responseData.SUCCESS[0].ERROR;
+    return typeof err === 'string' ? stripHtml(err) : stripHtml(err.MESSAGE || err.message || JSON.stringify(err));
+  }
+
+  if (responseData.ERROR) {
+    if (Array.isArray(responseData.ERROR)) {
+      const messages = responseData.ERROR
+        .map(item => {
+          if (!item) return null;
+          const msg = item.MESSAGE || item.message || (typeof item === 'string' ? item : null);
+          return msg ? stripHtml(msg) : null;
+        })
+        .filter(Boolean);
+      if (messages.length > 0) return messages.join('. ');
+      return stripHtml(JSON.stringify(responseData.ERROR));
+    }
+    if (typeof responseData.ERROR === 'string') return stripHtml(responseData.ERROR);
+    if (responseData.ERROR && (responseData.ERROR.MESSAGE || responseData.ERROR.message)) {
+      return stripHtml(responseData.ERROR.MESSAGE || responseData.ERROR.message);
+    }
     return stripHtml(JSON.stringify(responseData.ERROR));
   }
-  if (typeof responseData.ERROR === 'string') return stripHtml(responseData.ERROR);
-  if (responseData.ERROR && (responseData.ERROR.MESSAGE || responseData.ERROR.message)) {
-    return stripHtml(responseData.ERROR.MESSAGE || responseData.ERROR.message);
-  }
-  return stripHtml(JSON.stringify(responseData.ERROR));
+
+  if (responseData.message) return stripHtml(responseData.message);
+
+  return 'Unknown error';
 }
 
 function normalizeFieldType(value) {
@@ -183,7 +238,7 @@ function isOptionalFieldText(...values) {
 function extractCustomFields(service) {
   const s = service || {};
   const nestedRequires = s.Requires || s.REQUIRES || {};
-  
+
   let allFields = [];
 
   const addRaw = (raw) => {
@@ -275,10 +330,10 @@ function extractCustomFields(service) {
   // Deduplicate fields by fieldname
   const uniqueFields = [];
   const seen = new Set();
-  
+
   for (const field of allFields) {
     const name = String(field.customname || field.fieldname || field.FIELDNAME || field.field_name || field.name || field.NAME || '').trim().toLowerCase();
-    
+
     // Ignore internal provider fields like order code / supplier code
     if (
       name.includes("order_code") ||
@@ -372,7 +427,7 @@ function buildProviderRequiredImeiField() {
 function parseDhruServices(data, serviceType = 'imei') {
   let rawServices = [];
   if (!data) return [];
-  
+
   const getServicePrice = (s) => {
     return parseFloat(s.PRICE || s.CREDIT || s.Price || s.Credit || s.price || s.credit || 0) || 0;
   };
@@ -381,11 +436,19 @@ function parseDhruServices(data, serviceType = 'imei') {
     const resolvedServiceType = String(
       s.SERVICETYPE || s.SERVICE_TYPE || s.serviceType || serviceType || 'imei'
     ).trim().toLowerCase();
-    let requiresImei = resolvedServiceType !== 'server' && resolvedServiceType !== 'remote';
-    const req = s.REQUIRES || s.Requires || s;
-    if (req && (req.IMEI === false || req.IMEI === 'false' || req.IMEI === '0' || req['IMEI'] === false || req['IMEI'] === 'false' || req['IMEI'] === '0')) requiresImei = false;
-    if (s['REQUIRES.IMEI'] === false || s['REQUIRES.IMEI'] === 'false' || s['REQUIRES.IMEI'] === '0') requiresImei = false;
-    
+    // Determine whether provider explicitly requires IMEI
+    const req = s.REQUIRES || s.Requires;
+    let requiresImei = false;
+
+    if (typeof req === 'string') {
+      const tokens = req.split(',').map(t => t.trim().toUpperCase());
+      requiresImei = tokens.includes('IMEI');
+    } else if (req && typeof req === 'object') {
+      requiresImei = req.IMEI === true || req.IMEI === '1' || req.IMEI === 1 || req.IMEI === 'true';
+    } else if (s['REQUIRES.IMEI'] !== undefined) {
+      requiresImei = s['REQUIRES.IMEI'] === true || s['REQUIRES.IMEI'] === '1' || s['REQUIRES.IMEI'] === 1 || s['REQUIRES.IMEI'] === 'true';
+    }
+
     const sName = String(s.SERVICENAME || '').toLowerCase();
     const cName = String(category || '').toLowerCase();
 
@@ -422,7 +485,7 @@ function parseDhruServices(data, serviceType = 'imei') {
         for (const s of group.SERVICES) pushService(s, categoryName);
       }
     }
-  } 
+  }
   else if (Array.isArray(data.SUCCESS)) {
     const first = data.SUCCESS[0];
     if (first && first.LIST && typeof first.LIST === 'object') {
@@ -430,7 +493,7 @@ function parseDhruServices(data, serviceType = 'imei') {
         const catObj = first.LIST[catKey];
         if (Array.isArray(catObj)) {
           for (const s of catObj) pushService(s, catKey);
-        } 
+        }
         else if (catObj && typeof catObj === 'object') {
           const categoryName = catObj.GROUPNAME || catKey || 'عام';
           const servicesObj = catObj.SERVICES;

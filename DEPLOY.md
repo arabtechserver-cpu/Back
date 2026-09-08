@@ -31,29 +31,30 @@
 
 ## 🌐 النشر الفعلي على سيرفر خارجي (Production VPS Deployment)
 
-عند النشر على خادم حقيقي (سيرفر خارجي مع دومين مخصص مثل `arab-tech1.online`)، اتبع الخطوات التالية لتهيئة روابط الـ API:
+عند النشر على خادم حقيقي (سيرفر خارجي مع دومين مخصص مثل `al-wefaq.center`)، اتبع الخطوات التالية لتهيئة روابط الـ API:
 
 ### 1. إعداد روابط النطاق (Domain Name / Reverse Proxy)
 يُوصى بتوجيه خادم الويب (مثل Nginx أو Caddy) كوكيل عكسي (Reverse Proxy):
-- الدومين الرئيسي للواجهة: `https://arab-tech1.online` (يوجه للداخل على البورت `3000`)
-- دومين الخلفية (API): `https://spider-store-api.duckdns.org` أو دومين مخصص مثل `https://api.arab-tech1.online` (يوجه للداخل على البورت `5000`)
+- الدومين الرئيسي للواجهة: `https://al-wefaq.center` (يوجه للداخل على البورت `3000`)
+- دومين الخلفية (API): `https://api.al-wefaq.center` (يوجه للداخل على البورت `5000`)
 
 ### 2. البناء للإنتاج مع رابط الـ API المخصص
 عند تشغيل البناء على السيرفر الخارجي، يجب تمرير رابط خادم الـ API الحقيقي كمعامل بناء (Build Argument) لكي يتم تضمينه في ملفات Next.js الثابتة للعملاء:
 
-قم بتعديل قسم `args` للخدمة `frontend` داخل ملف [docker-compose.yml](file:///d:/pj/ge/docker-compose.yml):
+قم بتعديل قسم `args` للخدمة `frontend` داخل ملف [docker-compose.yml](file:///d:/pj/spider-store-front/backend/docker-compose.yml):
 ```yaml
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        - NEXT_PUBLIC_API_URL=https://api.yourdomain.com  # ضع رابط الـ API الخاص بسيرفرك هنا
+        - NEXT_PUBLIC_API_URL=https://api.al-wefaq.center
+        - NEXT_PUBLIC_SITE_URL=https://al-wefaq.center
 ```
 
 أو تشغيل أمر البناء مباشرة مع المعامل:
 ```bash
-docker-compose build --build-arg NEXT_PUBLIC_API_URL=https://api.yourdomain.com
+docker-compose build --build-arg NEXT_PUBLIC_API_URL=https://api.al-wefaq.center
 docker-compose up -d
 ```
 
@@ -68,15 +69,15 @@ JWT_SECRET=replace_with_a_long_random_secret
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=replace_with_a_strong_admin_password
 DATABASE_URL=postgres://user:password@host:port/database
-CORS_ORIGIN=https://arab-tech1.online,https://spider-store-api.duckdns.org
+CORS_ORIGIN=https://al-wefaq.center,https://api.al-wefaq.center
 DB_BACKUP_INTERVAL_MS=86400000
 DB_BACKUP_START_DELAY_MS=60000
 ```
 
 **Frontend**
 ```env
-NEXT_PUBLIC_API_URL=https://spider-store-api.duckdns.org
-NEXT_PUBLIC_SITE_URL=https://arab-tech1.online
+NEXT_PUBLIC_API_URL=https://api.al-wefaq.center
+NEXT_PUBLIC_SITE_URL=https://al-wefaq.center
 ```
 
 ---

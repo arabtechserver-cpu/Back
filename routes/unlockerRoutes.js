@@ -13,6 +13,9 @@ const submittingOrders = new Set();
 const { callDhruApi, stripHtml, getDhruErrorMessage, extractCustomFields, normalizeCustomField, parseDhruServices, buildStoredCustomField } = require('../services/dhruClient');
 const { placeDynamicOrder } = require('../services/dynamicClient');
 
+// ── Security Hardening: All provider / unlocker routes require Admin Authentication ──
+router.use(authMiddleware);
+
 function findDhruServiceInResponse(data, serviceId) {
   const targetId = String(serviceId || '').trim();
   if (!targetId || !data) return null;
@@ -70,47 +73,25 @@ async function fetchLiveDhruStoredFields(apiUrl, apiUser, apiKey, serviceId, ser
     .filter(Boolean);
 }
 
-// 1. Get Settings (Admin Protected or Public fallback)
-router.get('/settings', async (req, res) => {
+async function getActiveUnlockerCredentials() {
+  const apiKeyRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_key'");
+  const apiUrlRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_url'");
+  const apiUserRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_username'");
+  return {
+    apiKey: apiKeyRow && apiKeyRow.value ? apiKeyRow.value.trim() : 'ATS-f0feca4a984f3c1eec2ef6e1e1ff6dcf',
+    apiUrl: apiUrlRow && apiUrlRow.value ? apiUrlRow.value.trim() : 'https://arabtechproserver.tech/api/v1/provider',
+    apiUser: apiUserRow && apiUserRow.value ? apiUserRow.value.trim() : 'mina15g4y_pcm'
+  };
+}
+
+// 1. Get Settings (Admin Protected)
+router.get('/settings', authMiddleware, async (req, res) => {
   try {
-    const apiKeyRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_key'");
-    const apiUrlRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_url'");
-    const apiUserRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_username'");
-    
-    let apiKey = apiKeyRow ? apiKeyRow.value : '';
-    let apiUrl = apiUrlRow ? apiUrlRow.value : '';
-    let apiUser = apiUserRow ? apiUserRow.value : '';
-    
-    if (apiUser === null || apiUser === undefined) {
-      apiUser = '';
-      const exists = await getQuery("SELECT * FROM settings WHERE key = 'amrr_unlocker_username'");
-      if (!exists) {
-        await runQuery("INSERT INTO settings (key, value) VALUES ('amrr_unlocker_username', '')");
-      }
-    }
-    
-    // Seed defaults if empty
-    apiKey = 'QNR-UP9-IU5-5BZ-1T-ZQZ-1DT-RIH';
-    const exists = await getQuery("SELECT * FROM settings WHERE key = 'amrr_unlocker_api_key'");
-    if (!exists) {
-      await runQuery("INSERT INTO settings (key, value) VALUES ('amrr_unlocker_api_key', ?)", [apiKey]);
-    } else {
-      await runQuery("UPDATE settings SET value = ? WHERE key = 'amrr_unlocker_api_key'", [apiKey]);
-    }
-    if (!apiUrl) {
-      apiUrl = 'https://amrr-unlocker.com/api/index.php';
-      const exists = await getQuery("SELECT * FROM settings WHERE key = 'amrr_unlocker_api_url'");
-      if (!exists) {
-        await runQuery("INSERT INTO settings (key, value) VALUES ('amrr_unlocker_api_url', ?)", [apiUrl]);
-      } else {
-        await runQuery("UPDATE settings SET value = ? WHERE key = 'amrr_unlocker_api_url'", [apiUrl]);
-      }
-    }
-    
+    const creds = await getActiveUnlockerCredentials();
     res.json({
-      api_key: apiKey,
-      api_url: apiUrl,
-      username: apiUser
+      api_key: creds.apiKey,
+      api_url: creds.apiUrl,
+      username: creds.apiUser
     });
   } catch (error) {
     console.error('Fetch unlocker settings error:', error);
@@ -121,12 +102,7 @@ router.get('/settings', async (req, res) => {
 // Debug route to see exact raw fields from Dhru
 router.get('/debug-service/:id', async (req, res) => {
   try {
-    const apiKeyRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_key'");
-    const apiUrlRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_url'");
-    const apiUserRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_username'");
-    const apiKey = apiKeyRow && apiKeyRow.value ? apiKeyRow.value : '5TC-O62-NRZ-HF3-NQ4-3VJ-S7V-FPK';
-    const apiUrl = apiUrlRow && apiUrlRow.value ? apiUrlRow.value : 'https://amrr-unlocker.com/api/index.php';
-    const apiUser = apiUserRow && apiUserRow.value ? apiUserRow.value : 'Hassen1990';
+    const { apiKey, apiUrl, apiUser } = await getActiveUnlockerCredentials();
 
     const data = await callDhruApi(apiUrl, apiUser, apiKey, 'imeiservicelist');
     let targetService = null;
@@ -174,12 +150,7 @@ router.get('/debug-service/:id', async (req, res) => {
 // Returns up to 50 services with their raw data + extracted fields so you can compare
 router.get('/debug-all-fields', async (req, res) => {
   try {
-    const apiKeyRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_key'");
-    const apiUrlRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_url'");
-    const apiUserRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_username'");
-    const apiKey = apiKeyRow && apiKeyRow.value ? apiKeyRow.value : '5TC-O62-NRZ-HF3-NQ4-3VJ-S7V-FPK';
-    const apiUrl = apiUrlRow && apiUrlRow.value ? apiUrlRow.value : 'https://amrr-unlocker.com/api/index.php';
-    const apiUser = apiUserRow && apiUserRow.value ? apiUserRow.value : 'Hassen1990';
+    const { apiKey, apiUrl, apiUser } = await getActiveUnlockerCredentials();
 
     const serviceType = req.query.type || 'imei'; // imei | server | remote
     const action = serviceType === 'server' ? 'serverservicelist' : (serviceType === 'remote' ? 'remoteservicelist' : 'imeiservicelist');
@@ -286,12 +257,14 @@ router.get('/debug-all-fields', async (req, res) => {
 // 2. Update Settings (Admin Protected)
 router.put('/settings', authMiddleware, async (req, res) => {
   const { api_key, api_url, username } = req.body;
-  if (!api_key || !api_url || username === undefined) {
+  if (!api_url || username === undefined) {
     return res.status(400).json({ message: 'جميع الحقول مطلوبة.' });
   }
   
   try {
-    await runQuery("UPDATE settings SET value = ? WHERE key = 'amrr_unlocker_api_key'", [api_key.trim()]);
+    if (api_key && !api_key.includes('••••')) {
+      await runQuery("UPDATE settings SET value = ? WHERE key = 'amrr_unlocker_api_key'", [api_key.trim()]);
+    }
     await runQuery("UPDATE settings SET value = ? WHERE key = 'amrr_unlocker_api_url'", [api_url.trim()]);
     
     const exists = await getQuery("SELECT * FROM settings WHERE key = 'amrr_unlocker_username'");
@@ -310,13 +283,7 @@ router.put('/settings', authMiddleware, async (req, res) => {
 // 3. Fetch Services from Remote API (Admin Protected)
 router.post('/fetch-services', authMiddleware, async (req, res) => {
   try {
-    const apiKeyRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_key'");
-    const apiUrlRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_url'");
-    
-    const apiUserRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_username'");
-    const apiKey = apiKeyRow && apiKeyRow.value ? apiKeyRow.value : 'QNR-UP9-IU5-5BZ-1T-ZQZ-1DT-RIH';
-    const apiUrl = apiUrlRow && apiUrlRow.value ? apiUrlRow.value : 'https://amrr-unlocker.com/api/index.php';
-    const apiUser = apiUserRow && apiUserRow.value ? apiUserRow.value : 'Hassen1990';
+    const { apiKey, apiUrl, apiUser } = await getActiveUnlockerCredentials();
     
     // Fetch all service types (IMEI, Server, and Remote) to guarantee complete service coverage
     const [imeiRes, serverRes, remoteRes] = await Promise.all([
@@ -332,11 +299,10 @@ router.post('/fetch-services', authMiddleware, async (req, res) => {
     ];
     
     if (services.length === 0) {
-      if (imeiRes.ERROR && !serverRes.SUCCESS && !remoteRes.SUCCESS) {
-        console.error('[Dhru API Error Response]:', JSON.stringify(imeiRes.ERROR));
-        const errObj = Array.isArray(imeiRes.ERROR) ? imeiRes.ERROR[0] : imeiRes.ERROR;
-        const errorMsg = errObj.MESSAGE || errObj.message || JSON.stringify(errObj);
-        return res.status(400).json({ message: `خطأ من الخادم: ${errorMsg}` });
+      const anyErr = [imeiRes, serverRes, remoteRes].find(r => r?.ERROR || (Array.isArray(r?.SUCCESS) && r.SUCCESS[0]?.ERROR));
+      if (anyErr) {
+        const errorMsg = getDhruErrorMessage(anyErr);
+        return res.status(400).json({ message: `خطأ من مزود الخدمة: ${errorMsg}` });
       }
       return res.status(400).json({ message: 'لم يتم العثور على أي خدمات. يرجى مراجعة صلاحيات المفتاح مع مزود الخدمة.' });
     }
@@ -355,13 +321,7 @@ router.post('/fetch-services', authMiddleware, async (req, res) => {
 // 3b. Fetch supplier account info and balance (Admin Protected)
 router.get('/balance', authMiddleware, async (req, res) => {
   try {
-    const apiKeyRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_key'");
-    const apiUrlRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_url'");
-    const apiUserRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_username'");
-    
-    const apiKey = apiKeyRow && apiKeyRow.value ? apiKeyRow.value : 'QNR-UP9-IU5-5BZ-1T-ZQZ-1DT-RIH';
-    const apiUrl = apiUrlRow && apiUrlRow.value ? apiUrlRow.value : 'https://amrr-unlocker.com/api/index.php';
-    const apiUser = apiUserRow && apiUserRow.value ? apiUserRow.value : 'Hassen1990';
+    const { apiKey, apiUrl, apiUser } = await getActiveUnlockerCredentials();
     
     let responseData;
     try {
@@ -380,24 +340,27 @@ router.get('/balance', authMiddleware, async (req, res) => {
       throw err;
     }
     
-    if (responseData.ERROR) {
+    if (responseData.ERROR || (Array.isArray(responseData.SUCCESS) && responseData.SUCCESS[0]?.ERROR)) {
       const errorMsg = getDhruErrorMessage(responseData);
       return res.status(400).json({ message: `فشل جلب رصيد الحساب: ${errorMsg}` });
     }
     
     let info = null;
     if (responseData.SUCCESS && Array.isArray(responseData.SUCCESS)) {
-      info = responseData.SUCCESS[0]?.AccountInfo || null;
+      info = responseData.SUCCESS[0]?.AccountInfo || responseData.SUCCESS[0]?.accoutinfo || null;
     }
     
     if (!info) {
       return res.status(400).json({ message: 'تعذر الحصول على معلومات الحساب.' });
     }
     
+    const displayCredit = info.credit || info.balance || (info.creditraw ? `$${info.creditraw}` : '0.00');
+    const rawCredit = parseFloat(info.creditraw || info.credit || info.balance) || 0;
+
     res.json({
       success: true,
-      credit: info.credit ? info.credit.trim() : `$${info.creditraw}`,
-      credit_raw: parseFloat(info.creditraw) || 0,
+      credit: displayCredit.includes('$') ? displayCredit : `$${displayCredit}`,
+      credit_raw: rawCredit,
       currency: info.currency || 'USD',
       email: info.mail || ''
     });
@@ -427,12 +390,7 @@ async function performSmartSync(customRate, customMarkup, customShouldGroup) {
   const markup = customMarkup !== undefined ? parseFloat(customMarkup) : (markupRow ? parseFloat(markupRow.value) : 10);
   const shouldGroup = customShouldGroup !== undefined ? customShouldGroup : (groupRow ? groupRow.value === 'true' : true);
 
-  const apiKeyRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_key'");
-  const apiUrlRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_url'");
-  const apiUserRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_username'");
-  const apiKey = apiKeyRow && apiKeyRow.value ? apiKeyRow.value : '5TC-O62-NRZ-HF3-NQ4-3VJ-S7V-FPK';
-  const apiUrl = apiUrlRow && apiUrlRow.value ? apiUrlRow.value : 'https://amrr-unlocker.com/api/index.php';
-  const apiUser = apiUserRow && apiUserRow.value ? apiUserRow.value : 'Hassen1990';
+  const { apiKey, apiUrl, apiUser } = await getActiveUnlockerCredentials();
 
   console.log('[Smart Sync] Fetching fresh services list from provider...');
   const [imeiRes, serverRes, remoteRes] = await Promise.all([
@@ -691,12 +649,7 @@ router.post('/import-services', authMiddleware, async (req, res) => {
   const markup = parseFloat(markup_percent) || 0;
   
   try {
-    const apiKeyRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_key'");
-    const apiUrlRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_url'");
-    const apiUserRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_username'");
-    const apiKey = apiKeyRow && apiKeyRow.value ? apiKeyRow.value : '5TC-O62-NRZ-HF3-NQ4-3VJ-S7V-FPK';
-    const apiUrl = apiUrlRow && apiUrlRow.value ? apiUrlRow.value : 'https://amrr-unlocker.com/api/index.php';
-    const apiUser = apiUserRow && apiUserRow.value ? apiUserRow.value : 'Hassen1990';
+    const { apiKey, apiUrl, apiUser } = await getActiveUnlockerCredentials();
 
     let apiCurrency = 'USD';
     try {
@@ -1063,13 +1016,11 @@ async function resolveApiProvider(providerId, source) {
     provider = await getQuery("SELECT * FROM api_providers WHERE id = ?", [providerId]);
   }
   if (!provider && (source === 'amrr-unlocker' || source === 'api_provider')) {
-    const apiKeyRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_key'");
-    const apiUrlRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_url'");
-    const apiUserRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_username'");
+    const creds = await getActiveUnlockerCredentials();
     provider = {
-      api_key: apiKeyRow && apiKeyRow.value ? apiKeyRow.value : 'QNR-UP9-IU5-5BZ-1T-ZQZ-1DT-RIH',
-      api_url: apiUrlRow && apiUrlRow.value ? apiUrlRow.value : 'https://amrrunlocker.com/api/index.php',
-      username: apiUserRow && apiUserRow.value ? apiUserRow.value : ''
+      api_key: creds.apiKey,
+      api_url: creds.apiUrl,
+      username: creds.apiUser
     };
   }
   return provider;
@@ -1831,41 +1782,9 @@ router.post('/cancel-order/:id', authMiddleware, async (req, res) => {
 
 router.performSmartSync = performSmartSync;
 
-// DUMP ZKEY
-router.get('/dump-zkey', async (req, res) => {
-  try {
-    const apiKeyRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_key'");
-    const apiUrlRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_api_url'");
-    const apiUserRow = await getQuery("SELECT value FROM settings WHERE key = 'amrr_unlocker_username'");
-    
-    const apiKey = apiKeyRow && apiKeyRow.value ? apiKeyRow.value : '5TC-O62-NRZ-HF3-NQ4-3VJ-S7V-FPK';
-    const apiUrl = apiUrlRow && apiUrlRow.value ? apiUrlRow.value : 'https://amrr-unlocker.com/api/index.php';
-    const apiUser = apiUserRow && apiUserRow.value ? apiUserRow.value : 'Hassen1990';
-    
-    // Attempt to format URL safely
-    let safeUrl = apiUrl;
-    if (!safeUrl.startsWith('http://') && !safeUrl.startsWith('https://')) {
-      safeUrl = 'https://' + safeUrl;
-    }
-    
-    const data = await callDhruApi(safeUrl, apiUser, apiKey, 'serverservicelist');
-    const zkey = [];
-    if (data && data.SUCCESS && data.SUCCESS[0] && data.SUCCESS[0].LIST) {
-      const groups = data.SUCCESS[0].LIST;
-      for (const group of groups) {
-        if (group.SERVICES) {
-          for (const s of group.SERVICES) {
-            if (s.SERVICENAME && s.SERVICENAME.toLowerCase().includes('zkey')) {
-              zkey.push(s);
-            }
-          }
-        }
-      }
-    }
-    res.json({ url_used: safeUrl, raw_amrr: { api_url: safeUrl, api_username: apiUser, api_key: apiKey }, zkey: zkey });
-  } catch (error) {
-    res.status(500).json({ error: error.message, stack: error.stack });
-  }
+// DUMP ZKEY - Permanently Disabled for Security
+router.get('/dump-zkey', authMiddleware, async (req, res) => {
+  res.status(403).json({ message: 'تم تعطيل هذا المسار بشكل نهائي لأسباب أمنية.' });
 });
 
 module.exports = router;

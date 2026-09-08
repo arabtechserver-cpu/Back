@@ -1,5 +1,22 @@
 const fetch = require('node-fetch');
 
+// SSRF Protection
+function isSafeUrl(urlStr) {
+  try {
+    const parsed = new URL(urlStr);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return false;
+    const hostname = parsed.hostname.toLowerCase();
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '0.0.0.0') return false;
+    if (hostname === '169.254.169.254') return false;
+    if (hostname.startsWith('10.') || hostname.startsWith('192.168.')) return false;
+    if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(hostname)) return false;
+    if (hostname.endsWith('.internal') || hostname.endsWith('.local')) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // Utility to get nested property safely (e.g. "data.services.list")
 function getNestedValue(obj, path) {
   if (!path) return obj;
@@ -31,6 +48,9 @@ async function fetchDynamicServices(provider) {
   }
 
   const endpoint = mapping.sync_endpoint || provider.api_url;
+  if (!isSafeUrl(endpoint)) {
+    throw new Error('رابط المزود غير مسموح به أو غير آمن.');
+  }
   const method = mapping.sync_method || 'GET';
   
   // Prepare headers and body
@@ -104,6 +124,9 @@ async function placeDynamicOrder(provider, service, orderData) {
   }
 
   const endpoint = mapping.order_endpoint || provider.api_url;
+  if (!isSafeUrl(endpoint)) {
+    throw new Error('رابط المزود غير مسموح به أو غير آمن.');
+  }
   const method = mapping.order_method || 'POST';
   
   const headers = { 'Content-Type': 'application/json' };

@@ -60,7 +60,7 @@ const defaultJsonDb = {
   wallet_requests: [],
   wallet_transactions: [],
   settings: [
-    { key: "site_name", value: "عرب تك سيرفر" },
+    { key: "site_name", value: "سيرفر الوفاق - Al-Wefaq Server" },
     { key: "site_logo", value: "/logo.jpg" },
     { key: "site_favicon", value: "/favicon.png" }
   ],
@@ -656,6 +656,7 @@ async function createTables() {
       currency          VARCHAR(20) DEFAULT 'EGP',
       sender_phone      VARCHAR(100) DEFAULT '',
       notes             TEXT DEFAULT '',
+      payment_method    VARCHAR(255) DEFAULT '',
       status            VARCHAR(30) DEFAULT 'pending',
       admin_note        TEXT DEFAULT '',
       created_at        TIMESTAMPTZ DEFAULT NOW(),
@@ -813,6 +814,7 @@ async function createTables() {
       ALTER TABLE customers ADD COLUMN IF NOT EXISTS email VARCHAR(255) DEFAULT '';
       ALTER TABLE customers ADD COLUMN IF NOT EXISTS password_plain VARCHAR(255) DEFAULT '';
       ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS currency VARCHAR(20) DEFAULT 'USD';
+      ALTER TABLE wallet_requests ADD COLUMN IF NOT EXISTS payment_method VARCHAR(255) DEFAULT '';
       ALTER TABLE customers ADD COLUMN IF NOT EXISTS customer_level VARCHAR(30) DEFAULT 'bronze';
       ALTER TABLE customers ADD COLUMN IF NOT EXISTS is_vip BOOLEAN DEFAULT false;
       ALTER TABLE customers ADD COLUMN IF NOT EXISTS total_orders INT DEFAULT 0;
@@ -972,7 +974,7 @@ async function seedData() {
   // Seed settings in PostgreSQL
   const existingSettings = await allQuery('SELECT * FROM settings');
   if (existingSettings.length === 0) {
-    await patchedRunQuery("INSERT INTO settings (key, value) VALUES (?, ?)", ['site_name', 'عرب تك سيرفر']);
+    await patchedRunQuery("INSERT INTO settings (key, value) VALUES (?, ?)", ['site_name', 'سيرفر الوفاق - Al-Wefaq Server']);
     await patchedRunQuery("INSERT INTO settings (key, value) VALUES (?, ?)", ['site_logo', '/logo.jpg']);
     await patchedRunQuery("INSERT INTO settings (key, value) VALUES (?, ?)", ['site_favicon', '/favicon.png']);
     console.log('Default settings seeded in PostgreSQL');

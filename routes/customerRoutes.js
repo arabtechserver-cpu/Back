@@ -60,7 +60,7 @@ async function deleteCustomerOtp(otpKey) {
 setInterval(async () => {
   try {
     await runQuery('DELETE FROM customer_otps WHERE expires_at < ?', [Date.now()]);
-  } catch (e) {}
+  } catch (e) { }
 }, 60000);
 
 // Customer Auth Middleware
@@ -186,57 +186,41 @@ router.post('/register', turnstileMiddleware, async (req, res) => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
+    const newRefCode = "REF" + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substring(2, 5).toUpperCase();
 
-    // Generate 6-digit OTP code for verification before creating account
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    const otpKey = `reg_${cleanUsername}_${Date.now()}`;
-
-    const referred_by_code = req.body.referred_by_code || null;
-    await setCustomerOtp(otpKey, {
-      code,
-      type: 'register',
-      username: cleanUsername,
-      email: cleanEmail,
-      canonicalEmail,
-      password: hashedPassword,
-      phone: userPhone,
-      referred_by_code,
-      expiresAt: Date.now() + 10 * 60 * 1000
-    });
-
-    console.log('[Customer Auth OTP] Registration OTP generated.');
-
-    // 1. Send via Telegram if customer has linked their Telegram account
-    try {
-      const existingByPhone = await getQuery('SELECT id, username, telegram_chat_id FROM customers WHERE phone = ?', [userPhone]);
-      if (existingByPhone && existingByPhone.telegram_chat_id) {
-        await telegram.sendCustomerOtp(existingByPhone.id, code, cleanUsername, 'تأكيد إنشاء الحساب');
-      } else {
-        console.log(`[Customer Auth OTP] No Telegram chat_id for phone ${userPhone} — skipping Telegram`);
-      }
-    } catch (e) {
-      console.warn('[Customer Auth OTP] Telegram send failed:', e.message);
+    let referrerId = null;
+    const referred_by_code = req.body.referred_by_code;
+    if (referred_by_code) {
+      const referrer = await getQuery('SELECT id FROM customers WHERE referral_code = ?', [referred_by_code]);
+      if (referrer) referrerId = referrer.id;
     }
 
-    // 2. Send via Gmail / Email
-    let emailSent = false;
-    try {
-      emailSent = await emailService.sendCustomerAuthOtpEmail(cleanEmail, {
-        code,
+    const result = await runQuery(
+      'INSERT INTO customers (username, email, password, password_plain, phone, referral_code, referred_by, balance, balances) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)',
+      [cleanUsername, cleanEmail, hashedPassword, password, userPhone, newRefCode, referrerId, JSON.stringify({ USD: 0, USDT: 0 })]
+    );
+
+    if (referrerId) await awardReferralRewardIfEligible(referrerId);
+
+    const newCustomerId = result.lastID;
+    const token = jwt.sign(
+      { id: newCustomerId, username: cleanUsername, role: 'customer' },
+      getJwtSecret(),
+      { expiresIn: '30d' }
+    );
+
+    return res.status(201).json({
+      requireOtp: false,
+      message: 'تم إنشاء الحساب وتسجيل الدخول بنجاح 🚀',
+      token,
+      customer: {
+        id: newCustomerId,
         username: cleanUsername,
-        actionLabel: 'إنشاء وتفعيل حسابك الجديد'
-      });
-    } catch (emailErr) {
-      console.error(`[Customer Auth OTP] Registration email send FAILED to ${cleanEmail}:`, emailErr.message);
-    }
-
-    return res.status(200).json({
-      requireOtp: true,
-      otpKey,
-      message: emailSent
-        ? 'تم إرسال كود التحقق (OTP) إلى بريدك الإلكتروني (Gmail). يرجى إدخال الكود لإتمام إنشاء الحساب.'
-        : 'تم توليد كود التحقق. يرجى إدخال الكود المرسل إلى صندوق البريد الإلكتروني (Gmail).',
-      targetInfo: `البريد الإلكتروني (${cleanEmail})`
+        email: cleanEmail,
+        phone: userPhone,
+        balance: 0,
+        balances: { USD: 0, USDT: 0 }
+      }
     });
   } catch (error) {
     console.error('Customer registration error:', error);
@@ -276,54 +260,25 @@ router.post('/login', turnstileMiddleware, async (req, res) => {
       return res.status(401).json({ message: 'البريد الإلكتروني أو اسم المستخدم أو كلمة المرور غير صحيحة.' });
     }
 
-    // Generate 6-digit OTP for login
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    const otpKey = `login_${customer.id}_${Date.now()}`;
-
-    await setCustomerOtp(otpKey, {
-      code,
-      type: 'login',
-      customerId: customer.id,
-      expiresAt: Date.now() + 10 * 60 * 1000
-    });
-
-    console.log(`[Customer Auth OTP] Login OTP generated for customer #${customer.id}.`);
-
-    // 1. Send via Telegram if customer has linked their Telegram account
-    try {
-      await telegram.sendCustomerOtp(customer.id, code, customer.username, 'تأكيد تسجيل الدخول');
-    } catch (e) {
-      console.warn('[Customer Auth OTP] Telegram send failed:', e.message);
-    }
-
-    // 2. Send via WhatsApp
-    if (customer.phone) {
-      try {
-        const waMsg = `مرحباً بك في عرب تك سيرفر 🚀\n\nكود التحقق الخاص بك هو: *${code}*\nلإتمام تسجيل الدخول، يرجى إدخال هذا الكود.\n\n⚠️ الكود صالح لمدة 10 دقائق فقط.`;
-        await wa.sendMessage([customer.phone], waMsg);
-      } catch (waErr) {
-        console.warn('[Customer Auth OTP] WhatsApp send failed:', waErr.message);
-      }
-    }
-
-    // 3. Send via Gmail/HTML if email exists
-    if (customer.email) {
-      try {
-        await emailService.sendCustomerAuthOtpEmail(customer.email, {
-          code,
-          username: customer.username,
-          actionLabel: 'تأكيد تسجيل الدخول لحسابك'
-        });
-      } catch (emailErr) {
-        console.error(`[Customer Auth OTP] Email send FAILED to ${customer.email}:`, emailErr.message);
-      }
-    }
+    // Direct login without OTP
+    const token = jwt.sign(
+      { id: customer.id, username: customer.username, role: 'customer' },
+      getJwtSecret(),
+      { expiresIn: '30d' }
+    );
 
     return res.status(200).json({
-      requireOtp: true,
-      otpKey,
-      message: 'تم إرسال كود تحقق (OTP) إلى واتساب/جميل الخاص بك لتأكيد الدخول.',
-      targetInfo: customer.phone ? `واتساب (${customer.phone}) / جميل (${customer.email})` : `الجميل (${customer.email})`
+      requireOtp: false,
+      message: 'تم تسجيل الدخول بنجاح!',
+      token,
+      customer: {
+        id: customer.id,
+        username: customer.username,
+        email: customer.email || '',
+        phone: customer.phone || '',
+        balance: Number(customer.balance || 0),
+        balances: customer.balances ? (typeof customer.balances === 'string' ? JSON.parse(customer.balances) : customer.balances) : { USD: Number(customer.balance || 0) }
+      }
     });
   } catch (error) {
     console.error('Customer login error:', error);
@@ -400,20 +355,20 @@ router.post('/google-auth', async (req, res) => {
       const randomPassword = `G_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
       const hashedPassword = await bcrypt.hash(randomPassword, 10);
 
-              let referrerId = null;
-        const referred_by_code = req.body.referred_by_code;
-        if (referred_by_code) {
-          const referrer = await getQuery('SELECT id FROM customers WHERE referral_code = ?', [referred_by_code]);
-          if (referrer) referrerId = referrer.id;
-        }
-        const newRefCode = "REF" + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substring(2,5).toUpperCase();
+      let referrerId = null;
+      const referred_by_code = req.body.referred_by_code;
+      if (referred_by_code) {
+        const referrer = await getQuery('SELECT id FROM customers WHERE referral_code = ?', [referred_by_code]);
+        if (referrer) referrerId = referrer.id;
+      }
+      const newRefCode = "REF" + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substring(2, 5).toUpperCase();
 
-        const result = await runQuery(
-          'INSERT INTO customers (username, email, password, google_id, referral_code, referred_by) VALUES (?, ?, ?, ?, ?, ?)',
-          [finalUsername, email, hashedPassword, googleId, newRefCode, referrerId]
-        );
+      const result = await runQuery(
+        'INSERT INTO customers (username, email, password, google_id, referral_code, referred_by) VALUES (?, ?, ?, ?, ?, ?)',
+        [finalUsername, email, hashedPassword, googleId, newRefCode, referrerId]
+      );
 
-        if (referrerId) await awardReferralRewardIfEligible(referrerId);
+      if (referrerId) await awardReferralRewardIfEligible(referrerId);
 
       const newCustomerId = result.lastID;
 
@@ -468,20 +423,20 @@ router.post('/verify-auth-otp', async (req, res) => {
 
   try {
     if (item.type === 'register') {
-        // Complete registration now
-        let referrerId = null;
-        if (item.referred_by_code) {
-          const referrer = await getQuery('SELECT id FROM customers WHERE referral_code = ?', [item.referred_by_code]);
-          if (referrer) referrerId = referrer.id;
-        }
-        const newRefCode = "REF" + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substring(2,5).toUpperCase();
+      // Complete registration now
+      let referrerId = null;
+      if (item.referred_by_code) {
+        const referrer = await getQuery('SELECT id FROM customers WHERE referral_code = ?', [item.referred_by_code]);
+        if (referrer) referrerId = referrer.id;
+      }
+      const newRefCode = "REF" + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substring(2, 5).toUpperCase();
 
-        const result = await runQuery(
-          'INSERT INTO customers (username, email, password, phone, referral_code, referred_by) VALUES (?, ?, ?, ?, ?, ?)',
-          [item.username, item.email, item.password, item.phone, newRefCode, referrerId]
-        );
+      const result = await runQuery(
+        'INSERT INTO customers (username, email, password, phone, referral_code, referred_by) VALUES (?, ?, ?, ?, ?, ?)',
+        [item.username, item.email, item.password, item.phone, newRefCode, referrerId]
+      );
 
-        if (referrerId) await awardReferralRewardIfEligible(referrerId);
+      if (referrerId) await awardReferralRewardIfEligible(referrerId);
 
       await deleteCustomerOtp(otpKey);
 
@@ -556,7 +511,7 @@ router.get('/me', customerAuth, async (req, res) => {
 
     // Fetch all membership tiers
     const allTiers = (await allQuery('SELECT * FROM membership_tiers ORDER BY condition_value ASC')) || [];
-    
+
     // Determine active tiers (auto-computed based on conditions)
     const autoTiers = allTiers.filter(tier => {
       if (tier.condition_type === 'total_orders') {
@@ -630,7 +585,7 @@ router.get('/me', customerAuth, async (req, res) => {
 router.get('/wallet-requests', customerAuth, async (req, res) => {
   try {
     const requests = await allQuery(
-      `SELECT id, amount, currency, sender_phone, notes, status, admin_note, created_at, processed_at
+      `SELECT id, amount, currency, sender_phone, payment_method, notes, status, admin_note, created_at, processed_at
        FROM wallet_requests
        WHERE customer_id = ?
        ORDER BY id DESC
@@ -645,9 +600,10 @@ router.get('/wallet-requests', customerAuth, async (req, res) => {
 });
 
 router.post('/wallet-requests', customerAuth, async (req, res) => {
-  const { amount, sender_phone, notes, currency, receipt_image } = req.body;
+  const { amount, sender_phone, notes, currency, receipt_image, payment_method } = req.body;
   const parsedAmount = Number(amount);
   const targetCurrency = currency || 'USD';
+  const methodUsed = (payment_method || '').trim();
 
   if (!parsedAmount || parsedAmount <= 0) {
     return res.status(400).json({ message: 'يرجى إدخال مبلغ شحن صحيح.' });
@@ -660,8 +616,8 @@ router.post('/wallet-requests', customerAuth, async (req, res) => {
     }
 
     const result = await runQuery(
-      'INSERT INTO wallet_requests (customer_id, customer_username, amount, currency, sender_phone, notes, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [customer.id, customer.username, parsedAmount, targetCurrency, sender_phone || '', notes || '', 'pending']
+      'INSERT INTO wallet_requests (customer_id, customer_username, amount, currency, sender_phone, payment_method, notes, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [customer.id, customer.username, parsedAmount, targetCurrency, sender_phone || '', methodUsed, notes || '', 'pending']
     );
 
     const requestId = result.lastID;
@@ -676,20 +632,21 @@ router.post('/wallet-requests', customerAuth, async (req, res) => {
         const msgLines = [
           `💳 *طلب شحن رصيد جديد* #${requestId}`,
           `👤 العميل: *${customer.username}*`,
+          `🏦 طريقة الدفع / الخدمة: *${methodUsed || 'غير محددة'}*`,
           `💰 المبلغ: *${parsedAmount} ${targetCurrency}*`,
-          `📞 رقم التحويل: *${sender_phone || '-'}*`,
+          `📞 رقم التحويل / الحساب: *${sender_phone || '-'}*`,
           notes ? `📝 ملاحظات: ${notes}` : null,
           `\nراجع الطلب في لوحة التحكم واعتمده أو ارفضه.`
         ].filter(Boolean).join('\n');
 
         for (const chatId of adminChatIds) {
           if (receipt_image) {
-            await telegram.sendPhoto(String(chatId), receipt_image, msgLines).catch(() => {});
+            await telegram.sendPhoto(String(chatId), receipt_image, msgLines).catch(() => { });
           } else {
-            await telegram.sendMessage(String(chatId), msgLines).catch(() => {});
+            await telegram.sendMessage(String(chatId), msgLines).catch(() => { });
           }
         }
-        console.log(`[Telegram Admin] Wallet request #${requestId} notification sent`);
+        console.log(`[Telegram Admin] Wallet request #${requestId} notification sent (${methodUsed})`);
         telegramSent = true;
       }
 
@@ -699,6 +656,7 @@ router.post('/wallet-requests', customerAuth, async (req, res) => {
       await emailService.sendWalletRechargeAdminEmail(adminEmail, {
         requestId,
         customerUsername: customer.username,
+        paymentMethod: methodUsed,
         amount: parsedAmount,
         currency: targetCurrency,
         senderPhone: sender_phone,
@@ -728,7 +686,6 @@ router.get('/admin/customers', authMiddleware, async (req, res) => {
     const customers = (await allQuery(`
       SELECT id, username, email, phone, balance, balances,
              CASE WHEN password IS NULL OR password = '' THEN 0 ELSE 1 END as has_password,
-             google_id,
              is_vip,
              last_order_at, api_key, api_enabled, api_markup,
              api_blocked_services, api_allowed_ips, api_payment_mode
@@ -773,18 +730,17 @@ router.get('/admin/customers', authMiddleware, async (req, res) => {
         balance: Number(customer.balance || 0),
         balances: customer.balances ? (typeof customer.balances === 'string' ? JSON.parse(customer.balances) : customer.balances) : {},
         has_password: Boolean(customer.has_password),
-        google_id: customer.google_id || null,
-        password_masked: customer.google_id ? 'مسجل بجوجل' : (customer.has_password ? '********' : 'غير مسجل'),
+        password_masked: customer.has_password ? '********' : 'مسجل بجوجل',
         customer_level: computedLevel,
         is_vip: customer.is_vip === true || customer.is_vip === 'true' || customer.is_vip === 1,
         total_orders: orderInfo.count,
         last_order_at: orderInfo.last_order || customer.last_order_at || null,
-        api_key: customer.api_key || '',
-        api_enabled: Boolean(customer.api_enabled),
-        api_markup: Number(customer.api_markup || 0),
-        api_payment_mode: customer.api_payment_mode || 'prepaid',
-        api_blocked_services: customer.api_blocked_services ? JSON.parse(customer.api_blocked_services) : [],
-        api_allowed_ips: customer.api_allowed_ips ? JSON.parse(customer.api_allowed_ips) : []
+        api_key: '',
+        api_enabled: false,
+        api_markup: 0,
+        api_payment_mode: 'prepaid',
+        api_blocked_services: [],
+        api_allowed_ips: []
       };
     });
 
@@ -798,7 +754,7 @@ router.get('/admin/customers', authMiddleware, async (req, res) => {
 // Admin: update customer profile and optionally reset password
 router.put('/admin/:id', authMiddleware, async (req, res) => {
   const { id } = req.params;
-    const { username, email, phone, balance, balances, new_password, api_enabled, api_markup, api_payment_mode, api_blocked_services, api_allowed_ips, regenerate_api_key } = req.body;
+  const { username, email, phone, balance, balances, new_password, api_enabled, api_markup, api_payment_mode, api_blocked_services, api_allowed_ips, regenerate_api_key } = req.body;
 
   try {
     const customer = await getQuery('SELECT * FROM customers WHERE id = ?', [id]);
@@ -838,32 +794,15 @@ router.put('/admin/:id', authMiddleware, async (req, res) => {
     const balanceDiff = parsedBalance > Number(customer.balance || 0) ? parsedBalance - Number(customer.balance || 0) : 0;
     const newTotalDeposited = Number(customer.total_deposited || 0) + balanceDiff;
 
-    const nextApiEnabled = api_enabled !== undefined ? api_enabled : Boolean(customer.api_enabled);
-    const nextApiMarkup = api_markup !== undefined ? Number(api_markup) : Number(customer.api_markup || 0);
-    const nextApiBlocked = api_blocked_services ? JSON.stringify(api_blocked_services) : (customer.api_blocked_services || '[]');
-    const nextApiIps = api_allowed_ips ? JSON.stringify(api_allowed_ips) : (customer.api_allowed_ips || '[]');
-    const nextApiPaymentMode = api_payment_mode || customer.api_payment_mode || 'prepaid';
-
-    await runQuery('UPDATE customers SET username = ?, email = ?, phone = ?, balance = ?, total_deposited = ?, balances = ?, api_enabled = ?, api_markup = ?, api_payment_mode = ?, api_blocked_services = ?, api_allowed_ips = ? WHERE id = ?', [
+    await runQuery('UPDATE customers SET username = ?, email = ?, phone = ?, balance = ?, total_deposited = ?, balances = ?, api_enabled = false WHERE id = ?', [
       nextUsername,
       nextEmail,
       nextPhone,
       parsedBalance,
       newTotalDeposited,
       nextBalances,
-      nextApiEnabled,
-      nextApiMarkup,
-      nextApiPaymentMode,
-      nextApiBlocked,
-      nextApiIps,
       id
     ]);
-
-    if (regenerate_api_key) {
-      const crypto = require('crypto');
-      const newApiKey = [1,2,3,4,5,6,7].map(() => crypto.randomBytes(3).toString('hex').toUpperCase()).join('-');
-      await runQuery('UPDATE customers SET api_key = ? WHERE id = ?', [newApiKey, id]);
-    }
 
     if (typeof new_password === 'string' && new_password.trim()) {
       const hashedNewPassword = await bcrypt.hash(new_password.trim(), 10);
@@ -940,18 +879,18 @@ router.delete('/admin/:id', authMiddleware, deleteOtpAuth, async (req, res) => {
       if (fs.existsSync(dbPath)) {
         try {
           const { readDb, writeDb } = require('../db');
-            const db = readDb();
-          
+          const db = readDb();
+
           // Delete customer from customers array
           if (db.customers) {
             db.customers = db.customers.filter(c => Number(c.id) !== Number(id));
           }
-          
+
           // Delete transactions associated with customer
           if (db.wallet_transactions) {
             db.wallet_transactions = db.wallet_transactions.filter(t => Number(t.customer_id) !== Number(id));
           }
-          
+
           // Update orders associated with customer to customer_id = null
           if (db.orders) {
             db.orders = db.orders.map(o => {
@@ -961,12 +900,12 @@ router.delete('/admin/:id', authMiddleware, deleteOtpAuth, async (req, res) => {
               return o;
             });
           }
-          
+
           // Delete wallet requests associated with customer
           if (db.wallet_requests) {
             db.wallet_requests = db.wallet_requests.filter(r => Number(r.customer_id) !== Number(id));
           }
-          
+
           writeDb(db);
         } catch (err) {
           console.error('JSON customer delete error:', err);
@@ -1243,7 +1182,7 @@ router.post('/change-password', customerAuth, async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(newPassword, 10);
     await runQuery('UPDATE customers SET password = ? WHERE id = ?', [hashedPassword, req.customer.id]);
-    
+
     await deleteCustomerOtp(otpKey);
     return res.json({ message: 'تم تغيير كلمة المرور بنجاح.' });
   } catch (error) {
@@ -1446,19 +1385,19 @@ router.post('/passkey/register-challenge', customerAuth, async (req, res) => {
 
     // Extract exact browser domain from origin or referer header to satisfy WebAuthn RP ID requirements
     const originHeader = req.headers.origin || req.headers.referer || '';
-    let rpDomain = 'arab-tech1.online';
+    let rpDomain = 'al-wefaq.center';
     try {
       if (originHeader) {
         const parsedUrl = new URL(originHeader);
         rpDomain = parsedUrl.hostname;
       }
     } catch (e) {
-      rpDomain = 'arab-tech1.online';
+      rpDomain = 'al-wefaq.center';
     }
 
     const options = {
       challenge,
-      rp: { name: 'عرب تك سيرفر', id: rpDomain },
+      rp: { name: 'سيرفر الوفاق', id: rpDomain },
       user: {
         id: Buffer.from(String(customer.id)).toString('base64url'),
         name: customer.username,
@@ -1502,188 +1441,10 @@ router.post('/passkey/register-verify', customerAuth, async (req, res) => {
   }
 });
 
-// ==============================
-// API Key Management Routes
-// ==============================
 
-const crypto = require('crypto');
-
-// Generate a 20-character hex API key, grouped with a dash every 3 characters.
-function generateApiKey() {
-  const raw = crypto.randomBytes(10).toString('hex').toUpperCase();
-  return raw.match(/.{1,3}/g).join('-');
-}
-
-// Get Customer's API Key and settings
-router.get('/dev-settings', customerAuth, async (req, res) => {
-  try {
-    const customer = await getQuery('SELECT api_key, api_enabled, api_allowed_ips, api_markup, api_requested FROM customers WHERE id = ?', [req.customer.id]);
-    if (!customer) {
-      return res.status(404).json({ message: 'العميل غير موجود' });
-    }
-    res.json({
-      success: true,
-      api_key: customer.api_key || '',
-      api_enabled: Boolean(customer.api_enabled),
-      api_requested: Boolean(customer.api_requested),
-      api_allowed_ips: customer.api_allowed_ips || '[]',
-      api_markup: customer.api_markup || 0
-    });
-  } catch (error) {
-    console.error('Fetch API key error:', error);
-    res.status(500).json({ message: 'حدث خطأ أثناء جلب بيانات الـ API.' });
-  }
-});
-
-// Request API Access
-router.post('/request-api', customerAuth, async (req, res) => {
-  try {
-    const customer = await getQuery('SELECT api_key FROM customers WHERE id = ?', [req.customer.id]);
-    
-    let newApiKey = customer.api_key;
-    if (!newApiKey) {
-        newApiKey = generateApiKey();
-    }
-
-    await runQuery('UPDATE customers SET api_enabled = true, api_requested = false, api_key = ? WHERE id = ?', [newApiKey, req.customer.id]);
-    res.json({ success: true, message: 'تم تفعيل الـ API وإنشاء المفتاح بنجاح.' });
-  } catch (error) {
-    console.error('Request API error:', error);
-    res.status(500).json({ message: 'حدث خطأ أثناء إرسال الطلب.' });
-  }
-});
-
-// Regenerate API Key
-router.post('/dev-settings/regenerate', customerAuth, async (req, res) => {
-  try {
-    const newApiKey = generateApiKey();
-    await runQuery('UPDATE customers SET api_key = ? WHERE id = ?', [newApiKey, req.customer.id]);
-    res.json({
-      success: true,
-      api_key: newApiKey,
-      message: 'تم توليد مفتاح API جديد بنجاح.'
-    });
-  } catch (error) {
-    console.error('Regenerate API key error:', error);
-    if (error.message && error.message.includes('UNIQUE')) {
-       // Highly unlikely, but just in case
-       return res.status(500).json({ message: 'حدث تضارب في المفتاح، يرجى المحاولة مرة أخرى.' });
-    }
-    res.status(500).json({ message: 'حدث خطأ أثناء توليد المفتاح الجديد.' });
-  }
-});
-
-// Update Allowed IPs
-router.put('/dev-settings/allowed-ips', customerAuth, async (req, res) => {
-  const { ips } = req.body;
-  if (!Array.isArray(ips)) {
-    return res.status(400).json({ message: 'يجب أن يكون الحقل ips مصفوفة من العناوين.' });
-  }
-
-  try {
-    await runQuery('UPDATE customers SET api_allowed_ips = ? WHERE id = ?', [JSON.stringify(ips), req.customer.id]);
-    res.json({
-      success: true,
-      message: 'تم تحديث قائمة الـ IPs المسموحة بنجاح.'
-    });
-  } catch (error) {
-    console.error('Update allowed IPs error:', error);
-    res.status(500).json({ message: 'حدث خطأ أثناء تحديث قائمة الـ IPs.' });
-  }
-});
-
-// Test the customer's API credentials from the documentation page (no external IP check).
-router.post('/dev-settings/test', customerAuth, async (req, res) => {
-  try {
-    const customer = await getQuery('SELECT username, api_key, api_enabled, balance FROM customers WHERE id = ?', [req.customer.id]);
-    if (!customer?.api_enabled || !customer.api_key) return res.status(403).json({ success: false, message: 'API الحساب غير مفعل.' });
-    const action = String(req.body?.action || 'accountinfo');
-    if (action === 'accountinfo') return res.json({ success: true, action, response: { SUCCESS: [{ AccountInfo: { credit: String(customer.balance || 0), currency: 'USD' } }] } });
-    if (action === 'imeiservicelist' || action === 'serverservicelist' || action === 'remoteservicelist') {
-      const targetType = action === 'serverservicelist' ? 'server' : (action === 'remoteservicelist' ? 'remote' : 'imei');
-      const services = await allQuery('SELECT * FROM services');
-      const categories = await allQuery('SELECT * FROM categories');
-      const blockedServices = customer.api_blocked_services ? JSON.parse(customer.api_blocked_services) : [];
-      const markup = Number(customer.api_markup || 0);
-      const result = [];
-
-      for (const cat of categories) {
-        const catServices = services.filter(s => Number(s.category_id) === Number(cat.id));
-        if (catServices.length === 0) continue;
-        const serviceGroup = { GROUPNAME: cat.name, SERVICES: [] };
-
-        for (const s of catServices) {
-          if (blockedServices.includes(s.id)) continue;
-          if ((s.api_service_type || 'imei') !== targetType) continue;
-
-          let packages = [];
-          try { if (s.packages) packages = JSON.parse(s.packages); } catch(e) {}
-          
-          if (packages && packages.length > 0) {
-             for (const pkg of packages) {
-                let pkgPrice = Number(pkg.price || 0);
-                pkgPrice = pkgPrice + (pkgPrice * (markup / 100));
-                let requiresCustom = undefined;
-                if (pkg.fields && pkg.fields.length > 0) {
-                   requiresCustom = {};
-                   pkg.fields.forEach((f, idx) => {
-                      const fId = f.field_id || String(idx + 1);
-                      requiresCustom[fId] = {
-                         reqid: fId, fieldname: f.fieldname || f.name || 'Field', fieldtype: f.fieldtype || 'text',
-                         required: f.required ? "1" : "0", description: f.description || "", fieldoptions: f.fieldoptions || ""
-                      };
-                   });
-                }
-                const compositeId = (Math.floor(s.id) * 100000) + Math.floor(pkg.id);
-                serviceGroup.SERVICES.push({
-                   SERVICEID: compositeId, SERVICENAME: pkg.name || s.name, CREDIT: pkgPrice.toFixed(2),
-                   TIME: s.api_delivery_time || '1-24 Hours', INFO: s.description || '', "Requires.Custom": requiresCustom
-                });
-             }
-          } else {
-            let basePrice = Number(s.price || 0);
-            let finalPrice = basePrice + (basePrice * (markup / 100)); 
-            if (s.price_type === 'per_thousand') finalPrice = Number(s.price_per_thousand || 0) * (1 + markup / 100);
-            let requiresCustom = undefined;
-            let fields = [];
-            try { if (s.fields) fields = JSON.parse(s.fields); } catch(e) {}
-            if (fields && fields.length > 0) {
-               requiresCustom = {};
-               fields.forEach((f, idx) => {
-                  const fId = f.field_id || String(idx + 1);
-                  requiresCustom[fId] = {
-                     reqid: fId, fieldname: f.fieldname || f.name || 'Field', fieldtype: f.fieldtype || 'text',
-                     required: f.required ? "1" : "0", description: f.description || "", fieldoptions: f.fieldoptions || ""
-                  };
-               });
-            }
-            serviceGroup.SERVICES.push({
-              SERVICEID: s.id, SERVICENAME: s.name, CREDIT: finalPrice.toFixed(2),
-              TIME: s.api_delivery_time || '1-24 Hours', INFO: s.description || '', "Requires.Custom": requiresCustom
-            });
-          }
-        }
-        if (serviceGroup.SERVICES.length > 0) result.push(serviceGroup);
-      }
-      return res.json({ success: true, action, response: { SUCCESS: [{ LIST: result }] } });
-    }
-    return res.status(400).json({ success: false, message: 'العملية غير مدعومة للاختبار.' });
-  } catch (error) {
-    console.error('API test error:', error);
-    res.status(500).json({ success: false, message: 'تعذر اختبار API حالياً.' });
-  }
-});
-
-// Admin: Get API Logs for a specific customer
-router.get('/admin/:id/api-logs', authMiddleware, async (req, res) => {
-  try {
-    const customerId = req.params.id;
-    const logs = await allQuery('SELECT * FROM api_logs WHERE customer_id = ? ORDER BY id DESC LIMIT 100', [customerId]);
-    res.json(logs || []);
-  } catch (error) {
-    console.error('Fetch API logs error:', error);
-    res.status(500).json({ message: 'حدث خطأ أثناء جلب سجلات الـ API.' });
-  }
+// Strict Execution Mode: API management and keys disabled
+router.use(['/dev-settings', '/request-api', '/admin/:id/api-logs'], (req, res) => {
+  return res.status(403).json({ message: 'تم تعطيل هذه الميزة من قبل مسؤول النظام.' });
 });
 
 router.get('/referral-info', customerAuth, async (req, res) => {
@@ -1691,7 +1452,7 @@ router.get('/referral-info', customerAuth, async (req, res) => {
     let customer = await getQuery('SELECT * FROM customers WHERE id = ?', [req.customer.id]);
     if (!customer) return res.status(404).json({ message: 'Customer not found' });
     if (!customer.referral_code) {
-      const newRefCode = "REF" + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substring(2,5).toUpperCase();
+      const newRefCode = "REF" + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substring(2, 5).toUpperCase();
       await runQuery('UPDATE customers SET referral_code = ? WHERE id = ?', [newRefCode, req.customer.id]);
       customer.referral_code = newRefCode;
     }

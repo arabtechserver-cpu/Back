@@ -16,6 +16,11 @@ function normalizeMoneyForProvider(rawValue, contextLabel, fallback = 0) {
   return result.value;
 }
 
+// Strict Execution Mode: Disable provider management
+router.use((req, res) => {
+  return res.status(403).json({ message: 'تم تعطيل هذه الميزة من قبل مسؤول النظام.' });
+});
+
 // Get all API Providers (Admin Protected)
 router.get('/', authMiddleware, async (req, res) => {
   try {

@@ -4,3 +4,6 @@ database.json
 .DS_Store
 uploads/
 public/uploads/
+backups/
+*.tmp
+*.log

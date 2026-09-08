@@ -1,5 +1,5 @@
 /**
- * Telegram Bot Service — عرب تك سيرفر
+ * Telegram Bot Service — سيرفر الوفاق (Al-Wefaq)
  * Full Interactive System (OTP, Notifications, Orders Tracking, Direct Ordering)
  */
 
@@ -14,7 +14,7 @@ const { getQuery, runQuery, allQuery } = require('../db');
 const emailService = require('./emailService');
 
 // ── Config ────────────────────────────────────────────────────────────────────
-const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8902996463:AAE3zudjSRRGwYDHsbtSD_eg2SCYQM8NmjQ';
+const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8934320647:AAHa9v7csAx-aK-eT6ckHzfSq54vOZ_Wm3Q';
 const TG_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
 // ── User State (In-Memory) ───────────────────────────────────────────────────
@@ -158,7 +158,7 @@ async function sendCustomerOtp(customerId, code, username, actionLabel) {
     const row = await getQuery('SELECT telegram_chat_id FROM customers WHERE id = ?', [customerId]);
     if (!row || !row.telegram_chat_id) return false;
     const text =
-      `🔐 *عرب تك سيرفر — ${actionLabel || 'تأكيد الهوية'}*\n\n` +
+      `🔐 *سيرفر الوفاق — ${actionLabel || 'تأكيد الهوية'}*\n\n` +
       `مرحباً بك يا *${username}*،\n🔑 كود التحقق (OTP) الخاص بك هو:\n\n\`${code}\`\n\n⏱️ صالح لمدة 10 دقائق.\n🛡️ لا تشاركه مع أحد.`;
     return sendMessage(row.telegram_chat_id, text);
   } catch (err) { return false; }
@@ -828,7 +828,7 @@ async function processUpdate(update) {
     const customer = await getQuery('SELECT * FROM customers WHERE telegram_chat_id = ?', [chatId]);
     const buttons = [[{ text: '🛒 تصفح الخدمات والأسعار', callback_data: 'browse_cats' }]];
     
-    let welcomeMsg = `👋 مرحباً بك في بوت *عرب تك سيرفر*!\n\n📌 *قائمة الأوامر المتاحة:*\n🔎 \`/track 1005\` - لتتبع طلب محدد برقمه\n🔗 \`/unlink\` - لإلغاء ربط حسابك بهذا البوت\n\n`;
+    let welcomeMsg = `👋 مرحباً بك في بوت *سيرفر الوفاق (Al-Wefaq)*!\n\n📌 *قائمة الأوامر المتاحة:*\n🔎 \`/track 1005\` - لتتبع طلب محدد برقمه\n🔗 \`/unlink\` - لإلغاء ربط حسابك بهذا البوت\n\n`;
     
     if (!customer) {
       welcomeMsg += `⚠️ *أول مرة هنا؟* يجب عليك تسجيل الدخول أولاً لتتمكن من الشراء ومتابعة طلباتك.\n\nالرجاء اختيار طريقة تسجيل الدخول أو الربط من الأزرار بالأسفل:`;

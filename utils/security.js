@@ -31,7 +31,15 @@ function getAllowedOrigins() {
     'http://127.0.0.1:3001',
   ];
 
-  return Array.from(new Set([...configuredOrigins, ...devOrigins]));
+  const defaultAllowedOrigins = [
+    'https://al-wefaq.center',
+    'https://www.al-wefaq.center',
+    'https://api.al-wefaq.center',
+    'https://arab-tech1.online',
+    'https://api.arab-tech1.online',
+  ];
+
+  return Array.from(new Set([...configuredOrigins, ...defaultAllowedOrigins, ...devOrigins]));
 }
 
 function isOriginAllowed(origin, allowedOrigins) {
@@ -42,8 +50,11 @@ function isOriginAllowed(origin, allowedOrigins) {
     const url = new URL(origin);
     const hostname = url.hostname.toLowerCase();
     
-    // Dynamically allow all subdomains of arab-tech1.online
-    if (hostname === 'arab-tech1.online' || hostname.endsWith('.arab-tech1.online')) {
+    // Dynamically allow all subdomains of al-wefaq.center and arab-tech1.online
+    if (
+      hostname === 'al-wefaq.center' || hostname.endsWith('.al-wefaq.center') ||
+      hostname === 'arab-tech1.online' || hostname.endsWith('.arab-tech1.online')
+    ) {
       return true;
     }
   } catch (e) {

@@ -35,8 +35,8 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        - NEXT_PUBLIC_API_URL=https://spider-store-api.duckdns.org
-        - NEXT_PUBLIC_SITE_URL=https://arab-tech1.online
+        - NEXT_PUBLIC_API_URL=https://api.al-wefaq.center
+        - NEXT_PUBLIC_SITE_URL=https://al-wefaq.center
     container_name: spider-store-frontend
     restart: always
     ports:

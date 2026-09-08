@@ -66,6 +66,10 @@ const allowedOrigins = getAllowedOrigins();
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" },
   contentSecurityPolicy: false,
+  frameguard: { action: 'deny' },
+  noSniff: true,
+  xssFilter: true,
+  hidePoweredBy: true
 }));
 
 // ── Rate Limiting ────────────────────────────────────────────────────────────
@@ -88,6 +92,29 @@ const authLimiter = rateLimit({
 app.use('/api/auth/login', authLimiter);
 app.use('/api/customer/login', authLimiter);
 app.use('/api/customer/register', authLimiter);
+
+// Protect OTP verification endpoints against brute-force attacks
+const otpLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000, // 10 minutes
+  max: 15,
+  message: { message: 'محاولات تحقق مفرطة (OTP)، يرجى الانتظار 10 دقائق والمحاولة مجدداً.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use('/api/otp/', otpLimiter);
+app.use('/api/auth/verify-login-otp', otpLimiter);
+app.use('/api/customer/verify-auth-otp', otpLimiter);
+
+// Protect Provider APIs (Arab Tech Pro Server / DHRU) against hammering & quota exhaustion
+const providerLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 60, // max 60 requests per minute
+  message: { message: 'تم تجاوز معدل استدعاء مزود الخدمة، يرجى الانتظار دقيقة والمحاولة مجدداً.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use('/api/unlocker', providerLimiter);
+app.use('/api/api-providers', providerLimiter);
 
 // ── CORS ─────────────────────────────────────────────────────────────────────
 const corsOptions = {
@@ -150,14 +177,14 @@ app.use('/api', (req, res, next) => {
     apiCache.clear();
     return next();
   }
-  
+
   // Do not cache sensitive or dynamic user data routes
   const skipPaths = ['/auth', '/customer', '/wallet', '/otp', '/orders', '/backups', '/v1', '/telegram', '/settings/admin', '/analytics'];
   if (skipPaths.some(p => req.path.startsWith(p))) return next();
 
   const key = req.originalUrl;
   const cached = apiCache.get(key);
-  
+
   if (cached && (Date.now() - cached.time < CACHE_TTL_MS)) {
     res.setHeader('X-Server-Cache', 'HIT');
     return res.json(cached.data);
@@ -165,7 +192,7 @@ app.use('/api', (req, res, next) => {
 
   // Intercept response and save to cache
   const originalJson = res.json;
-  res.json = function(body) {
+  res.json = function (body) {
     if (res.statusCode === 200) {
       if (apiCache.size >= CACHE_MAX_ENTRIES && !apiCache.has(key)) {
         apiCache.delete(apiCache.keys().next().value);
@@ -215,7 +242,7 @@ app.get('/api/health', (req, res) => {
 // Start Server — bind to 0.0.0.0 so Docker proxy can reach it
 const server = app.listen(PORT, HOST, () => {
   console.log(`Backend server running on ${HOST}:${PORT}`);
-  
+
   // Automatically trigger WebP conversion for any existing legacy images
   try {
     const { runMigration } = require('./convert_images');
@@ -262,12 +289,12 @@ const server = app.listen(PORT, HOST, () => {
         country_code VARCHAR(10) DEFAULT 'EG',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )`);
-      
+
       // Migration to add country_code if the table already existed
       try {
         await db.db.query(`ALTER TABLE reviews ADD COLUMN IF NOT EXISTS country_code VARCHAR(10) DEFAULT 'EG'`);
-      } catch (alterErr) {}
-      
+      } catch (alterErr) { }
+
       console.log('[PostgreSQL] reviews table ensured.');
     } catch (e) {
       console.warn('[PostgreSQL] reviews table creation note:', e.message);
@@ -291,7 +318,7 @@ const server = app.listen(PORT, HOST, () => {
 
   // Keep-alive self-ping to prevent Koyeb / Render free tiers from sleeping
   setInterval(() => {
-    const targetUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://api.arab-tech1.online';
+    const targetUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://api.al-wefaq.center';
     fetch(`${targetUrl}/api/health`)
       .then(res => console.log('[Keep-Alive] Ping successful:', res.status))
       .catch(err => console.error('[Keep-Alive] Ping failed:', err.message));

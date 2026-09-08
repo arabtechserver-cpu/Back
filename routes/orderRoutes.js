@@ -316,9 +316,9 @@ router.post('/', async (req, res) => {
     // Auto-submit API orders paid with wallet balance in BACKGROUND (fire-and-forget)
     // This prevents timeout-caused duplicate submissions from the frontend
     let autoSubmitted = false;
-    if (normalizedPaymentMethod === 'wallet' && serviceInfo.api_source === 'amrr-unlocker') {
+    if (normalizedPaymentMethod === 'wallet' && (serviceInfo.api_source === 'amrr-unlocker' || serviceInfo.api_provider_id)) {
       const autoSubmitSetting = await getQuery("SELECT value FROM settings WHERE key = 'api_auto_submit'");
-      const isAutoSubmitEnabled = autoSubmitSetting ? autoSubmitSetting.value === 'true' : false; // Disabled by default per user request
+      const isAutoSubmitEnabled = autoSubmitSetting ? autoSubmitSetting.value === 'true' : false; // Only sent automatically if explicitly enabled by admin
       if (isAutoSubmitEnabled) {
         autoSubmitted = true;
         const orderId = result.lastID;
@@ -355,14 +355,14 @@ router.post('/', async (req, res) => {
             `\n🔗 راجع الطلب في لوحة التحكم`
           ].filter(Boolean).join('\n');
           for (const chatId of adminChatIds) {
-              let keyboard = null;
-              if (serviceInfo.api_provider_id && !autoSubmitted) {
-                keyboard = {
-                  inline_keyboard: [
-                    [{ text: 'موافقة وإرسال للمزود', callback_data: `approve_api_${orderId}` }]
-                  ]
-                };
-              }
+            let keyboard = null;
+            if ((serviceInfo.api_provider_id || serviceInfo.api_source) && !autoSubmitted) {
+              keyboard = {
+                inline_keyboard: [
+                  [{ text: 'موافقة وإرسال للمزود 🚀', callback_data: `approve_api_${orderId}` }]
+                ]
+              };
+            }
               if (savedReceiptPath) {
                 const fullImagePath = path.join(__dirname, '..', savedReceiptPath);
                 await telegram.sendPhoto(String(chatId), fullImagePath, tgMsg, keyboard).catch(() => {});
@@ -405,7 +405,7 @@ router.post('/', async (req, res) => {
             `▫️ الباقة: *${package_name}*`,
             `▫️ الحالة: ⏳ قيد المراجعة والتنفيذ`,
             ``,
-            `سوف تصلك رسالة أخرى فور إتمام تنفيذه من الإدارة.\nشكراً لثقتك بنا! 🚀 — عرب تك سيرفر`
+            `سوف تصلك رسالة أخرى فور إتمام تنفيذه من الإدارة.\nشكراً لثقتك بنا! 🚀 — سيرفر الوفاق`
           ].join('\n');
           await telegram.sendMessage(customer.telegram_chat_id, tgMsg);
           console.log(`[Telegram Customer] Order #${orderId} submitted notification sent ✓`);

@@ -6,9 +6,9 @@ const { getQuery } = require('../db');
  * Get Loops configuration (API key and transactional IDs) from settings DB or process.env
  */
 async function getLoopsConfig() {
-  let loopsApiKey = process.env.LOOPS_API_KEY || 'c54fb8a81230d2f9432530b5fdf9ac4b';
-  let loopsTransactionalIdOtp = process.env.LOOPS_TRANSACTIONAL_ID_OTP || 'cmrv2rlz301lp0j2pig1clc4n';
-  let loopsTransactionalIdReset = process.env.LOOPS_TRANSACTIONAL_ID_RESET || 'cmrv2rlz301lp0j2pig1clc4n';
+  let loopsApiKey = process.env.LOOPS_API_KEY || '83a547eef80c7b3147e0ecf9d87d4127';
+  let loopsTransactionalIdOtp = process.env.LOOPS_TRANSACTIONAL_ID_OTP || 'cmtg9w7hh018j0jymc2bx2kzc';
+  let loopsTransactionalIdReset = process.env.LOOPS_TRANSACTIONAL_ID_RESET || 'cmtg9w7hh018j0jymc2bx2kzc';
 
   try {
     const keyRow = await getQuery("SELECT value FROM settings WHERE key = 'loops_api_key'");
@@ -26,22 +26,57 @@ async function getLoopsConfig() {
 }
 
 /**
- * Send Transactional Email via Loops API (https://app.loops.so/api/v1/transactional)
+ * Send Transactional Email via Resend API (Primary)
  */
-async function sendViaLoops(toEmail, transactionalId, dataVariables) {
-  const { loopsApiKey } = await getLoopsConfig();
-  if (!loopsApiKey || !transactionalId) {
-    return false;
-  }
+async function sendViaResendDirect(toEmail, subject, html) {
+  const resendKey = process.env.RESEND_API_KEY || "";
+  const resendFrom = process.env.RESEND_FROM || "arabtechproserver.tech <arabtechproserver@arabtechproserver.tech>";
+  
+  return new Promise((resolve) => {
+    const payload = JSON.stringify({
+      from: resendFrom,
+      to: [toEmail],
+      subject,
+      html
+    });
 
-  const payload = JSON.stringify({
-    transactionalId,
-    email: toEmail,
-    addToAudience: true,
-    dataVariables
+    const options = {
+      hostname: 'api.resend.com',
+      port: 443,
+      path: '/emails',
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${resendKey}`,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(payload)
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', c => data += c);
+      res.on('end', () => resolve(res.statusCode >= 200 && res.statusCode < 300));
+    });
+    req.on('error', () => resolve(false));
+    req.write(payload);
+    req.end();
   });
+}
+
+/**
+ * Send Transactional Email via Loops API (Fallback)
+ */
+async function sendViaLoops(toEmail, transactionalId, dataVariables = {}) {
+  const { loopsApiKey } = await getLoopsConfig();
+  if (!loopsApiKey) return false;
 
   return new Promise((resolve) => {
+    const payload = JSON.stringify({
+      email: toEmail,
+      transactionalId,
+      dataVariables
+    });
+
     const options = {
       hostname: 'app.loops.so',
       port: 443,
@@ -139,11 +174,11 @@ function getHtmlWrapper(title, contentHtml) {
 </head>
 <body style="font-family: Arial, sans-serif; direction: rtl; text-align: right; background-color: #ffffff; color: #333333; margin: 0; padding: 20px;">
   <div style="max-width: 600px; margin: 0 auto; border: 1px solid #dddddd; border-radius: 8px; padding: 20px;">
-    <h2 style="color: #0056b3; margin-top: 0; text-align: center;">عرب تك سيرفر</h2>
+    <h2 style="color: #0056b3; margin-top: 0; text-align: center;">سيرفر الوفاق</h2>
     <hr style="border: 0; border-top: 1px solid #eeeeee; margin-bottom: 20px;">
     ${contentHtml}
     <hr style="border: 0; border-top: 1px solid #eeeeee; margin-top: 30px; margin-bottom: 20px;">
-    <p style="font-size: 12px; color: #888888; text-align: center;">جميع الحقوق محفوظة © عرب تك سيرفر<br>هذه رسالة تلقائية، يرجى عدم الرد عليها مباشرة.</p>
+    <p style="font-size: 12px; color: #888888; text-align: center;">جميع الحقوق محفوظة © سيرفر الوفاق<br>هذه رسالة تلقائية، يرجى عدم الرد عليها مباشرة.</p>
   </div>
 </body>
 </html>
@@ -153,7 +188,7 @@ function getHtmlWrapper(title, contentHtml) {
 /**
  * Modern HTML email template for Customer OTP & Password Reset
  */
-function getCustomerEmailTemplate({ siteName = 'عرب تك سيرفر', username = 'عزيزنا العميل', title = '', messageBody = '', otpCode = null, resetUrl = null }) {
+function getCustomerEmailTemplate({ siteName = 'سيرفر الوفاق', username = 'عزيزنا العميل', title = '', messageBody = '', otpCode = null, resetUrl = null }) {
   const currentYear = new Date().getFullYear();
   return `
 <!DOCTYPE html>
@@ -245,9 +280,9 @@ async function sendOrderSubmittedEmail(toEmail, { orderId, serviceName, packageN
     return false;
   }
 
-  const title = `[عرب تك سيرفر] تم استلام طلبك رقم #${orderId} بنجاح ⏳`;
+  const title = `[سيرفر الوفاق] تم استلام طلبك رقم #${orderId} بنجاح ⏳`;
   const content = `
-    <h2 style="color: #60a5fa; margin-top: 0;">📦 مرحباً بك في عرب تك سيرفر!</h2>
+    <h2 style="color: #60a5fa; margin-top: 0;">📦 مرحباً بك في سيرفر الوفاق!</h2>
     <p>لقد استلمنا طلبك الجديد بنجاح، وهو الآن <strong>قيد المراجعة والتنفيذ الفوري</strong> من قبل فريق العمل أو النظام الآلي.</p>
     
     <div class="order-box">
@@ -284,7 +319,7 @@ async function sendOrderSubmittedEmail(toEmail, { orderId, serviceName, packageN
 
   try {
     const info = await transporter.sendMail({
-      from: `"عرب تك سيرفر" <${transporter.options.auth.user}>`,
+      from: `"سيرفر الوفاق" <${transporter.options.auth.user}>`,
       to: toEmail,
       subject: title,
       html: getHtmlWrapper(title, content)
@@ -353,12 +388,12 @@ async function sendOrderCompletedEmail(toEmail, { orderId, serviceName, packageN
   }
 
   content += `
-    <p>نتمنى لك تجربة استخدام رائعة وممتعة، ونسعد دائماً بخدمتك في عرب تك سيرفر! ❤️</p>
+    <p>نتمنى لك تجربة استخدام رائعة وممتعة، ونسعد دائماً بخدمتك في سيرفر الوفاق! ❤️</p>
   `;
 
   try {
     const info = await transporter.sendMail({
-      from: `"عرب تك سيرفر" <${transporter.options.auth.user}>`,
+      from: `"سيرفر الوفاق" <${transporter.options.auth.user}>`,
       to: toEmail,
       subject: title,
       html: getHtmlWrapper(title, content)
@@ -376,7 +411,7 @@ async function sendOrderCompletedEmail(toEmail, { orderId, serviceName, packageN
  */
 async function sendCustomerAuthOtpEmail(toEmail, { code, username, actionLabel }) {
   if (!toEmail) return false;
-  const siteName = 'عرب تك سيرفر';
+  const siteName = 'سيرفر الوفاق';
 
   // 1. Send via Loops API (User requested primary)
   const { loopsTransactionalIdOtp } = await getLoopsConfig();
@@ -389,7 +424,7 @@ async function sendCustomerAuthOtpEmail(toEmail, { code, username, actionLabel }
     otp_code: code,
     message_body: `لقد تم طلب كود تحقق الأمان من أجل ${actionLabel || 'تفعيل وإتمام الدخول لحسابك'}.`,
     actionLabel: actionLabel || 'تأكيد الحساب',
-    reset_url: 'https://arab-tech1.online'
+    reset_url: 'https://al-wefaq.center'
   });
 
   if (loopsSuccess) {
@@ -431,7 +466,7 @@ async function sendCustomerAuthOtpEmail(toEmail, { code, username, actionLabel }
  */
 async function sendPasswordResetEmail(toEmail, { username, resetUrl }) {
   if (!toEmail) return false;
-  const siteName = 'عرب تك سيرفر';
+  const siteName = 'سيرفر الوفاق';
 
   // 1. Send via Loops API (User requested primary)
   const { loopsTransactionalIdReset, loopsTransactionalIdOtp } = await getLoopsConfig();
@@ -484,7 +519,7 @@ async function sendPasswordResetEmail(toEmail, { username, resetUrl }) {
 /**
  * Send admin email notification when a wallet recharge request is submitted
  */
-async function sendWalletRechargeAdminEmail(adminEmail, { requestId, customerUsername, amount, currency, senderPhone, notes }) {
+async function sendWalletRechargeAdminEmail(adminEmail, { requestId, customerUsername, paymentMethod, amount, currency, senderPhone, notes }) {
   const transporter = await getTransporter();
   if (!transporter) return false;
 
@@ -505,6 +540,12 @@ async function sendWalletRechargeAdminEmail(adminEmail, { requestId, customerUse
         <span class="order-label">اسم العميل:</span>
         <span class="order-value">${customerUsername}</span>
       </div>
+      ${paymentMethod ? `
+      <div class="order-item">
+        <span class="order-label">طريقة الدفع / الخدمة:</span>
+        <span class="order-value" style="color: #38bdf8; font-weight: bold;">${paymentMethod}</span>
+      </div>
+      ` : ''}
       <div class="order-item">
         <span class="order-label">المبلغ المطلوب:</span>
         <span class="order-value" style="color: #4ade80; font-size: 18px;">${amount} ${currency || 'USD'}</span>
@@ -530,7 +571,7 @@ async function sendWalletRechargeAdminEmail(adminEmail, { requestId, customerUse
 
   try {
     const info = await transporter.sendMail({
-      from: `"عرب تك سيرفر" <${transporter.options.auth.user}>`,
+      from: `"سيرفر الوفاق" <${transporter.options.auth.user}>`,
       to: targetEmail,
       subject: title,
       html: getHtmlWrapper(title, content)
@@ -645,7 +686,7 @@ async function sendAdminOtpEmail(toEmail, { code, action, customMessage }) {
     return false;
   }
 
-  const title = `[عرب تك سيرفر] كود تحقق أمان الإدارة (OTP) 🔐`;
+  const title = `[سيرفر الوفاق] كود تحقق أمان الإدارة (OTP) 🔐`;
   
   let actionText = '';
   if (action === 'admin_login') {
@@ -674,7 +715,7 @@ async function sendAdminOtpEmail(toEmail, { code, action, customMessage }) {
 
   try {
     const info = await transporter.sendMail({
-      from: `"عرب تك سيرفر" <${transporter.options.auth.user}>`,
+      from: `"سيرفر الوفاق" <${transporter.options.auth.user}>`,
       to: toEmail,
       subject: title,
       html: getHtmlWrapper(title, content)
