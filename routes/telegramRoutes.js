@@ -97,7 +97,7 @@ router.post('/test', authMiddleware, async (req, res) => {
   for (const chatId of adminIds) {
     const ok = await telegram.sendMessage(
       String(chatId),
-      '✅ *اختبار بوت سيرفر الوفاق*\n\nالبوت يعمل بشكل صحيح وجاهز لإرسال كودات التحقق (OTP) والإشعارات! 🚀'
+      '✅ *اختبار بوت SK-unlocker*\n\nالبوت يعمل بشكل صحيح وجاهز لإرسال كودات التحقق (OTP) والإشعارات! 🚀'
     );
     results.push({ chatId, ok });
   }

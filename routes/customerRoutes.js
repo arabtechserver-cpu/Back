@@ -1385,19 +1385,19 @@ router.post('/passkey/register-challenge', customerAuth, async (req, res) => {
 
     // Extract exact browser domain from origin or referer header to satisfy WebAuthn RP ID requirements
     const originHeader = req.headers.origin || req.headers.referer || '';
-    let rpDomain = 'al-wefaq.center';
+    let rpDomain = 'SK-unlocker.center';
     try {
       if (originHeader) {
         const parsedUrl = new URL(originHeader);
         rpDomain = parsedUrl.hostname;
       }
     } catch (e) {
-      rpDomain = 'al-wefaq.center';
+      rpDomain = 'SK-unlocker.center';
     }
 
     const options = {
       challenge,
-      rp: { name: 'سيرفر الوفاق', id: rpDomain },
+      rp: { name: 'SK-unlocker', id: rpDomain },
       user: {
         id: Buffer.from(String(customer.id)).toString('base64url'),
         name: customer.username,

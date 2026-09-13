@@ -401,13 +401,18 @@ router.get('/popular', async (req, res) => {
 router.get('/:id', async (req, res) => {
   const { id } = req.params;
 
+  // Guard: reject non-numeric or null IDs immediately — prevents PostgreSQL type errors
+  if (!id || id === 'null' || id === 'undefined' || !/^\d+$/.test(id)) {
+    return res.status(404).json({ message: 'الخدمة غير موجودة.' });
+  }
+
   try {
     const service = await getQuery(`
       SELECT s.*, c.currency as category_currency, c.fields as category_fields, c.fields_title as category_fields_title 
       FROM services s 
       LEFT JOIN categories c ON s.category_id = c.id 
       WHERE s.id = ?
-    `, [id]);
+    `, [parseInt(id, 10)]);
     
     if (!service) {
       return res.status(404).json({ message: 'الخدمة غير موجودة.' });

@@ -32,7 +32,9 @@ function getAllowedOrigins() {
   ];
 
   const defaultAllowedOrigins = [
-    'https://al-wefaq.center',
+    'https://sk-unlocker.com',
+    'https://www.sk-unlocker.com',
+    'https://api.sk-unlocker.com',
     'https://www.al-wefaq.center',
     'https://api.al-wefaq.center',
     'https://arab-tech1.online',
@@ -52,7 +54,7 @@ function isOriginAllowed(origin, allowedOrigins) {
     
     // Dynamically allow all subdomains of al-wefaq.center and arab-tech1.online
     if (
-      hostname === 'al-wefaq.center' || hostname.endsWith('.al-wefaq.center') ||
+      hostname === 'sk-unlocker.com' || hostname.endsWith('.sk-unlocker.com') || hostname === 'al-wefaq.center' || hostname.endsWith('.al-wefaq.center') ||
       hostname === 'arab-tech1.online' || hostname.endsWith('.arab-tech1.online')
     ) {
       return true;

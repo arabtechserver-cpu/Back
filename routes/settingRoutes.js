@@ -77,7 +77,7 @@ router.get('/admin', authMiddleware, async (req, res) => {
 
     res.set('Cache-Control', 'no-store, max-age=0');
     res.json({
-      site_name: settings.site_name || 'سيرفر الوفاق - Al-Wefaq Server',
+      site_name: settings.site_name || 'SK-unlocker',
       site_logo: settings.site_logo || '/logo.jpg',
       site_favicon: settings.site_favicon || '/favicon.png',
       payment_methods: parseSetting(settings.payment_methods, []),
@@ -117,7 +117,7 @@ router.get('/metadata', async (req, res) => {
 
     res.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=3600');
     res.json({
-      site_name: settings.site_name || 'سيرفر الوفاق - Al-Wefaq Server',
+      site_name: settings.site_name || 'SK-unlocker',
       site_logo: settings.site_logo || '/logo.jpg',
       site_favicon: settings.site_favicon || '/favicon.png',
       base_currency: settings.base_currency || 'USD',
@@ -195,7 +195,7 @@ router.get('/', async (req, res) => {
 
     res.json({
       announcement_text: settings.announcement_text || '🟢 واتساب الإدارة 1: +1 (672) 897-2935 | 🟢 واتساب الإدارة 2: +249 12 366 7227',
-      site_name: settings.site_name || 'سيرفر الوفاق - Al-Wefaq Server',
+      site_name: settings.site_name || 'SK-unlocker',
       site_logo: settings.site_logo || '/logo.jpg',
       site_favicon: settings.site_favicon || '/favicon.png',
       payment_methods: stripInlinePaymentLogos(paymentMethods),

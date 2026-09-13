@@ -174,11 +174,11 @@ function getHtmlWrapper(title, contentHtml) {
 </head>
 <body style="font-family: Arial, sans-serif; direction: rtl; text-align: right; background-color: #ffffff; color: #333333; margin: 0; padding: 20px;">
   <div style="max-width: 600px; margin: 0 auto; border: 1px solid #dddddd; border-radius: 8px; padding: 20px;">
-    <h2 style="color: #0056b3; margin-top: 0; text-align: center;">سيرفر الوفاق</h2>
+    <h2 style="color: #0056b3; margin-top: 0; text-align: center;">SK-unlocker</h2>
     <hr style="border: 0; border-top: 1px solid #eeeeee; margin-bottom: 20px;">
     ${contentHtml}
     <hr style="border: 0; border-top: 1px solid #eeeeee; margin-top: 30px; margin-bottom: 20px;">
-    <p style="font-size: 12px; color: #888888; text-align: center;">جميع الحقوق محفوظة © سيرفر الوفاق<br>هذه رسالة تلقائية، يرجى عدم الرد عليها مباشرة.</p>
+    <p style="font-size: 12px; color: #888888; text-align: center;">جميع الحقوق محفوظة © SK-unlocker<br>هذه رسالة تلقائية، يرجى عدم الرد عليها مباشرة.</p>
   </div>
 </body>
 </html>
@@ -188,7 +188,7 @@ function getHtmlWrapper(title, contentHtml) {
 /**
  * Modern HTML email template for Customer OTP & Password Reset
  */
-function getCustomerEmailTemplate({ siteName = 'سيرفر الوفاق', username = 'عزيزنا العميل', title = '', messageBody = '', otpCode = null, resetUrl = null }) {
+function getCustomerEmailTemplate({ siteName = 'SK-unlocker', username = 'عزيزنا العميل', title = '', messageBody = '', otpCode = null, resetUrl = null }) {
   const currentYear = new Date().getFullYear();
   return `
 <!DOCTYPE html>
@@ -280,9 +280,9 @@ async function sendOrderSubmittedEmail(toEmail, { orderId, serviceName, packageN
     return false;
   }
 
-  const title = `[سيرفر الوفاق] تم استلام طلبك رقم #${orderId} بنجاح ⏳`;
+  const title = `[SK-unlocker] تم استلام طلبك رقم #${orderId} بنجاح ⏳`;
   const content = `
-    <h2 style="color: #60a5fa; margin-top: 0;">📦 مرحباً بك في سيرفر الوفاق!</h2>
+    <h2 style="color: #60a5fa; margin-top: 0;">📦 مرحباً بك في SK-unlocker!</h2>
     <p>لقد استلمنا طلبك الجديد بنجاح، وهو الآن <strong>قيد المراجعة والتنفيذ الفوري</strong> من قبل فريق العمل أو النظام الآلي.</p>
     
     <div class="order-box">
@@ -319,7 +319,7 @@ async function sendOrderSubmittedEmail(toEmail, { orderId, serviceName, packageN
 
   try {
     const info = await transporter.sendMail({
-      from: `"سيرفر الوفاق" <${transporter.options.auth.user}>`,
+      from: `"SK-unlocker" <${transporter.options.auth.user}>`,
       to: toEmail,
       subject: title,
       html: getHtmlWrapper(title, content)
@@ -388,12 +388,12 @@ async function sendOrderCompletedEmail(toEmail, { orderId, serviceName, packageN
   }
 
   content += `
-    <p>نتمنى لك تجربة استخدام رائعة وممتعة، ونسعد دائماً بخدمتك في سيرفر الوفاق! ❤️</p>
+    <p>نتمنى لك تجربة استخدام رائعة وممتعة، ونسعد دائماً بخدمتك في SK-unlocker! ❤️</p>
   `;
 
   try {
     const info = await transporter.sendMail({
-      from: `"سيرفر الوفاق" <${transporter.options.auth.user}>`,
+      from: `"SK-unlocker" <${transporter.options.auth.user}>`,
       to: toEmail,
       subject: title,
       html: getHtmlWrapper(title, content)
@@ -411,7 +411,7 @@ async function sendOrderCompletedEmail(toEmail, { orderId, serviceName, packageN
  */
 async function sendCustomerAuthOtpEmail(toEmail, { code, username, actionLabel }) {
   if (!toEmail) return false;
-  const siteName = 'سيرفر الوفاق';
+  const siteName = 'SK-unlocker';
 
   // 1. Send via Loops API (User requested primary)
   const { loopsTransactionalIdOtp } = await getLoopsConfig();
@@ -424,7 +424,7 @@ async function sendCustomerAuthOtpEmail(toEmail, { code, username, actionLabel }
     otp_code: code,
     message_body: `لقد تم طلب كود تحقق الأمان من أجل ${actionLabel || 'تفعيل وإتمام الدخول لحسابك'}.`,
     actionLabel: actionLabel || 'تأكيد الحساب',
-    reset_url: 'https://al-wefaq.center'
+    reset_url: 'https://SK-unlocker.center'
   });
 
   if (loopsSuccess) {
@@ -466,7 +466,7 @@ async function sendCustomerAuthOtpEmail(toEmail, { code, username, actionLabel }
  */
 async function sendPasswordResetEmail(toEmail, { username, resetUrl }) {
   if (!toEmail) return false;
-  const siteName = 'سيرفر الوفاق';
+  const siteName = 'SK-unlocker';
 
   // 1. Send via Loops API (User requested primary)
   const { loopsTransactionalIdReset, loopsTransactionalIdOtp } = await getLoopsConfig();
@@ -571,7 +571,7 @@ async function sendWalletRechargeAdminEmail(adminEmail, { requestId, customerUse
 
   try {
     const info = await transporter.sendMail({
-      from: `"سيرفر الوفاق" <${transporter.options.auth.user}>`,
+      from: `"SK-unlocker" <${transporter.options.auth.user}>`,
       to: targetEmail,
       subject: title,
       html: getHtmlWrapper(title, content)
@@ -686,7 +686,7 @@ async function sendAdminOtpEmail(toEmail, { code, action, customMessage }) {
     return false;
   }
 
-  const title = `[سيرفر الوفاق] كود تحقق أمان الإدارة (OTP) 🔐`;
+  const title = `[SK-unlocker] كود تحقق أمان الإدارة (OTP) 🔐`;
   
   let actionText = '';
   if (action === 'admin_login') {
@@ -715,7 +715,7 @@ async function sendAdminOtpEmail(toEmail, { code, action, customMessage }) {
 
   try {
     const info = await transporter.sendMail({
-      from: `"سيرفر الوفاق" <${transporter.options.auth.user}>`,
+      from: `"SK-unlocker" <${transporter.options.auth.user}>`,
       to: toEmail,
       subject: title,
       html: getHtmlWrapper(title, content)

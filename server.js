@@ -44,12 +44,7 @@ const aiRoutes = require('./routes/aiRoutes');
 const telegram = require('./utils/telegramService');
 const { startDatabaseBackupScheduler } = require('./utils/databaseBackup');
 const { startAutoSyncScheduler } = require('./utils/autoSync');
-// Load update_contact_info safely (may not exist in all environments)
-try {
-  require('./update_contact_info');
-} catch (e) {
-  // Not critical — skip if missing
-}
+
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -257,16 +252,6 @@ const server = app.listen(PORT, HOST, () => {
     console.error('[Auto-Convert] Failed to start image conversion:', e.message);
   }
 
-  // Automatically deduplicate database on startup and every 6 hours
-  setTimeout(() => {
-    const { removeDuplicates } = require('./remove_duplicates');
-    removeDuplicates().catch(err => console.error('[Auto Clean] Error deduplicating on startup:', err.message));
-  }, 10000); // 10 seconds after startup to ensure DB is connected
-
-  setInterval(() => {
-    const { removeDuplicates } = require('./remove_duplicates');
-    removeDuplicates().catch(err => console.error('[Auto Clean] Error deduplicating:', err.message));
-  }, 6 * 60 * 60 * 1000); // every 6 hours
 
   // ── Telegram bot migration: ensure telegram_chat_id column exists ──────────
   (async () => {
@@ -318,8 +303,8 @@ const server = app.listen(PORT, HOST, () => {
 
   // Keep-alive self-ping to prevent Koyeb / Render free tiers from sleeping
   setInterval(() => {
-    const targetUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://api.al-wefaq.center';
-    fetch(`${targetUrl}/api/health`)
+    const selfUrl = process.env.BACKEND_URL || `http://localhost:${PORT}`;
+    fetch(`${selfUrl}/api/health`)
       .then(res => console.log('[Keep-Alive] Ping successful:', res.status))
       .catch(err => console.error('[Keep-Alive] Ping failed:', err.message));
   }, 10 * 60 * 1000); // Every 10 minutes

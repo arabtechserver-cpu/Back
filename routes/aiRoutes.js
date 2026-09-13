@@ -58,13 +58,13 @@ try {
 
 // System prompt to define the AI's behavior
 const SYSTEM_PROMPT = `
-أنت "المساعد الذكي للدعم الفني وخدمة العملاء والتفاوض" لمنصة "سيرفر الوفاق" (Al-Wefaq Server).
+أنت "المساعد الذكي للدعم الفني وخدمة العملاء والتفاوض" لمنصة "SK-unlocker".
 أنت تتحدث بأسلوب بشري ذكي، لبق، متفهم، هادئ، واحترافي جداً.
 
 قواعدك الأساسية في الحوار:
 1. **الاستماع والنقاش البناء والوصول لحل**:
    - ناقش العميل في كلامه تحديداً وتفاعل معه بود وهدوء.
-   - إذا كان العميل غاضباً أو يشتكي من خسارة أو منافسة أو أسعار: تفهم موقفه فوراً بكل احترام، وأكد له أن سيرفر الوفاق (Al-Wefaq Server) شريك داعم للتجار والفنيين، واعرض عليه باقات خاصة للموزعين وأسعار خاصة لتعويض أي ضرر عبر الـ API.
+   - إذا كان العميل غاضباً أو يشتكي من خسارة أو منافسة أو أسعار: تفهم موقفه فوراً بكل احترام، وأكد له أن SK-unlocker شريك داعم للتجار والفنيين، واعرض عليه باقات خاصة للموزعين وأسعار خاصة لتعويض أي ضرر عبر الـ API.
 2. **حل المشاكل التقنية واسترجاع الرصيد**:
    - إذا اشتكى العميل من تأخر طلب، كود، أو طلب استرجاع رصيد: اسأله بلطف عن رقم الطلب (Order ID) أو اسم الخدمة، وطمئنه بأن سياسة السيرفر تضمن استرجاع الرصيد 100% لمحفظته في حال وجود أي مشكلة.
 3. **رفع التذاكر وإشعار الإدارة على تيليجرام (submit_complaint)**:
@@ -80,8 +80,8 @@ Understand Modern Standard Arabic, Egyptian Arabic, Sudanese Arabic, Gulf, Levan
 `;
 
 const SITE_CONTEXT = `
-اسم المنصة: Al-Wefaq Server (سيرفر الوفاق) لخدمات السيرفرات والتفعيلات وأدوات GSM وفتح الهواتف.
-الصفحات: الرئيسية https://al-wefaq.center | الخدمات https://al-wefaq.center/services | المحفظة https://al-wefaq.center/wallet | الشروط وسياسة الاسترجاع https://al-wefaq.center/terms | الدعم الفني https://al-wefaq.center/tickets/new
+اسم المنصة: SK-unlocker لخدمات السيرفرات والتفعيلات وأدوات GSM وفتح الهواتف.
+الصفحات: الرئيسية https://sk-unlocker.com | الخدمات https://sk-unlocker.com/services | المحفظة https://sk-unlocker.com/wallet | الشروط وسياسة الاسترجاع https://sk-unlocker.com/terms | الدعم الفني https://sk-unlocker.com/tickets/new
 التواصل الرسمي:
 - واتساب الإدارة 1: https://wa.me/249118100809 (+249 11 810 0809)
 - واتساب الإدارة 2: https://wa.me/249927922237 (+249 92 792 2237)
@@ -213,7 +213,7 @@ async function sendTicketTelegramNotification({ complaintId, customerName, email
       `📄 *تفاصيل المشكلة:*\n${details}\n\n` +
       `🕒 *التاريخ والوقت:* ${formattedDate}\n` +
       `━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `🤖 *تم الإنشاء بواسطة:* _Al-Wefaq AI Smart Assistant_`;
+      `🤖 *تم الإنشاء بواسطة:* _SK-unlocker AI Smart Assistant_`;
 
     for (const adminId of admins) {
       await telegram.sendMessage(String(adminId), tgMessage).catch(err => {
@@ -327,11 +327,11 @@ async function executeToolCall(toolCall, customerId, guestInfo = {}) {
         try { packages = typeof s.packages === 'string' ? JSON.parse(s.packages || '[]') : (s.packages || []); } catch {}
         const matchingPackages = packages.filter(pkg => searchTerms.some(term => JSON.stringify(pkg).toLowerCase().includes(term)));
         return { id: s.id, name: s.name, price: s.price, category: s.category_name, packages: matchingPackages.length ? matchingPackages : packages,
-          url: `https://al-wefaq.center/service/${s.id}` };
+          url: `https://sk-unlocker.com/service/${s.id}` };
       });
       if (results.length) return { results };
       const fallback = imeiServices.filter(s => s.name.toLowerCase().includes(query) || s.group.toLowerCase().includes(query)).slice(0, 5)
-        .map(s => ({ ...s, url: `https://al-wefaq.center/service/${s.id}` }));
+        .map(s => ({ ...s, url: `https://sk-unlocker.com/service/${s.id}` }));
       return { results: fallback };
     }
   } catch (e) {
@@ -361,7 +361,7 @@ async function buildLocalReply(message, customerId, guestInfo = {}) {
 
   // 1. Discussions about competition, losses, merchant grievances
   if (/تنافس|بتنافس|خسرت|تخسرني|بتخصرني|خصرت|عملاء|خف اداء|عيب|منافسة/.test(normalized)) {
-    return `أهلاً بك يا غالي ويسعدنا جداً سماع وجهة نظرك وتفهم موقفك تماماً! 🤝\n\nنحن في **سيرفر الوفاق (Al-Wefaq)** هدفنا الأول ليس منافسة زملائنا التجار أو أصحاب المحلات، بل بالعكس تماماً نحن نوفر أسعار جملة وسيرفرات API مباشرة لتمكين التجار والفنيين من تحقيق أعلى هامش ربح وخدمة عملائهم بأسرع وقت وبأقل تكلفة.\n\nإذا كنت صاحب متجر أو فني، يسعدنا فتح **حساب تاجر / موزع VIP** لك بأسعار مخصصة وأعلى نسبة خصم، حتى نكون شركاء نجاح معاً! هل تحب أن أوصلك مباشرة بالإدارة لمناقشة أسعار الجملة والشراكة، أو لديك طلب أو استفسار محدد؟`;
+    return `أهلاً بك يا غالي ويسعدنا جداً سماع وجهة نظرك وتفهم موقفك تماماً! 🤝\n\nنحن في **SK-unlocker** هدفنا الأول ليس منافسة زملائنا التجار أو أصحاب المحلات، بل بالعكس تماماً نحن نوفر أسعار جملة وسيرفرات API مباشرة لتمكين التجار والفنيين من تحقيق أعلى هامش ربح وخدمة عملائهم بأسرع وقت وبأقل تكلفة.\n\nإذا كنت صاحب متجر أو فني، يسعدنا فتح **حساب تاجر / موزع VIP** لك بأسعار مخصصة وأعلى نسبة خصم، حتى نكون شركاء نجاح معاً! هل تحب أن أوصلك مباشرة بالإدارة لمناقشة أسعار الجملة والشراكة، أو لديك طلب أو استفسار محدد؟`;
   }
 
   // 2. Clear request to file a complaint or ticket
@@ -406,7 +406,7 @@ async function buildLocalReply(message, customerId, guestInfo = {}) {
 
   // 4. Developer / Designer inquiries
   if (/مصمم|مبرمج|مطور|مين عمل|developer|programmer|designer/.test(normalized)) {
-    return 'مصمم ومبرمج موقع سيرفر الوفاق (Al-Wefaq) هو Mina Samir، ورقم التواصل: 01279301263.';
+    return 'مصمم ومبرمج موقع SK-unlocker هو Mina Samir، ورقم التواصل: 01279301263.';
   }
 
   // 5. Official Contacts
@@ -416,17 +416,17 @@ async function buildLocalReply(message, customerId, guestInfo = {}) {
 
   // 6. User profile / Wallet Balance
   if (/رصيد|محفظ|balance|wallet/.test(normalized)) {
-    if (!customerId) return 'لعرض رصيدك والشحن، يرجى تسجيل الدخول: https://al-wefaq.center/login';
+    if (!customerId) return 'لعرض رصيدك والشحن، يرجى تسجيل الدخول: https://sk-unlocker.com/login';
     const customer = await getQuery('SELECT balance FROM customers WHERE id = ?', [customerId]);
-    return `رصيد محفظتك الحالي: **${Number(customer?.balance || 0).toFixed(2)} USD**\nيمكنك شحن المحفظة من هنا: https://al-wefaq.center/wallet`;
+    return `رصيد محفظتك الحالي: **${Number(customer?.balance || 0).toFixed(2)} USD**\nيمكنك شحن المحفظة من هنا: https://sk-unlocker.com/wallet`;
   }
 
   // 7. Orders history
   if (/طلب|طلبات|order|اتعمل|اكتمل|لسه/.test(normalized)) {
-    if (!customerId) return 'لعرض وتتبع طلباتك، يرجى تسجيل الدخول: https://al-wefaq.center/login';
+    if (!customerId) return 'لعرض وتتبع طلباتك، يرجى تسجيل الدخول: https://sk-unlocker.com/login';
     const rows = await allQuery(`SELECT id, service_name, package_name, package_price, status FROM orders WHERE customer_id = ? ORDER BY id DESC LIMIT 5`, [customerId]);
-    if (!rows?.length) return 'لا توجد طلبات مسجلة على حسابك حتى الآن. يمكنك تصفح الخدمات والشراء من: https://al-wefaq.center/services';
-    return `آخر طلباتك:\n${rows.map(order => `• #${order.id} — ${order.service_name || 'خدمة'} — ${formatOrderStatus(order.status)} — $${Number(order.package_price || 0).toFixed(2)}`).join('\n')}\nتتبع كل الطلبات: https://al-wefaq.center/orders`;
+    if (!rows?.length) return 'لا توجد طلبات مسجلة على حسابك حتى الآن. يمكنك تصفح الخدمات والشراء من: https://sk-unlocker.com/services';
+    return `آخر طلباتك:\n${rows.map(order => `• #${order.id} — ${order.service_name || 'خدمة'} — ${formatOrderStatus(order.status)} — $${Number(order.package_price || 0).toFixed(2)}`).join('\n')}\nتتبع كل الطلبات: https://sk-unlocker.com/orders`;
   }
 
   // 8. Service / Catalog Search
@@ -438,7 +438,7 @@ async function buildLocalReply(message, customerId, guestInfo = {}) {
     }
   }
 
-  return `أهلاً بك في الدعم الفني الذكي لمنصة **سيرفر الوفاق (Al-Wefaq)**! 🤖\n\nأنا هنا لمساعدتك في أي استفسار حول خدمات السيرفر، فحص الطلبات وتتبعها، أو التنسيق لحل أي مشكلة أو فتح تذكرة دعم مباشرة للإدارة.\n\nكيف يمكنني خدمتك اليوم؟`;
+  return `أهلاً بك في الدعم الفني الذكي لمنصة **SK-unlocker**! 🤖\n\nأنا هنا لمساعدتك في أي استفسار حول خدمات السيرفر، فحص الطلبات وتتبعها، أو التنسيق لحل أي مشكلة أو فتح تذكرة دعم مباشرة للإدارة.\n\nكيف يمكنني خدمتك اليوم؟`;
 }
 
 // Make direct call to OpenRouter API (Single Model - No Switching)
@@ -455,8 +455,8 @@ async function callOpenRouter(messages) {
     headers: {
       'Authorization': `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://al-wefaq.center', 
-      'X-Title': 'Al-Wefaq Server'
+      'HTTP-Referer': 'https://sk-unlocker.com', 
+      'X-Title': 'SK-unlocker'
     },
     body: JSON.stringify({
       model: model,

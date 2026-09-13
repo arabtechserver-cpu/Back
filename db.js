@@ -60,7 +60,7 @@ const defaultJsonDb = {
   wallet_requests: [],
   wallet_transactions: [],
   settings: [
-    { key: "site_name", value: "سيرفر الوفاق - Al-Wefaq Server" },
+    { key: "site_name", value: "SK-unlocker" },
     { key: "site_logo", value: "/logo.jpg" },
     { key: "site_favicon", value: "/favicon.png" }
   ],
@@ -974,7 +974,7 @@ async function seedData() {
   // Seed settings in PostgreSQL
   const existingSettings = await allQuery('SELECT * FROM settings');
   if (existingSettings.length === 0) {
-    await patchedRunQuery("INSERT INTO settings (key, value) VALUES (?, ?)", ['site_name', 'سيرفر الوفاق - Al-Wefaq Server']);
+    await patchedRunQuery("INSERT INTO settings (key, value) VALUES (?, ?)", ['site_name', 'SK-unlocker']);
     await patchedRunQuery("INSERT INTO settings (key, value) VALUES (?, ?)", ['site_logo', '/logo.jpg']);
     await patchedRunQuery("INSERT INTO settings (key, value) VALUES (?, ?)", ['site_favicon', '/favicon.png']);
     console.log('Default settings seeded in PostgreSQL');

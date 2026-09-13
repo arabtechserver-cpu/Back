@@ -136,8 +136,8 @@ router.post('/paypal/create-order', customerAuth, async (req, res) => {
       return res.status(400).json({ message: 'الحد الأدنى للشحن عبر PayPal هو 1 دولار.' });
     }
 
-    const returnUrl = `${process.env.PAYPAL_RETURN_URL || 'https://al-wefaq.center/wallet'}?paypal=success`;
-    const cancelUrl = `${process.env.PAYPAL_CANCEL_URL || 'https://al-wefaq.center/wallet'}?paypal=cancel`;
+    const returnUrl = `${process.env.PAYPAL_RETURN_URL || 'https://sk-unlocker.com/wallet'}?paypal=success`;
+    const cancelUrl = `${process.env.PAYPAL_CANCEL_URL || 'https://sk-unlocker.com/wallet'}?paypal=cancel`;
 
     const order = await paypal.createOrder(parsedAmount, returnUrl, cancelUrl);
 

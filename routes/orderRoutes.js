@@ -405,7 +405,7 @@ router.post('/', async (req, res) => {
             `▫️ الباقة: *${package_name}*`,
             `▫️ الحالة: ⏳ قيد المراجعة والتنفيذ`,
             ``,
-            `سوف تصلك رسالة أخرى فور إتمام تنفيذه من الإدارة.\nشكراً لثقتك بنا! 🚀 — سيرفر الوفاق`
+            `سوف تصلك رسالة أخرى فور إتمام تنفيذه من الإدارة.\nشكراً لثقتك بنا! 🚀 — SK-unlocker`
           ].join('\n');
           await telegram.sendMessage(customer.telegram_chat_id, tgMsg);
           console.log(`[Telegram Customer] Order #${orderId} submitted notification sent ✓`);

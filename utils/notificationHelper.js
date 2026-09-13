@@ -39,7 +39,7 @@ async function notifyCustomerOfOrderUpdate(orderId, nextStatus, nextCode = '', n
         nextCode ? `🔑 كود التفعيل:\n\`${nextCode}\`` : null,
         nextDownloadLink ? `🔗 [${nextDownloadLinkTitle || 'رابط التحميل'}](${nextDownloadLink})` : null,
         ``,
-        `شكراً لتعاملك معنا ❤️ — سيرفر الوفاق`
+        `شكراً لتعاملك معنا ❤️ — SK-unlocker`
       ].filter(Boolean).join('\n');
 
       try {

@@ -68,7 +68,7 @@ async function sendBackupViaWhatsApp(backupPath, reason = 'scheduled') {
     }
     captionText += `📦 تم إنشاء وحفظ نسخة احتياطية كاملة لجداول وبيانات الموقع على السيرفر.\n`;
     captionText += `📁 *الملف المرفق:* \`${path.basename(backupPath)}\`\n\n`;
-    captionText += `🛡️ *نظام الحماية والأمان — سيرفر الوفاق*`;
+    captionText += `🛡️ *نظام الحماية والأمان — SK-unlocker*`;
 
     await wa.sendDocument(numbers, backupPath, captionText);
     console.log(`[DB Backup] Backup document successfully sent to WhatsApp (${numbers.join(', ')}) ✓`);

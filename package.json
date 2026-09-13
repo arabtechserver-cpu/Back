@@ -6,7 +6,7 @@
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js",
+    "dev": "node --watch-path=server.js --watch-path=db.js --watch-path=routes --watch-path=services --watch-path=middleware --watch-path=utils server.js",
     "convert-images": "node scripts/convert-inline-images.js",
     "convert-upload-images": "node -e \"require('./convert_images').runMigration().then(() => process.exit(0)).catch((err) => { console.error(err); process.exit(1); })\""
   },
