@@ -25,6 +25,10 @@ function getPublicClientIp(req: Request): string | null {
 }
 
 export async function turnstileMiddleware(req: Request, res: Response, next: NextFunction) {
+  if (process.env.DISABLE_TURNSTILE === "true" || process.env.DISABLE_CLOUDFLARE === "true") {
+    return next();
+  }
+
   const secret = process.env.TURNSTILE_SECRET;
   const isDev = process.env.NODE_ENV === "development";
 
