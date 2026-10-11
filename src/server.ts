@@ -47,7 +47,7 @@ app.use(cors({
       /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) ||
       /^https?:\/\/(.*\.)?borai\.store$/.test(origin) ||
       /^https?:\/\/(\d{1,3}\.){3}\d{1,3}(:\d+)?$/.test(origin) ||
-      /^https?:\/\/.*(ngrok|localtunnel|trycloudflare|nip\.io|\.local)(:\d+)?$/.test(origin) ||
+      /^https?:\/\/.*(ngrok|localtunnel|nip\.io|\.local)(:\d+)?$/.test(origin) ||
       process.env.ALLOW_ALL_ORIGINS === 'true'
     ) {
       return callback(null, true);

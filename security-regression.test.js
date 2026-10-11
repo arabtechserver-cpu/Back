@@ -52,22 +52,6 @@ function testJwtSecretIsRequired() {
   }
 }
 
-async function testTurnstileIsDisabled() {
-  delete require.cache[require.resolve("./dist/middleware/turnstileMiddleware")];
-  const { turnstileMiddleware } = require("./dist/middleware/turnstileMiddleware");
-  const response = createResponse();
-  let nextCalled = false;
-
-  await turnstileMiddleware(
-    { body: {}, headers: {}, socket: {} },
-    response,
-    () => { nextCalled = true; }
-  );
-
-  assert.equal(nextCalled, true, "turnstile middleware must always pass through (disabled)");
-  assert.equal(response.statusCode, 200, "turnstile middleware must not reject requests");
-}
-
 function testSsrfProtectionBlocksPrivateHosts() {
   const { isPrivateIP, isPrivateHostname } = require("./dist/utils/dhru-api");
 
@@ -175,7 +159,6 @@ function testAdminOtpExpiresAndRejects() {
 (async () => {
   await testAuthenticationRequiresTokenForGet();
   testJwtSecretIsRequired();
-  await testTurnstileIsDisabled();
   testSsrfProtectionBlocksPrivateHosts();
   testProviderApiKeyMasking();
   testAdminServiceResponseHidesMarginsForNonAdmin();

@@ -30,17 +30,73 @@ async function serve(app, run) {
     const instance = app.listen(0, '127.0.0.1', () => resolve(instance));
   });
   try {
-    await run((url, headers = {}, method = 'GET') => new Promise((resolve, reject) => {
+    await run((url, headers = {}, method = 'GET', body) => new Promise((resolve, reject) => {
       const req = http.request({ hostname: '127.0.0.1', port: server.address().port, path: url, headers, method }, res => {
         let body = '';
         res.on('data', chunk => { body += chunk; });
         res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body }));
       });
       req.on('error', reject);
-      req.end();
+      req.end(body);
     }));
   } finally { await new Promise(resolve => server.close(resolve)); }
 }
+
+test('login works without a captcha while passwords, admin IP restrictions, and OTP remain enforced', async () => {
+  const bcrypt = require('bcryptjs');
+  const access = require('./dist/services/ipAccessService');
+  const telegram = require('./dist/utils/telegramService');
+  const originalFind = prisma.user.findFirst;
+  const originalAccess = access.checkIpAccess;
+  const originalLog = access.logDashboardAccess;
+  const originalSend = telegram.sendTelegramAdminOtp;
+  const originalOtpSetting = process.env.DISABLE_ADMIN_OTP;
+  let allowed = true;
+  const user = {
+    id: 'captcha-free-test', email: 'test@example.com', username: 'test',
+    password: await bcrypt.hash('correct-test-password', 4), role: 'user',
+    status: 'active', tokenVersion: 1, balance: 0
+  };
+  try {
+    delete process.env.DISABLE_ADMIN_OTP;
+    prisma.user.findFirst = async () => user;
+    access.checkIpAccess = async () => ({ allowed, allowedBy: 'ip' });
+    access.logDashboardAccess = async () => {};
+    telegram.sendTelegramAdminOtp = async () => {};
+    const app = express();
+    app.use(express.json());
+    app.use('/api/auth', require('./dist/routes/auth').default);
+    await serve(app, async request => {
+      const login = async password => {
+        const res = await request('/api/auth/login', { 'content-type': 'application/json' }, 'POST', JSON.stringify({ email: user.email, password }));
+        return { status: res.status, ...JSON.parse(res.body) };
+      };
+      const invalid = await login('wrong-password');
+      assert.equal(invalid.success, false);
+      assert.equal(invalid.token, undefined);
+      const customer = await login('correct-test-password');
+      assert.equal(customer.success, true);
+      assert.equal(jwt.verify(customer.token, process.env.JWT_SECRET).id, user.id);
+      user.role = 'admin';
+      const admin = await login('correct-test-password');
+      assert.equal(admin.success, true);
+      assert.equal(admin.requireOtp, true);
+      assert.ok(admin.challengeToken);
+      assert.equal(admin.token, undefined);
+      allowed = false;
+      const blocked = await login('correct-test-password');
+      assert.equal(blocked.status, 403);
+      assert.equal(blocked.code, 'IP_NOT_ALLOWED');
+    });
+  } finally {
+    prisma.user.findFirst = originalFind;
+    access.checkIpAccess = originalAccess;
+    access.logDashboardAccess = originalLog;
+    telegram.sendTelegramAdminOtp = originalSend;
+    if (originalOtpSetting === undefined) delete process.env.DISABLE_ADMIN_OTP;
+    else process.env.DISABLE_ADMIN_OTP = originalOtpSetting;
+  }
+});
 
 test('public static middleware blocks encoded receipts while allowing images and authenticated routes', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'arad-receipt-test-'));
