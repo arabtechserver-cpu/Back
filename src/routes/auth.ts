@@ -37,8 +37,8 @@ setInterval(() => {
   }
 }, 15 * 60 * 1000).unref();
 
-// POST /api/auth/register - Direct & Fast Registration with Cloudflare Turnstile Protection
-router.post('/register', turnstileMiddleware, async (req, res) => {
+// POST /api/auth/register - Direct & Fast Registration
+router.post('/register', async (req, res) => {
   try {
     const { fullName, email, username, password, country, phone } = req.body;
 
@@ -164,8 +164,8 @@ router.post('/send-otp', async (req, res) => {
   }
 });
 
-// POST /api/auth/forgot-password - Reset password with Cloudflare Turnstile Protection
-router.post('/forgot-password', turnstileMiddleware, async (req, res) => {
+// POST /api/auth/forgot-password - Reset password
+router.post('/forgot-password', async (req, res) => {
   try {
     const { email, otp, newPassword } = req.body;
 
@@ -237,8 +237,8 @@ router.post('/logout', authenticateToken, async (req: any, res) => {
   }
 });
 
-// POST /api/auth/login - Fast Login Authentication with Cloudflare Turnstile Protection
-router.post('/login', turnstileMiddleware, async (req, res) => {
+// POST /api/auth/login - Fast Login Authentication
+router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) {

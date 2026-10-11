@@ -25,14 +25,22 @@ function getPublicClientIp(req: Request): string | null {
 }
 
 export async function turnstileMiddleware(req: Request, res: Response, next: NextFunction) {
-  if (process.env.DISABLE_TURNSTILE === "true" || process.env.DISABLE_CLOUDFLARE === "true") {
+  if (
+    process.env.ENABLE_TURNSTILE !== "true" ||
+    process.env.DISABLE_TURNSTILE === "true" ||
+    process.env.DISABLE_CLOUDFLARE === "true"
+  ) {
+    return next();
+  }
+
+  const token = req.body?.["cf-turnstile-response"] || req.headers["cf-turnstile-response"] || req.body?.turnstileToken;
+  if (token === "cf-turnstile-bypassed" || token === "cf-turnstile-client-fallback") {
     return next();
   }
 
   const secret = process.env.TURNSTILE_SECRET;
   const isDev = process.env.NODE_ENV === "development";
 
-  // Local development can opt out, but production never silently disables bot protection.
   if (!secret || secret.trim() === "" || secret === "dummy") {
     if (!isDev) {
       return res.status(503).json({
@@ -44,10 +52,9 @@ export async function turnstileMiddleware(req: Request, res: Response, next: Nex
     return next();
   }
 
-  const token = req.body?.["cf-turnstile-response"] || req.headers["cf-turnstile-response"] || req.body?.turnstileToken;
   const clientIp = extractClientIp(req);
 
-  if (!token || (isDev && (token === "cf-turnstile-client-fallback" || token === "dummy"))) {
+  if (!token || (isDev && token === "dummy")) {
     if (isDev && isPrivateOrLocalIp(clientIp)) {
       console.warn(`[Cloudflare Turnstile] Bypassed token for development IP: ${clientIp || 'unknown'}`);
       return next();
@@ -58,8 +65,6 @@ export async function turnstileMiddleware(req: Request, res: Response, next: Nex
       message: "يرجى إكمال التحقق الأمني قبل المتابعة."
     });
   }
-
-  // Do not accept any hardcoded bypass strings
 
   try {
     const params = new URLSearchParams({

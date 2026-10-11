@@ -22,19 +22,22 @@ router.post('/events', analyticsLimiter, async (req, res) => {
       return res.status(400).json({ error: 'حدث غير صالح.' });
     }
 
-    await prisma.analyticsEvent.create({
-      data: {
-        eventName: String(eventName).trim().slice(0, 80),
-        sessionId: sessionId ? String(sessionId).trim().slice(0, 100) : null,
-        path: path ? String(path).trim().slice(0, 500) : null,
-        metadata: metadata ? JSON.stringify(metadata) : null,
-      }
-    });
+    try {
+      await prisma.analyticsEvent.create({
+        data: {
+          eventName: String(eventName).trim().slice(0, 80),
+          sessionId: sessionId ? String(sessionId).trim().slice(0, 100) : null,
+          path: path ? String(path).trim().slice(0, 500) : null,
+          metadata: metadata ? (typeof metadata === 'string' ? metadata : JSON.stringify(metadata)) : null,
+        }
+      });
+    } catch (dbErr: any) {
+      console.warn('Analytics event storage notice:', dbErr?.message);
+    }
 
     return res.status(202).json({ accepted: true });
   } catch (error: any) {
-    console.error('Analytics event error:', error);
-    return res.status(500).json({ error: 'تعذر تسجيل الحدث.' });
+    return res.status(200).json({ accepted: false });
   }
 });
 

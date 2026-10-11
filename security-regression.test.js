@@ -56,8 +56,10 @@ async function testTurnstileFailsClosedWhenConfigured() {
   const originalSecret = process.env.TURNSTILE_SECRET;
   const originalDisable = process.env.DISABLE_TURNSTILE;
   const originalDisableCloudflare = process.env.DISABLE_CLOUDFLARE;
+  const originalEnable = process.env.ENABLE_TURNSTILE;
   delete process.env.DISABLE_TURNSTILE;
   delete process.env.DISABLE_CLOUDFLARE;
+  process.env.ENABLE_TURNSTILE = "true";
   process.env.TURNSTILE_SECRET = "test-turnstile-secret";
   delete require.cache[require.resolve("./dist/middleware/turnstileMiddleware")];
   const { turnstileMiddleware } = require("./dist/middleware/turnstileMiddleware");
@@ -93,6 +95,11 @@ async function testTurnstileFailsClosedWhenConfigured() {
       process.env.DISABLE_CLOUDFLARE = originalDisableCloudflare;
     } else {
       delete process.env.DISABLE_CLOUDFLARE;
+    }
+    if (originalEnable !== undefined) {
+      process.env.ENABLE_TURNSTILE = originalEnable;
+    } else {
+      delete process.env.ENABLE_TURNSTILE;
     }
     delete require.cache[require.resolve("./dist/middleware/turnstileMiddleware")];
   }
