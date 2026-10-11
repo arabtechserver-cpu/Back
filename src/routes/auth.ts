@@ -5,23 +5,15 @@ import { generateToken, authenticateToken } from '../middleware/auth';
 import { sendOtpEmailViaLoops, addContactToLoops } from '../utils/emailService';
 import { sendTelegramAlert, sendTelegramAdminOtp, sendTelegramAdminLoginSuccess } from '../utils/telegramService';
 import { createAdminOtpChallenge, verifyAdminOtp, resendAdminOtp } from '../utils/adminOtp';
-import { turnstileMiddleware } from '../middleware/turnstileMiddleware';
+
 import bcrypt from 'bcryptjs';
-import rateLimit from 'express-rate-limit';
+
 import { extractClientIp } from '../utils/ipUtils';
 import { checkIpAccess, logDashboardAccess } from '../services/ipAccessService';
 
 
 const router = Router();
 
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 20,
-  message: { success: false, error: 'تجاوزت الحد المسموح به، يرجى المحاولة بعد قليل.' },
-  validate: { xForwardedForHeader: false }
-});
-
-router.use(authLimiter);
 
 // In-memory OTP Store for forgot password flow with brute force attempt tracking
 interface UserOtpRecord {

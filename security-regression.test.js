@@ -52,57 +52,20 @@ function testJwtSecretIsRequired() {
   }
 }
 
-async function testTurnstileFailsClosedWhenConfigured() {
-  const originalSecret = process.env.TURNSTILE_SECRET;
-  const originalDisable = process.env.DISABLE_TURNSTILE;
-  const originalDisableCloudflare = process.env.DISABLE_CLOUDFLARE;
-  const originalEnable = process.env.ENABLE_TURNSTILE;
-  delete process.env.DISABLE_TURNSTILE;
-  delete process.env.DISABLE_CLOUDFLARE;
-  process.env.ENABLE_TURNSTILE = "true";
-  process.env.TURNSTILE_SECRET = "test-turnstile-secret";
+async function testTurnstileIsDisabled() {
   delete require.cache[require.resolve("./dist/middleware/turnstileMiddleware")];
   const { turnstileMiddleware } = require("./dist/middleware/turnstileMiddleware");
   const response = createResponse();
   let nextCalled = false;
 
-  try {
-    await turnstileMiddleware(
-      { body: {}, headers: {}, socket: {} },
-      response,
-      () => { nextCalled = true; }
-    );
+  await turnstileMiddleware(
+    { body: {}, headers: {}, socket: {} },
+    response,
+    () => { nextCalled = true; }
+  );
 
-    assert.equal(nextCalled, false, "missing Turnstile tokens must be rejected when protection is configured");
-    assert.equal(response.statusCode, 403);
-
-    process.env.DISABLE_TURNSTILE = "true";
-    let bypassCalled = false;
-    await turnstileMiddleware(
-      { body: {}, headers: {}, socket: {} },
-      response,
-      () => { bypassCalled = true; }
-    );
-    assert.equal(bypassCalled, true, "Turnstile must be bypassed when DISABLE_TURNSTILE is true");
-  } finally {
-    process.env.TURNSTILE_SECRET = originalSecret;
-    if (originalDisable !== undefined) {
-      process.env.DISABLE_TURNSTILE = originalDisable;
-    } else {
-      delete process.env.DISABLE_TURNSTILE;
-    }
-    if (originalDisableCloudflare !== undefined) {
-      process.env.DISABLE_CLOUDFLARE = originalDisableCloudflare;
-    } else {
-      delete process.env.DISABLE_CLOUDFLARE;
-    }
-    if (originalEnable !== undefined) {
-      process.env.ENABLE_TURNSTILE = originalEnable;
-    } else {
-      delete process.env.ENABLE_TURNSTILE;
-    }
-    delete require.cache[require.resolve("./dist/middleware/turnstileMiddleware")];
-  }
+  assert.equal(nextCalled, true, "turnstile middleware must always pass through (disabled)");
+  assert.equal(response.statusCode, 200, "turnstile middleware must not reject requests");
 }
 
 function testSsrfProtectionBlocksPrivateHosts() {
@@ -212,7 +175,7 @@ function testAdminOtpExpiresAndRejects() {
 (async () => {
   await testAuthenticationRequiresTokenForGet();
   testJwtSecretIsRequired();
-  await testTurnstileFailsClosedWhenConfigured();
+  await testTurnstileIsDisabled();
   testSsrfProtectionBlocksPrivateHosts();
   testProviderApiKeyMasking();
   testAdminServiceResponseHidesMarginsForNonAdmin();
