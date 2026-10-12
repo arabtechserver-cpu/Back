@@ -81,8 +81,30 @@ type DhruAction =
   | "remoteservicelist"
   | "placeimeiorder"
   | "placeserverorder"
+  | "placefileorder"
   | "getimeiorder"
-  | "getserverorder";
+  | "getserverorder"
+  | "getfileorder";
+
+export function isActionMismatchError(res: any): boolean {
+  if (!res) return false;
+  const msg = String(
+    res?.ERROR?.[0]?.MESSAGE ||
+    res?.error ||
+    res?.Error ||
+    res?.ERROR?.[0]?.FULL_DESCRIPTION ||
+    ""
+  ).toLowerCase();
+
+  return (
+    msg.includes("command not found") ||
+    msg.includes("invalid action") ||
+    msg.includes("invalid command") ||
+    msg.includes("action not found") ||
+    msg.includes("unknown action") ||
+    msg.includes("action is not valid")
+  );
+}
 
 export function normalizeTargetApiUrl(rawUrl?: string): string {
   let url = (rawUrl || DHRU_API_URL).trim();
@@ -321,7 +343,9 @@ export async function placeImeiOrder(
     serviceid: serviceId,
     id: serviceId,
     IMEI: imei,
-    imei: imei
+    imei: imei,
+    QNT: "1",
+    qnt: "1"
   };
 
   const cleanFields: Record<string, string> = {};
@@ -347,10 +371,13 @@ export async function placeImeiOrder(
 
   let res = await dhruApiRequest("placeimeiorder", params, provider);
 
-  // Fallback if provider expects placeserverorder
-  if (res?.ERROR?.[0]?.MESSAGE === 'Command Not Found' || res?.error?.includes?.('Command Not Found')) {
-    console.log('[Dhru API] placeimeiorder returned Command Not Found, attempting fallback placeserverorder...');
+  if (isActionMismatchError(res)) {
+    console.log('[Dhru API] placeimeiorder returned action mismatch, attempting fallback placeserverorder...');
     res = await dhruApiRequest("placeserverorder", params, provider);
+    if (isActionMismatchError(res)) {
+      console.log('[Dhru API] placeserverorder returned action mismatch, attempting fallback placefileorder...');
+      res = await dhruApiRequest("placefileorder", params, provider);
+    }
   }
 
   return res;
@@ -417,13 +444,15 @@ export async function placeServerOrder(
     });
   }
 
-  // Standard Dhru command for placing server service orders is placeserverorder
   let res = await dhruApiRequest("placeserverorder", params, provider);
 
-  // If provider returns Command Not Found, fallback to placeimeiorder
-  if (res?.ERROR?.[0]?.MESSAGE === 'Command Not Found' || res?.error?.includes?.('Command Not Found')) {
-    console.log('[Dhru API] placeserverorder returned Command Not Found, attempting fallback placeimeiorder...');
+  if (isActionMismatchError(res)) {
+    console.log('[Dhru API] placeserverorder returned action mismatch, attempting fallback placeimeiorder...');
     res = await dhruApiRequest("placeimeiorder", params, provider);
+    if (isActionMismatchError(res)) {
+      console.log('[Dhru API] placeimeiorder returned action mismatch, attempting fallback placefileorder...');
+      res = await dhruApiRequest("placefileorder", params, provider);
+    }
   }
 
   return res;
@@ -438,8 +467,11 @@ export async function getImeiOrder(orderId: string, provider?: ProviderConfig) {
     orderid: orderId
   };
   let res = await dhruApiRequest("getimeiorder", params, provider);
-  if (res?.ERROR?.[0]?.MESSAGE === 'Command Not Found') {
+  if (isActionMismatchError(res)) {
     res = await dhruApiRequest("getserverorder", params, provider);
+    if (isActionMismatchError(res)) {
+      res = await dhruApiRequest("getfileorder", params, provider);
+    }
   }
   return res;
 }
@@ -452,10 +484,12 @@ export async function getServerOrder(orderId: string, provider?: ProviderConfig)
     referenceid: orderId,
     orderid: orderId
   };
-  // In Dhru, getimeiorder is the standard query for all orders
   let res = await dhruApiRequest("getimeiorder", params, provider);
-  if (res?.ERROR?.[0]?.MESSAGE === 'Command Not Found') {
+  if (isActionMismatchError(res)) {
     res = await dhruApiRequest("getserverorder", params, provider);
+    if (isActionMismatchError(res)) {
+      res = await dhruApiRequest("getfileorder", params, provider);
+    }
   }
   return res;
 }
