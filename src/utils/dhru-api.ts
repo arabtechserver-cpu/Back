@@ -181,6 +181,7 @@ export function dhruApiRequest(
         method: "POST",
         family: 4,
         servername: urlObj.hostname,
+        rejectUnauthorized: false,
         headers: {
           Host: urlObj.hostname,
           "Content-Type": "application/x-www-form-urlencoded",

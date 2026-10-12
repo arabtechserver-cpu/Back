@@ -132,8 +132,13 @@ export async function bootstrapDatabase() {
     const activeProvider = await prisma.apiProvider.findFirst({ where: { isActive: true } });
     if (serviceCount === 0 && (activeProvider || (process.env.DHRU_API_URL && process.env.DHRU_API_KEY))) {
       console.log('[Bootstrap] Active provider detected. Starting automatic services sync...');
-      await syncDhruServices();
-      console.log('[Bootstrap] Automatic services sync finished successfully!');
+      try {
+        await syncDhruServices();
+        console.log('[Bootstrap] Automatic services sync finished successfully!');
+      } catch (syncErr: any) {
+        console.warn('[Bootstrap] Warning: Automatic services sync skipped on startup:', syncErr?.message || syncErr);
+        console.warn('[Bootstrap] Server will start normally. You can sync services anytime from the dashboard.');
+      }
     } else {
       console.log(`[Bootstrap] Found ${serviceCount} existing services. Awaiting custom provider addition.`);
     }
