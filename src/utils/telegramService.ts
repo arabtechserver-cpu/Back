@@ -4,11 +4,10 @@ import fs from 'fs';
 import path from 'path';
 import bcrypt from 'bcryptjs';
 import { prisma } from "../utils/prisma";
-import { placeImeiOrder, placeServerOrder } from './dhru-api';
+import { sendOrderToProvider, getProviderDispatchResult } from './provider-order-dispatch';
 import { sendDepositApprovalEmail, sendOrderConfirmationEmail } from './emailService';
 import { checkAndAutoUpgradeMembership } from './membershipUpgrade';
 import { normalizeTelegramAdminChatIds } from './telegram-config';
-import { resolveOrderServiceType } from './order-response';
 import { getUploadDir } from './uploads';
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
@@ -135,7 +134,7 @@ async function answerCallbackQuery(callbackQueryId: string, text?: string, showA
 }
 
 // Handle Incoming Telegram Commands, Text, & Interactive Button Clicks
-async function handleIncomingTelegramUpdate(update: any) {
+export async function handleIncomingTelegramUpdate(update: any) {
   const incomingChatId: string = (
     update?.callback_query?.message?.chat?.id ||
     update?.message?.chat?.id ||
@@ -237,8 +236,8 @@ async function handleIncomingTelegramUpdate(update: any) {
         }
 
         const dhruService = await prisma.dhruService.findFirst({
-          where: { id: order.serviceId },
-          include: { dhruCategory: true }
+          where: { OR: [{ id: order.serviceId }, { dhruId: order.serviceId }] },
+          include: { dhruCategory: true, apiProvider: true }
         });
 
         if (!dhruService || !dhruService.dhruId) {
@@ -250,23 +249,24 @@ async function handleIncomingTelegramUpdate(update: any) {
           return;
         }
 
-        let dhruResponse: any = null;
-        if (resolveOrderServiceType(
-          dhruService.apiServiceType,
-          dhruService.dhruCategory?.name,
-          dhruService.groupName
-        ) === 'imei') {
-          dhruResponse = await placeImeiOrder(dhruService.dhruId, order.targetInput, {});
-        } else {
-          dhruResponse = await placeServerOrder(dhruService.dhruId, order.quantity, {}, order.targetInput);
-        }
-
-        if (!dhruResponse || dhruResponse.SUCCESS === false || dhruResponse.ERROR || dhruResponse.Error) {
-          await prisma.order.update({
-            where: { id: orderId },
+        let dhruResponse: any;
+        try {
+          dhruResponse = await sendOrderToProvider(order, dhruService);
+        } catch (error: any) {
+          await prisma.order.updateMany({
+            where: { id: orderId, status: 'dispatching', apiOrderId: null },
             data: { status: 'pending' }
           });
-          const rawErrMsg = dhruResponse?.Error || dhruResponse?.ERROR?.[0]?.MESSAGE || dhruResponse?.ERROR?.[0]?.FULL_DESCRIPTION || 'خطأ غير معروف من المزود';
+          await sendTelegramMessage(chatId, `[ERROR] <b>فشل إرسال الطلب للمزود:</b> ${error?.message}`);
+          return;
+        }
+        const dispatchResult = getProviderDispatchResult(dhruResponse);
+        if (dispatchResult.error) {
+          await prisma.order.update({
+            where: { id: orderId },
+            data: { status: dispatchResult.unconfirmed ? 'dispatching' : 'pending' }
+          });
+          const rawErrMsg = dispatchResult.error;
           const isCredit = JSON.stringify(dhruResponse || {}).toLowerCase().includes('credit');
           const finalErrMsg = isCredit
             ? 'رصيد حسابك لدى المزود الخارجي غير كافٍ. يرجى شحن حسابك لدى المزود أولاً ثم إعادة المحاولة.'
@@ -275,7 +275,7 @@ async function handleIncomingTelegramUpdate(update: any) {
           return;
         }
 
-        const refId = String(dhruResponse?.SUCCESS?.[0]?.REFERENCEID || dhruResponse?.REFERENCEID || 'SENT');
+        const refId = dispatchResult.reference;
 
         await prisma.order.update({
           where: { id: orderId },

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { prisma } from "../utils/prisma";
-import { placeImeiOrder, placeServerOrder, getImeiOrder, getServerOrder, normalizeProviderCustomFields, DHRU_API_URL } from '../utils/dhru-api';
+import { getImeiOrder, getServerOrder, DHRU_API_URL } from '../utils/dhru-api';
 import { getProviderRemoteServiceId } from '../utils/provider-service-id';
 import { buildOrderFieldDetails, resolveOrderServiceType, parseOrderMetadata } from '../utils/order-response';
 import { sendTelegramPhotoNotification } from '../utils/telegramService';
@@ -9,6 +9,8 @@ import { isAdmin, authenticateToken } from '../middleware/auth';
 import { dashboardIpGuard } from '../middleware/dashboardIpGuard';
 import { getServiceQuantityConfig } from '../utils/provider-quantity';
 import { AUTO_REFUND_CUTOFF_DATE } from '../utils/order-refund-cutoff';
+
+import { sendOrderToProvider, getProviderDispatchResult } from '../utils/provider-order-dispatch';
 
 const router = Router();
 
@@ -535,6 +537,7 @@ router.post('/', authenticateToken, async (req, res) => {
 
 // POST /api/orders/dispatch-provider - Admin Dispatch Order to Provider API
 router.post('/dispatch-provider', isAdmin, async (req, res) => {
+  let providerAcceptedOrUnconfirmed = false;
   try {
     const { orderId } = req.body;
     if (!orderId) {
@@ -586,53 +589,22 @@ router.post('/dispatch-provider', isAdmin, async (req, res) => {
       });
     }
 
-    const providerConfig = dhruService.apiProvider
-      ? {
-          apiUrl: dhruService.apiProvider.apiUrl,
-          username: dhruService.apiProvider.username,
-          apiKey: dhruService.apiProvider.apiKey
-        }
-      : undefined;
-
     // Parse custom fields if stored in notes
-    let customFields: Record<string, string> = {};
-    let rawImei = '';
     let parsedNotes: any = {};
     try {
       if (order.notes) {
         parsedNotes = JSON.parse(order.notes);
-        if (parsedNotes.customFields) customFields = parsedNotes.customFields;
-        if (parsedNotes.rawImei) rawImei = parsedNotes.rawImei;
       }
     } catch {}
 
-    let dhruResponse: any = null;
-    let apiOrderId: string | null = null;
-    const providerCustomFields = normalizeProviderCustomFields(customFields, dhruService.requiresCustom);
-    if (order.quantity > 0) {
-      providerCustomFields['QNT'] = String(order.quantity);
-    }
+    const dhruResponse = await sendOrderToProvider(order, dhruService);
+    const dispatchResult = getProviderDispatchResult(dhruResponse);
+    const apiOrderId = dispatchResult.reference;
+    providerAcceptedOrUnconfirmed = Boolean(apiOrderId) || dispatchResult.unconfirmed;
 
-    const serviceType = resolveOrderServiceType(
-      dhruService.apiServiceType,
-      dhruService.dhruCategory?.name,
-      dhruService.groupName
-    );
-    if (serviceType === 'imei') {
-      const imeiToSend = rawImei ? String(rawImei).trim() : String(order.targetInput).trim();
-      dhruResponse = await placeImeiOrder(getProviderRemoteServiceId(dhruService.dhruId), imeiToSend, providerCustomFields, providerConfig);
-    } else {
-      const inputToSend = String(order.targetInput).trim();
-      dhruResponse = await placeServerOrder(getProviderRemoteServiceId(dhruService.dhruId), order.quantity, providerCustomFields, inputToSend, providerConfig);
-    }
-
-    if (!dhruResponse || dhruResponse.SUCCESS === false || dhruResponse.ERROR || dhruResponse.Error) {
-      console.error('[Dispatch Provider Error]:', dhruResponse);
-      const rawErrMsg =
-        dhruResponse?.Error ||
-        dhruResponse?.ERROR?.[0]?.MESSAGE ||
-        dhruResponse?.ERROR?.[0]?.FULL_DESCRIPTION ||
-        'رفض المزود الطلب';
+    if (dispatchResult.error) {
+      console.error('[Dispatch Provider Error]:', dispatchResult.error);
+      const rawErrMsg = dispatchResult.error;
 
       const responseStr = JSON.stringify(dhruResponse || {}).toLowerCase();
       const isCreditError =
@@ -659,7 +631,7 @@ router.post('/dispatch-provider', isAdmin, async (req, res) => {
       await prisma.order.update({
         where: { id: orderId },
         data: {
-          status: 'pending',
+          status: dispatchResult.unconfirmed ? 'dispatching' : 'pending',
           notes: JSON.stringify(parsedNotes)
         }
       });
@@ -685,10 +657,6 @@ router.post('/dispatch-provider', isAdmin, async (req, res) => {
       return res.status(400).json({ error: `فشل الإرسال: ${userFacingMsg}` });
     }
 
-    if (dhruResponse.SUCCESS && dhruResponse.SUCCESS[0] && dhruResponse.SUCCESS[0].REFERENCEID) {
-      apiOrderId = String(dhruResponse.SUCCESS[0].REFERENCEID);
-    }
-
     // Add Timeline Event
     const now = new Date();
     const events = Array.isArray(parsedNotes.events) ? parsedNotes.events : [];
@@ -696,7 +664,7 @@ router.post('/dispatch-provider', isAdmin, async (req, res) => {
       time: now.toISOString(),
       action: 'DISPATCHED_TO_PROVIDER',
       title: 'تم الإرسال للمزود بنجاح',
-      desc: `تم إرسال الطلب آلياً إلى سيرفر (${dhruService.apiProvider?.name || 'المزود'}). رقم المرجع الخارجي: #${apiOrderId || 'N/A'}.`
+      desc: `تم إرسال الطلب آلياً إلى سيرفر (${dhruService.apiProvider?.name || 'المزود'}). رقم المرجع الخارجي: #${apiOrderId}.`
     });
 
     parsedNotes.events = events;
@@ -705,24 +673,26 @@ router.post('/dispatch-provider', isAdmin, async (req, res) => {
       where: { id: orderId },
       data: {
         status: 'processing',
-        apiOrderId: apiOrderId || order.apiOrderId,
+        apiOrderId,
         notes: JSON.stringify(parsedNotes)
       }
     });
 
     return res.json({
       success: true,
-      message: `تم إرسال الطلب إلى المزود بنجاح! رقم المرجع: #${apiOrderId || 'تم التسليم'}`,
+      message: `تم إرسال الطلب إلى المزود بنجاح! رقم المرجع: #${apiOrderId}`,
       order: updatedOrder,
       apiOrderId
     });
   } catch (error: any) {
     console.error('Error dispatching order to provider:', error);
-    await prisma.order.updateMany({
-      where: { id: req.body?.orderId, status: 'dispatching' },
-      data: { status: 'pending' }
-    });
-    return res.status(500).json({ error: 'حدث خطأ أثناء الإرسال للمزود' });
+    if (req.body?.orderId && !providerAcceptedOrUnconfirmed) {
+      await prisma.order.updateMany({
+        where: { id: req.body.orderId, status: 'dispatching', apiOrderId: null },
+        data: { status: 'pending' }
+      });
+    }
+    return res.status(500).json({ error: error?.message || 'حدث خطأ أثناء الإرسال للمزود' });
   }
 });
 

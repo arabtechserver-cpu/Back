@@ -1,3 +1,4 @@
+import { parseProviderParameters } from '../utils/provider-api-parameters';
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { prisma } from '../utils/prisma';
@@ -302,20 +303,12 @@ const handleDhruApiRequest = async (req: any, res: any) => {
   }
 
   try {
-    // 1. Parse incoming parameters from various formats (JSON string, Object, or flat form fields)
-    let parsedParams: Record<string, any> = {};
-
-    if (parameters) {
-      if (typeof parameters === 'string') {
-        try {
-          parsedParams = JSON.parse(parameters);
-        } catch {
-          // If not JSON, might be raw value
-          parsedParams = { raw: parameters };
-        }
-      } else if (typeof parameters === 'object' && parameters !== null) {
-        parsedParams = { ...parameters };
-      }
+    // Dhru sends XML; custom integrations can send JSON or a parameters object.
+    let parsedParams: Record<string, any>;
+    try {
+      parsedParams = parseProviderParameters(parameters);
+    } catch {
+      return res.status(400).json({ ERROR: [{ MESSAGE: 'Invalid parameters: use a JSON object or PARAMETERS XML' }] });
     }
 
     // Also pick up flat fields from req.body and req.query (e.g. ID, IMEI, customfield, format, etc.)

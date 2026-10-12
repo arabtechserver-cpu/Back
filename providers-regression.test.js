@@ -1,8 +1,9 @@
 const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
-const providers = require("./dist/routes/providers.js");
-const providerServiceIds = require("./dist/utils/provider-service-id.js");
+const testBuild = process.env.BORAI_TEST_BUILD || "./dist";
+const providers = require(path.resolve(__dirname, testBuild, "routes/providers.js"));
+const providerServiceIds = require(path.resolve(__dirname, testBuild, "utils/provider-service-id.js"));
 
 function run() {
   assert.equal(
@@ -22,7 +23,7 @@ function run() {
   );
   assert.deepEqual(
     normalizeRequestedServiceTypes(undefined),
-    ["imei", "server", "remote"]
+    ["imei", "server", "remote", "topups", "appstores", "gamecodes", "subscriptions", "esim"]
   );
   assert.deepEqual(normalizeRequestedServiceTypes([]), []);
 

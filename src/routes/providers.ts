@@ -1,3 +1,4 @@
+import { serializeProviderParameters } from '../utils/provider-api-parameters';
 import { Router } from "express";
 import { prisma } from "../utils/prisma";
 import { cleanServiceName } from "../scripts/syncDhruServices";
@@ -445,8 +446,14 @@ export function makeProviderApiCall(
       data.append("action", action);
       data.append("requestformat", "JSON");
 
+      const usesXmlParameters = /\.php$/i.test(urlObj.pathname);
+      if (usesXmlParameters && Object.keys(parameters).length > 0) {
+        data.append("parameters", serializeProviderParameters(parameters));
+      }
+
       Object.entries(parameters).forEach(([k, v]) => {
-        data.append(`parameters[${k}]`, v);
+        if (usesXmlParameters) data.append(k, v);
+        else data.append(`parameters[${k}]`, v);
       });
 
       const postData = data.toString();

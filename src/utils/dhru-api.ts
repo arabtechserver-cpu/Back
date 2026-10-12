@@ -1,3 +1,4 @@
+import { serializeProviderParameters } from './provider-api-parameters';
 import https from "https";
 import http from "http";
 import dns from "dns";
@@ -165,8 +166,13 @@ export function dhruApiRequest(
     data.append("action", action);
     data.append("requestformat", "JSON");
 
+    const usesXmlParameters = /\.php$/i.test(new URL(targetUrl).pathname);
+    if (usesXmlParameters && Object.keys(parameters).length > 0) {
+      data.append("parameters", serializeProviderParameters(parameters));
+    }
+
     Object.entries(parameters).forEach(([key, value]) => {
-      data.append(`parameters[${key}]`, value);
+      if (!usesXmlParameters) data.append(`parameters[${key}]`, value);
       data.append(key, value);
     });
 
