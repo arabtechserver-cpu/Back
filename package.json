@@ -7,13 +7,14 @@
     "test": "node security-regression.test.js && node security-hardening.test.js && node ip-access-control.test.js",
     "dev": "nodemon --watch src --exec tsx src/server.ts",
     "build": "npx prisma generate && tsc",
-    "start": "node dist/server.js",
+    "start": "node --max-old-space-size=128 --max-semi-space-size=4 dist/server.js",
     "db:migrate": "npx prisma migrate deploy",
     "db:push": "npx prisma db push --skip-generate",
     "ip:status": "tsx src/scripts/resetIpRestriction.ts --status",
     "ip:disable": "tsx src/scripts/resetIpRestriction.ts --disable",
     "ip:enable": "tsx src/scripts/resetIpRestriction.ts --enable",
-    "ip:add": "tsx src/scripts/resetIpRestriction.ts --add-ip"
+    "ip:add": "tsx src/scripts/resetIpRestriction.ts --add-ip",
+    "test:memory": "node --max-old-space-size=128 low-memory-regression.test.js"
   },
   "keywords": [],
   "author": "",

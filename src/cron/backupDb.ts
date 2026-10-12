@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { sendDocumentToAdmins } from '../utils/telegramService';
 import { prisma } from "../utils/prisma";
+import { writeJsonSnapshot } from "../utils/json-snapshot";
 
 export function initBackupCron() {
   console.log('[CRON] Initializing Daily JSON Backup Cron Job (runs at 00:00 every day)');
@@ -30,7 +31,7 @@ export async function performJSONBackupAndSend() {
 
     console.log(`[Backup] Fetching data from database for JSON report...`);
     
-    const users = await prisma.user.findMany({
+    const userArgs = {
       select: {
         id: true,
         fullName: true,
@@ -50,33 +51,20 @@ export async function performJSONBackupAndSend() {
         apiSiteName: true,
         apiSiteUrl: true
       }
-    });
-    
-    const orders = await prisma.order.findMany();
-    const transactions = await prisma.transaction.findMany();
-    const walletTransactions = await prisma.walletTransaction.findMany();
-
-    const backupData = {
-      timestamp: new Date().toISOString(),
-      summary: {
-        totalUsers: users.length,
-        totalOrders: orders.length,
-        totalTransactions: transactions.length,
-        totalWalletTransactions: walletTransactions.length
-      },
-      users,
-      orders,
-      transactions,
-      walletTransactions
     };
+    const [totalUsers, totalOrders, totalTransactions, totalWalletTransactions] = await Promise.all([
+      prisma.user.count(), prisma.order.count(), prisma.transaction.count(), prisma.walletTransaction.count()
+    ]);
+    const summary = { totalUsers, totalOrders, totalTransactions, totalWalletTransactions };
+    await writeJsonSnapshot(jsonFilePath, { timestamp: new Date().toISOString(), summary }, {
+      users: { model: prisma.user, args: userArgs }, orders: { model: prisma.order, batchSize: 10 },
+      transactions: { model: prisma.transaction, batchSize: 1 }, walletTransactions: { model: prisma.walletTransaction }
+    });
 
-    console.log(`[Backup] Writing data to JSON file at ${jsonFilePath}`);
-    fs.writeFileSync(jsonFilePath, JSON.stringify(backupData, null, 2), 'utf8');
-    
     const stats = fs.statSync(jsonFilePath);
     const fileSizeMB = (stats.size / 1024 / 1024).toFixed(2);
     
-    const caption = `[REPORT] <b>تقرير النسخة الاحتياطية اليومي (JSON)</b>\n\n<b>التاريخ:</b> ${dateStr}\n<b>المستخدمين:</b> ${users.length}\n<b>الطلبات:</b> ${orders.length}\n<b>المعاملات:</b> ${transactions.length}\n<b>الحجم:</b> ${fileSizeMB} MB`;
+    const caption = `[REPORT] <b>تقرير النسخة الاحتياطية اليومي (JSON)</b>\n\n<b>التاريخ:</b> ${dateStr}\n<b>المستخدمين:</b> ${totalUsers}\n<b>الطلبات:</b> ${totalOrders}\n<b>المعاملات:</b> ${totalTransactions}\n<b>الحجم:</b> ${fileSizeMB} MB`;
     
     const delivered = await sendDocumentToAdmins(jsonFilePath, caption);
     if (delivered) {

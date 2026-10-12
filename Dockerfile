@@ -28,6 +28,8 @@ COPY docker-entrypoint.sh ./docker-entrypoint.sh
 RUN mkdir -p /app/uploads /app/backups && chown -R node:node /app/uploads /app/backups && chmod 750 /app/uploads /app/backups
 
 ENV NODE_ENV=production
+ENV NODE_OPTIONS="--max-old-space-size=128 --max-semi-space-size=4"
+ENV UV_THREADPOOL_SIZE=2
 USER node
 
 EXPOSE 5000

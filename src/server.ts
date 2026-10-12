@@ -12,8 +12,12 @@ const PORT = Number(process.env.PORT) || 5000;
 const allowedOrigins = [
   'http://localhost:3000',
   'http://127.0.0.1:3000',
-  'https://arabtechproserver.tech',
-  'https://www.arabtechproserver.tech',
+  'http://borai.local',
+  'http://borai.local:3000',
+  'http://borai-server.local',
+  'http://borai-server.local:3000',
+  'https://borai.store',
+  'https://www.borai.store',
   ...(process.env.FRONTEND_URL || '')
     .split(',')
     .map((origin) => origin.trim())
@@ -41,7 +45,10 @@ app.use(cors({
       !origin ||
       allowedOrigins.includes(origin) ||
       /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) ||
-      /^https?:\/\/(www\.)?arabtechproserver\.tech$/.test(origin)
+      /^https?:\/\/(.*\.)?borai\.store$/.test(origin) ||
+      /^https?:\/\/(\d{1,3}\.){3}\d{1,3}(:\d+)?$/.test(origin) ||
+      /^https?:\/\/.*(ngrok|localtunnel|trycloudflare|nip\.io|\.local)(:\d+)?$/.test(origin) ||
+      process.env.ALLOW_ALL_ORIGINS === 'true'
     ) {
       return callback(null, true);
     }
@@ -144,7 +151,6 @@ import externalApiRoutes from './routes/externalApi';
 import couponsRoutes from './routes/coupons';
 import settingsRoutes from './routes/settings';
 import ipAccessRoutes from './routes/ipAccess';
-import foxreloadRoutes from './routes/foxreload';
 
 app.use('/api/auth', authRoutes);
 app.use('/api/coupons', couponsRoutes);
@@ -155,7 +161,6 @@ app.use('/api/wallet/paypal', paypalRoutes);
 app.use('/api/wallet', walletRoutes);
 app.use('/api/blog', blogRoutes);
 app.use('/api/dhru', dhruRoutes);
-app.use('/api/foxreload', foxreloadRoutes);
 app.use('/api/providers', providersRoutes);
 app.use('/api/api-providers', providersRoutes);
 app.use('/api/videos', videoRoutes);
@@ -208,11 +213,15 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 
 async function startServer() {
   try {
-    await bootstrapDatabase();
-    await startTelegramBotPolling();
-    await restoreImagesToDisk(prisma).catch(() => {});
-    initOrderSyncCron();
-    initBackupCron();
+    if (process.env.STARTUP_MAINTENANCE_ENABLED !== 'false') {
+      await bootstrapDatabase();
+      await restoreImagesToDisk(prisma).catch(() => {});
+    }
+    if (process.env.BACKGROUND_TASKS_ENABLED !== 'false') {
+      await startTelegramBotPolling();
+      initOrderSyncCron();
+      initBackupCron();
+    }
 
     app.listen(PORT, '0.0.0.0', () => {
       console.log(`Backend server is running on http://0.0.0.0:${PORT}`);

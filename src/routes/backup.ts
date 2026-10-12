@@ -5,6 +5,7 @@ import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { isAdmin } from '../middleware/auth';
 import { prisma } from "../utils/prisma";
+import { writeJsonSnapshot } from "../utils/json-snapshot";
 
 const router = Router();
 const BACKUPS_DIR = path.join(__dirname, '..', '..', 'backups');
@@ -18,86 +19,28 @@ try {
   console.warn('[Backup] Unable to initialize backups directory on module load:', dirErr);
 }
 
-// Helper: Extract all data into a JSON structure
-async function generateBackupSnapshot() {
-  const [
-    users,
-    orders,
-    transactions,
-    walletTransactions,
-    dhruCategories,
-    dhruServices,
-    blogPosts,
-    videoSeries,
-    videoTutorials,
-    subscribers,
-    newsletterBroadcasts,
-    storedImages,
-    paymentIntents,
-    apiProviders,
-    allowedIps,
-    settings,
-    coupons
-  ] = await Promise.all([
-    prisma.user.findMany({
-      select: {
-        id: true,
-        fullName: true,
-        email: true,
-        username: true,
-        phone: true,
-        country: true,
-        role: true,
-        status: true,
-        balance: true,
-        membershipTierId: true,
-        createdAt: true,
-        updatedAt: true,
-        // password and apiKey deliberately excluded from backup
-      }
-    }),
-    prisma.order.findMany(),
-    prisma.transaction.findMany(),
-    prisma.walletTransaction.findMany(),
-    prisma.dhruCategory.findMany(),
-    prisma.dhruService.findMany(),
-    prisma.blogPost.findMany(),
-    prisma.videoSeries.findMany(),
-    prisma.videoTutorial.findMany(),
-    prisma.subscriber.findMany(),
-    prisma.newsletterBroadcast.findMany(),
-    prisma.storedImage.findMany(),
-    prisma.paymentIntent.findMany(),
-    prisma.apiProvider.findMany(),
-    prisma.allowedDashboardIP.findMany(),
-    prisma.setting.findMany(),
-    prisma.coupon.findMany()
+// Keep the existing backup schema, fetching one bounded batch at a time.
+async function generateBackupSnapshot(filePath: string) {
+  const [totalUsers, totalOrders, totalTransactions, totalServices, totalBlogPosts, totalVideos] = await Promise.all([
+    prisma.user.count(), prisma.order.count(), prisma.transaction.count(),
+    prisma.dhruService.count(), prisma.blogPost.count(), prisma.videoTutorial.count()
   ]);
-
-  return {
-    version: '2.0',
-    createdAt: new Date().toISOString(),
-    summary: {
-      totalUsers: users.length,
-      totalOrders: orders.length,
-      totalTransactions: transactions.length,
-      totalServices: dhruServices.length,
-      totalBlogPosts: blogPosts.length,
-      totalVideos: videoTutorials.length,
-    },
-    users,
-    orders,
-    transactions,
-    walletTransactions,
-    dhruCategories,
-    dhruServices,
-    blogPosts,
-    videoSeries,
-    videoTutorials,
-    subscribers,
-    newsletterBroadcasts,
-    storedImages,
-  };
+  await writeJsonSnapshot(filePath, {
+    version: '2.0', createdAt: new Date().toISOString(),
+    summary: { totalUsers, totalOrders, totalTransactions, totalServices, totalBlogPosts, totalVideos }
+  }, {
+    users: { model: prisma.user, args: { select: {
+      id: true, fullName: true, email: true, username: true, phone: true, country: true,
+      role: true, status: true, balance: true, membershipTierId: true, createdAt: true, updatedAt: true
+      // password and apiKey deliberately excluded from backup
+    } } },
+    orders: { model: prisma.order, batchSize: 10 }, transactions: { model: prisma.transaction, batchSize: 1 },
+    walletTransactions: { model: prisma.walletTransaction }, dhruCategories: { model: prisma.dhruCategory },
+    dhruServices: { model: prisma.dhruService, batchSize: 10 }, blogPosts: { model: prisma.blogPost },
+    videoSeries: { model: prisma.videoSeries }, videoTutorials: { model: prisma.videoTutorial },
+    subscribers: { model: prisma.subscriber }, newsletterBroadcasts: { model: prisma.newsletterBroadcast },
+    storedImages: { model: prisma.storedImage, batchSize: 1 }
+  });
 }
 
 // Helper: Perform Selective Restore / Merge
@@ -473,12 +416,11 @@ router.get('/', isAdmin, async (req, res) => {
 // POST /api/backup/create - Create a new JSON backup
 router.post('/create', isAdmin, async (req, res) => {
   try {
-    const backupData = await generateBackupSnapshot();
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const backupFilename = `backup-${timestamp}.json`;
     const destPath = path.join(BACKUPS_DIR, backupFilename);
 
-    fs.writeFileSync(destPath, JSON.stringify(backupData, null, 2), 'utf8');
+    await generateBackupSnapshot(destPath);
 
     res.json({
       success: true,

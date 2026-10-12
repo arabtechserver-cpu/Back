@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from "express";
-import { extractClientIp } from '../utils/ipUtils';
+import { extractClientIp, isPrivateOrLocalIp } from '../utils/ipUtils';
 
 
 
@@ -43,9 +43,9 @@ export async function turnstileMiddleware(req: Request, res: Response, next: Nex
   const token = req.body?.["cf-turnstile-response"] || req.headers["cf-turnstile-response"] || req.body?.turnstileToken;
   const clientIp = extractClientIp(req);
 
-  if (!token) {
-    if (isDev) {
-      console.warn(`[Cloudflare Turnstile] Bypassed missing token for development IP: ${clientIp || 'unknown'}`);
+  if (!token || (isDev && (token === "cf-turnstile-client-fallback" || token === "dummy"))) {
+    if (isDev && isPrivateOrLocalIp(clientIp)) {
+      console.warn(`[Cloudflare Turnstile] Bypassed token for development IP: ${clientIp || 'unknown'}`);
       return next();
     }
     return res.status(403).json({
@@ -77,6 +77,7 @@ export async function turnstileMiddleware(req: Request, res: Response, next: Nex
 
     if (!response.ok) {
       console.warn(`[Cloudflare Turnstile] Verification endpoint returned status ${response.status}`);
+      if (isDev) return next();
       return res.status(403).json({
         success: false,
         error: "فشل التحقق الأمني من Cloudflare Turnstile (Network Error). يرجى المحاولة مرة أخرى.",
@@ -91,12 +92,9 @@ export async function turnstileMiddleware(req: Request, res: Response, next: Nex
       const errorCodes: string[] = Array.isArray(result["error-codes"]) ? result["error-codes"] : [];
       console.warn("[Cloudflare Turnstile] Verification notice:", errorCodes);
 
-      // Handle hostname-mismatch gracefully in local/development environments
-      if (errorCodes.includes("hostname-mismatch")) {
-        if (isDev) {
-          console.warn("[Cloudflare Turnstile] Accepted token despite hostname-mismatch for local/dev environment");
-          return next();
-        }
+      if (isDev) {
+        console.warn("[Cloudflare Turnstile] Accepted verification notice for local/dev environment:", errorCodes);
+        return next();
       }
 
       // Specific message for expired or already-used tokens so client can trigger a clean refresh

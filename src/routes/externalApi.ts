@@ -19,44 +19,61 @@ const externalApiLimiter = rateLimit({
 
 router.use(externalApiLimiter);
 
-// Middleware to authenticate API requests with username and API key
-const authenticateApi = async (req: any, res: any, next: any) => {
+// Middleware to authenticate API requests with username and API key or Bearer token
+export const authenticateApi = async (req: any, res: any, next: any) => {
   try {
-    const username = (
-      req.body.username ||
-      req.query.username ||
-      req.headers['x-username'] ||
-      ''
-    ).toString().trim();
+    const authHeader = (req.headers['authorization'] || '').toString().trim();
+    let bearerToken = '';
+    if (authHeader.startsWith('Bearer ') || authHeader.startsWith('bearer ')) {
+      bearerToken = authHeader.slice(7).trim();
+    }
 
     const apiKey = (
-      req.body.apiaccesskey ||
-      req.body.key ||
-      req.body.apiKey ||
-      req.query.apiaccesskey ||
-      req.query.key ||
+      bearerToken ||
+      req.body?.apiaccesskey ||
+      req.body?.key ||
+      req.body?.apiKey ||
+      req.query?.apiaccesskey ||
+      req.query?.key ||
       req.headers['x-api-key'] ||
       ''
     ).toString().trim();
 
-    if (!username || !apiKey) {
+    const username = (
+      req.body?.username ||
+      req.query?.username ||
+      req.headers['x-username'] ||
+      ''
+    ).toString().trim();
+
+    if (!apiKey && !username) {
       return res.status(401).json({
         SUCCESS: [{
-          ERROR: "Invalid username or API key. Please provide username and apiaccesskey/key."
+          ERROR: "Invalid authentication. Please provide API key or Bearer token."
         }]
       });
     }
 
-    const user = await prisma.user.findFirst({
-      where: {
-        OR: [
-          { username: { equals: username, mode: 'insensitive' } },
-          { email: { equals: username, mode: 'insensitive' } }
-        ],
-        apiKey: apiKey,
-        apiEnabled: true
-      }
-    });
+    let user = null;
+    if (apiKey && username) {
+      user = await prisma.user.findFirst({
+        where: {
+          OR: [
+            { username: { equals: username, mode: 'insensitive' } },
+            { email: { equals: username, mode: 'insensitive' } }
+          ],
+          apiKey: apiKey,
+          apiEnabled: true
+        }
+      });
+    } else if (apiKey) {
+      user = await prisma.user.findFirst({
+        where: {
+          apiKey: apiKey,
+          apiEnabled: true
+        }
+      });
+    }
 
     if (!user) {
       return res.status(401).json({
@@ -76,16 +93,201 @@ const authenticateApi = async (req: any, res: any, next: any) => {
 
     req.apiUser = user;
     next();
-  } catch (error) {
+  } catch (error: any) {
+    console.error("API auth error:", error?.message || error);
     return res.status(500).json({
       SUCCESS: [{
-        ERROR: "Internal Server Error during API authentication"
+        ERROR: "Internal Server Error during API authentication: " + (error?.message || "")
       }]
     });
   }
 };
 
-router.all('/', authenticateApi, async (req: any, res: any) => {
+export async function getUnifiedSectionsStats(user?: any) {
+  const activeServices = await prisma.dhruService.findMany({
+    where: {
+      isActive: true,
+      OR: [
+        { apiProvider: { isActive: true } },
+        { providerId: null }
+      ]
+    },
+    include: {
+      dhruCategory: { select: { name: true } }
+    }
+  });
+
+  const imeiGroups = new Set<string>();
+  const serverGroups = new Set<string>();
+  const remoteGroups = new Set<string>();
+  const topupsGroups = new Set<string>();
+  const appstoresGroups = new Set<string>();
+  const gamecodesGroups = new Set<string>();
+  const subscriptionsGroups = new Set<string>();
+  const esimGroups = new Set<string>();
+
+  let imeiCount = 0;
+  let serverCount = 0;
+  let remoteCount = 0;
+  let topupsCount = 0;
+  let appStoresCount = 0;
+  let gameCodesCount = 0;
+  let subscriptionsCount = 0;
+  let esimCount = 0;
+
+  for (const srv of activeServices) {
+    const srvType = srv.apiServiceType || resolveOrderServiceType(
+      srv.apiServiceType,
+      srv.dhruCategory?.name,
+      srv.groupName
+    );
+    const grp = srv.groupName?.trim() || "General";
+    if (srvType === 'imei') {
+      imeiCount++;
+      imeiGroups.add(grp);
+    } else if (srvType === 'remote') {
+      remoteCount++;
+      remoteGroups.add(grp);
+    } else if (srvType === 'topups') {
+      topupsCount++;
+      topupsGroups.add(grp);
+    } else if (srvType === 'appstores') {
+      appStoresCount++;
+      appstoresGroups.add(grp);
+    } else if (srvType === 'gamecodes') {
+      gameCodesCount++;
+      gamecodesGroups.add(grp);
+    } else if (srvType === 'subscriptions') {
+      subscriptionsCount++;
+      subscriptionsGroups.add(grp);
+    } else if (srvType === 'esim') {
+      esimCount++;
+      esimGroups.add(grp);
+    } else {
+      serverCount++;
+      serverGroups.add(grp);
+    }
+  }
+
+  const sections = [
+    {
+      id: "imei",
+      nameEn: "IMEI",
+      nameAr: "خدمات IMEI",
+      type: "gsm",
+      icon: "fingerprint",
+      servicesCount: imeiCount,
+      packagesCount: imeiGroups.size,
+      descriptionAr: "فك شفرات الشبكات وتخطي الحسابات وفحص أرقام السيريال",
+      descriptionEn: "Carrier network unlock, iCloud/FRP bypass, and serial checks",
+      apiAction: "imeiservicelist"
+    },
+    {
+      id: "server",
+      nameEn: "Server",
+      nameAr: "خدمات السيرفر",
+      type: "gsm",
+      icon: "dns",
+      servicesCount: serverCount,
+      packagesCount: serverGroups.size,
+      descriptionAr: "تفعيلات البوكسات والدونجل وسيرفرات البرمجة وشراء الكردت",
+      descriptionEn: "Dongle/Box activations, server credits, and digital licenses",
+      apiAction: "serverservicelist"
+    },
+    {
+      id: "remote",
+      nameEn: "Remote",
+      nameAr: "خدمات التحكم عن بعد",
+      type: "gsm",
+      icon: "settings_remote",
+      servicesCount: remoteCount,
+      packagesCount: remoteGroups.size,
+      descriptionAr: "خدمات الدعم الفني والعمليات السريعة عبر مشاركة منفذ USB",
+      descriptionEn: "Live technical assistance and remote flashing/bypass over USB",
+      apiAction: "remoteservicelist"
+    },
+    {
+      id: "topups",
+      nameEn: "In-Game Top-Ups",
+      nameAr: "شحن الألعاب المباشر",
+      type: "digital",
+      icon: "sports_esports",
+      servicesCount: topupsCount,
+      packagesCount: topupsGroups.size,
+      descriptionAr: "شحن مباشر لحسابات الألعاب العالمية عبر الـ ID واللاعب",
+      descriptionEn: "Direct player ID top-ups for major online multiplayer games",
+      apiAction: "topups"
+    },
+    {
+      id: "appStores",
+      nameEn: "App Stores",
+      nameAr: "متاجر التطبيقات",
+      type: "digital",
+      icon: "store",
+      servicesCount: appStoresCount,
+      packagesCount: appstoresGroups.size,
+      descriptionAr: "بطاقات وقسائم متاجر التطبيقات الرسمية مثل Apple وGoogle Play",
+      descriptionEn: "Official digital store cards for iOS App Store and Google Play",
+      apiAction: "appstores"
+    },
+    {
+      id: "gameCodes",
+      nameEn: "Game Codes",
+      nameAr: "أكواد وبطاقات الألعاب",
+      type: "digital",
+      icon: "vpn_key",
+      servicesCount: gameCodesCount,
+      packagesCount: gamecodesGroups.size,
+      descriptionAr: "أكواد شحن الألعاب وبطاقات المنصات مثل PlayStation وXbox وSteam",
+      descriptionEn: "Prepaid game cards and digital voucher redemption codes",
+      apiAction: "gamecodes"
+    },
+    {
+      id: "subscriptions",
+      nameEn: "Subscriptions",
+      nameAr: "الاشتراكات والترفيه",
+      type: "digital",
+      icon: "subscriptions",
+      servicesCount: subscriptionsCount,
+      packagesCount: subscriptionsGroups.size,
+      descriptionAr: "اشتراكات المنصات الترفيهية والتطبيقات الرقمية المعتمدة",
+      descriptionEn: "Entertainment and productivity streaming subscription plans",
+      apiAction: "subscriptions"
+    },
+    {
+      id: "esim",
+      nameEn: "eSIM",
+      nameAr: "شرائح الإنترنت eSIM",
+      type: "digital",
+      icon: "sim_card",
+      servicesCount: esimCount,
+      packagesCount: esimGroups.size,
+      descriptionAr: "باقات شرائح الاتصال وبيانات الإنترنت المتجولة لمختلف دول العالم",
+      descriptionEn: "International mobile data roaming plans and travel eSIM profiles",
+      apiAction: "esim"
+    }
+  ];
+
+  const totalGsmServices = imeiCount + serverCount + remoteCount;
+  const totalDigitalBundles = topupsCount + appStoresCount + gameCodesCount + subscriptionsCount + esimCount;
+
+  return {
+    success: true,
+    account: user ? {
+      username: user.username,
+      balance: user.balance,
+      currency: "USD",
+      email: user.email
+    } : null,
+    total_sections: sections.length,
+    total_gsm_services: totalGsmServices,
+    total_digital_bundles: totalDigitalBundles,
+    total_services_and_bundles: totalGsmServices + totalDigitalBundles,
+    sections
+  };
+}
+
+const handleDhruApiRequest = async (req: any, res: any) => {
   const action = req.body?.action || req.query?.action || req.headers?.['x-action'];
   const parameters = req.body?.parameters || req.query?.parameters;
   const user = req.apiUser;
@@ -131,6 +333,24 @@ router.all('/', authenticateApi, async (req: any, res: any) => {
     const normalizedAction = (action || '').toString().toLowerCase().trim();
 
     switch (normalizedAction) {
+      // ----------------------------------------------------
+      // 0. Unified Sections & Stats
+      // ----------------------------------------------------
+      case 'sections':
+      case 'getsections':
+      case 'categories': {
+        const stats = await getUnifiedSectionsStats(user);
+        return res.json({
+          SUCCESS: [{
+            total_sections: stats.total_sections,
+            total_gsm_services: stats.total_gsm_services,
+            total_digital_bundles: stats.total_digital_bundles,
+            SECTIONS: stats.sections
+          }],
+          ...stats
+        });
+      }
+
       // ----------------------------------------------------
       // 1. Account Info
       // ----------------------------------------------------
@@ -653,6 +873,32 @@ router.all('/', authenticateApi, async (req: any, res: any) => {
       SUCCESS: [{
         ERROR: "Internal Server Error"
       }]
+    });
+  }
+};
+
+router.all('/', authenticateApi, handleDhruApiRequest);
+
+router.all('/sections', authenticateApi, async (req: any, res: any) => {
+  const action = req.body?.action || req.query?.action || req.headers?.['x-action'];
+  if (action && String(action).toLowerCase() !== 'sections') {
+    return handleDhruApiRequest(req, res);
+  }
+  try {
+    const stats = await getUnifiedSectionsStats(req.apiUser);
+    return res.json({
+      SUCCESS: [{
+        total_sections: stats.total_sections,
+        total_gsm_services: stats.total_gsm_services,
+        total_digital_bundles: stats.total_digital_bundles,
+        SECTIONS: stats.sections
+      }],
+      ...stats
+    });
+  } catch (error: any) {
+    console.error("Error fetching sections:", error);
+    return res.status(500).json({
+      SUCCESS: [{ ERROR: "Failed to fetch sections" }]
     });
   }
 });

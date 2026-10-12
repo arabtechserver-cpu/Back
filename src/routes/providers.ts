@@ -15,7 +15,6 @@ import {
 } from "../utils/provider-quantity";
 import { invalidateDhruServicesCache } from "./dhru";
 import { isPrivateIP, isPrivateHostname } from "../utils/dhru-api";
-
 const dnsLookup = promisify(dns.lookup);
 
 export function maskApiKey(key?: string | null): string {
@@ -58,7 +57,12 @@ export function normalizeApiUrl(rawUrl: string): string {
   urlObj.username = "";
   urlObj.password = "";
 
-  const path = urlObj.pathname.replace(/\/+$/, "");
+  let path = urlObj.pathname.replace(/\/+$/, "");
+  if (path.endsWith("/sections")) {
+    path = path.slice(0, -"/sections".length).replace(/\/+$/, "");
+  }
+  urlObj.pathname = path;
+
   const hasExplicitApiEndpoint =
     /\/api\/index\.php$/i.test(path) ||
     /\/api\/v\d+$/i.test(path) ||
@@ -87,7 +91,10 @@ function collectAccountInfoCandidates(payload: any): any[] {
 
   return candidates.flatMap((candidate) => {
     if (!candidate || typeof candidate !== "object") return [];
-    return [candidate, candidate.AccountInfo, candidate.accountinfo, candidate.accountInfo].filter(Boolean);
+    const nested = Object.entries(candidate)
+      .filter(([key]) => /^(account|accout)[\s_-]?info$/i.test(key))
+      .map(([, val]) => val);
+    return [candidate, candidate.AccountInfo, candidate.accountinfo, candidate.accountInfo, candidate.accoutinfo, ...nested].filter(Boolean);
   });
 }
 
@@ -525,7 +532,7 @@ router.get("/", async (req, res) => {
     // If empty, initialize the default primary provider
     if (providers.length === 0) {
       const realProvider = {
-        name: "سيرفر عرب تك (Dhru Fusion API)",
+        name: "مزود الخدمات الرقمية (Dhru Fusion API)",
         apiUrl: process.env.DHRU_API_URL || "https://arab-tech1.online/api/v1",
         username: process.env.DHRU_USERNAME || "",
         apiKey: process.env.DHRU_API_KEY || "",
@@ -793,9 +800,26 @@ async function checkAndUpdateProviderBalance(id: string, res: any) {
 router.post("/:id/balance", (req, res) => checkAndUpdateProviderBalance(req.params.id, res));
 router.get("/:id/balance", (req, res) => checkAndUpdateProviderBalance(req.params.id, res));
 
-export type ProviderServiceType = "imei" | "server" | "remote";
+export type ProviderServiceType =
+  | "imei"
+  | "server"
+  | "remote"
+  | "topups"
+  | "appstores"
+  | "gamecodes"
+  | "subscriptions"
+  | "esim";
 
-const PROVIDER_SERVICE_TYPES: ProviderServiceType[] = ["imei", "server", "remote"];
+const PROVIDER_SERVICE_TYPES: ProviderServiceType[] = [
+  "imei",
+  "server",
+  "remote",
+  "topups",
+  "appstores",
+  "gamecodes",
+  "subscriptions",
+  "esim"
+];
 
 export function normalizeRequestedServiceTypes(input: unknown): ProviderServiceType[] {
   if (input === undefined || input === null) return [...PROVIDER_SERVICE_TYPES];
@@ -807,32 +831,204 @@ export function normalizeRequestedServiceTypes(input: unknown): ProviderServiceT
   return Array.from(new Set(normalized));
 }
 
+export function refinePackageGroupName(rawGroup: string, serviceName: string): string {
+  const g = String(rawGroup || "").trim();
+  const lowerG = g.toLowerCase();
+  const isGeneric =
+    !g ||
+    lowerG === "server default group" ||
+    lowerG === "imei default group" ||
+    lowerG === "remote default group" ||
+    lowerG === "default group" ||
+    lowerG === "server services" ||
+    lowerG === "imei services" ||
+    lowerG === "general" ||
+    lowerG === "باقة عامة";
+
+  if (!isGeneric) return g;
+
+  const s = String(serviceName || "").toLowerCase();
+  if (s.includes("pubg")) return "PUBG Mobile (شدات وباقات)";
+  if (s.includes("free fire")) return "Free Fire (جواهر وبطاقات)";
+  if (s.includes("efootball")) return "eFootball (Coins & Points)";
+  if (s.includes("tiktok")) return "TikTok (عملات ومتابعين)";
+  if (s.includes("google play")) return "Google Play Gift Cards";
+  if (s.includes("itunes")) return "iTunes & Apple Gift Cards";
+  if (s.includes("bein sport")) return "Bein Sport الاشتراكات";
+  if (s.includes("cheetah")) return "Cheetah Tool";
+  if (s.includes("chimera")) return "Chimera Tool";
+  if (s.includes("eft")) return "EFT Dongle & Tool";
+  if (s.includes("dft")) return "DFT PRO Tool";
+  if (s.includes("halabtech")) return "HalabTech Support";
+  if (s.includes("hydra")) return "Hydra Tool";
+  if (s.includes("griffin")) return "Griffin Unlocker";
+  if (s.includes("tsm")) return "TSM Tool Pro";
+  if (s.includes("sigma")) return "Sigma Plus Activations";
+  if (s.includes("sk-unloker") || s.includes("sk-tool")) return "SK-Unlocker Tool";
+  if (s.includes("tfm")) return "TFM Pro Tool";
+  if (s.includes("muslim odin")) return "Muslim Odin Tool";
+  if (s.includes("z3x")) return "Z3X SamsTool";
+  if (s.includes("amt")) return "AMT Android Multi Tool";
+  if (s.includes("facebook") || s.includes("twitter")) return "Social Media (خدمات التواصل)";
+  if (s.includes("idm") || s.includes("internet download")) return "برامج وتراخيص (PC Software)";
+  if (s.includes("mastercard") || s.includes("redotpay")) return "بطاقات مصرفية (Cards)";
+  if (s.includes("mdmfix")) return "MdmFixTool";
+  if (s.includes("an tool")) return "AN TOOL";
+
+  return g;
+}
+
+export function detectProviderServiceType(
+  explicitType: unknown,
+  serviceName: string = "",
+  groupName: string = "",
+  endpointType?: ProviderServiceType | "unknown"
+): ProviderServiceType | "unknown" {
+  const explicit = String(explicitType || "").trim().toLowerCase();
+  if (PROVIDER_SERVICE_TYPES.includes(explicit as ProviderServiceType)) return explicit as ProviderServiceType;
+  if (explicit === "gamecurrency" || explicit === "game_codes") return "gamecodes";
+  if (explicit === "app_stores" || explicit === "appstore") return "appstores";
+  if (explicit === "topup" || explicit === "top_ups" || explicit === "in-game top-ups") return "topups";
+  if (explicit === "sub" || explicit === "subscription") return "subscriptions";
+
+  const text = `${groupName} ${serviceName}`.toLowerCase();
+
+  // 1. App Stores & Gift Cards
+  if (
+    text.includes("itunes") ||
+    text.includes("google play") ||
+    text.includes("app store") ||
+    text.includes("appstore") ||
+    text.includes("apple store") ||
+    text.includes("متجر") ||
+    text.includes("متاجر")
+  ) {
+    return "appstores";
+  }
+
+  // 2. In-Game Top-Ups
+  if (
+    text.includes("pubg") ||
+    text.includes("free fire") ||
+    text.includes("efootball") ||
+    text.includes("diamonds") ||
+    text.includes("diamond") ||
+    text.includes("uc ") ||
+    text.includes(" uc") ||
+    text.includes("coins") ||
+    text.includes("player id") ||
+    text.includes("شدات") ||
+    text.includes("جواهر") ||
+    text.includes("بالايدي") ||
+    text.includes("بلاير ايدي") ||
+    text.includes("تيك توك") ||
+    text.includes("tiktok") ||
+    text.includes("topup") ||
+    text.includes("top-up") ||
+    text.includes("roblox") ||
+    text.includes("valorant") ||
+    text.includes("mobile legends") ||
+    text.includes("brawl stars") ||
+    text.includes("fifa") ||
+    text.includes("cod mobile") ||
+    text.includes("شحن")
+  ) {
+    return "topups";
+  }
+
+  // 3. Game Codes & Digital Cards
+  if (
+    text.includes("gift card") ||
+    text.includes("recharge card") ||
+    text.includes("card pin") ||
+    text.includes("قسيمة") ||
+    text.includes("voucher") ||
+    text.includes("steam") ||
+    text.includes("playstation") ||
+    text.includes("psn") ||
+    text.includes("xbox") ||
+    text.includes("razer") ||
+    text.includes("بطاقة") ||
+    text.includes("بطاق")
+  ) {
+    return "gamecodes";
+  }
+
+  // 4. Subscriptions
+  if (
+    text.includes("bein sport") ||
+    text.includes("netflix") ||
+    text.includes("shahid") ||
+    text.includes("iptv") ||
+    text.includes("spotify") ||
+    text.includes("youtube premium") ||
+    text.includes("اشتراك") ||
+    text.includes("اشتراكات")
+  ) {
+    return "subscriptions";
+  }
+
+  // 5. eSIM
+  if (text.includes("esim") || text.includes("شريحة") || text.includes("شرائح")) {
+    return "esim";
+  }
+
+  // 6. Generic code/pin (excluding GSM unlock/repair codes)
+  if (
+    (text.includes("كود") || text.includes("code")) &&
+    !text.includes("nck") &&
+    !text.includes("unlock") &&
+    !text.includes("schematic") &&
+    !text.includes("activation") &&
+    !text.includes("tool") &&
+    !text.includes("otp") &&
+    !text.includes("repair") &&
+    !text.includes("bypass")
+  ) {
+    return "gamecodes";
+  }
+
+  // GSM Types
+  if (explicit.includes("remote") || text.includes("remote")) return "remote";
+  if (explicit.includes("imei") || text.includes("imei")) return "imei";
+  if (explicit.includes("server") || text.includes("server")) return "server";
+
+  return endpointType || "unknown";
+}
+
 export function getProviderServiceType(categoryName: unknown): ProviderServiceType | "unknown" {
-  const normalized = String(categoryName || "").toLowerCase();
-  if (normalized.includes("remote")) return "remote";
-  if (normalized.includes("server")) return "server";
-  if (normalized.includes("imei")) return "imei";
-  return "unknown";
+  return detectProviderServiceType("", "", String(categoryName || ""));
 }
 
 export function normalizeProviderApiServiceType(
   explicitType: unknown,
   endpointType?: ProviderServiceType | "unknown"
 ): ProviderServiceType | "unknown" {
-  const normalized = String(explicitType || "").trim().toLowerCase();
-  if (normalized.includes("remote")) return "remote";
-  if (normalized.includes("server")) return "server";
-  if (normalized.includes("imei")) return "imei";
-  return endpointType || "unknown";
+  return detectProviderServiceType(explicitType, "", "", endpointType);
+}
+
+export function getCategoryNameForServiceType(type: string): string {
+  switch (type) {
+    case "topups": return "In-Game Top-Ups";
+    case "gamecodes": return "Game Codes";
+    case "appstores": return "App Stores";
+    case "subscriptions": return "Subscriptions";
+    case "esim": return "eSIM";
+    case "imei": return "IMEI Service";
+    case "remote": return "Remote Service";
+    default: return "Server Service";
+  }
 }
 
 export function getProviderServiceApiActions(types: ProviderServiceType[]) {
-  const actions = {
+  const actions: Record<string, string> = {
     imei: "imeiservicelist",
     server: "serverservicelist",
     remote: "remoteservicelist"
-  } as const;
-  return types.map((type) => ({ type, action: actions[type] }));
+  };
+  return types
+    .filter((type) => type in actions)
+    .map((type) => ({ type, action: actions[type] }));
 }
 
 // Helper: parse raw services list from provider responses
@@ -882,10 +1078,13 @@ export function parseAllProviderServices(imeiRes: any, serverRes: any, remoteRes
         const sCredit = parseFloat(s.CREDIT || s.credit || s.PRICE || s.price || "0") || 0;
         const sTime = String(s.TIME || s.time || "1-24 Hours");
         const sInfo = String(s.INFO || s.info || "");
-        const apiServiceType = normalizeProviderApiServiceType(
+        const apiServiceType = detectProviderServiceType(
           s.SERVICETYPE ?? s.SERVICE_TYPE ?? s.serviceType ?? s.service_type ?? groupType,
+          sName,
+          groupName,
           groupType
         );
+        const refinedGroupName = refinePackageGroupName(groupName, sName);
 
         if (apiServiceType === "imei") {
           const hasHardwareId = normalizedFields.some((f: any) => {
@@ -930,9 +1129,9 @@ export function parseAllProviderServices(imeiRes: any, serverRes: any, remoteRes
           service_id: sId,
           name: sName,
           service_name: sName,
-          group_name: groupName,
-          groupName,
-          category_name: apiServiceType === "imei" ? "IMEI Service" : (apiServiceType === "remote" ? "Remote Service" : "Server Service"),
+          group_name: refinedGroupName,
+          groupName: refinedGroupName,
+          category_name: getCategoryNameForServiceType(apiServiceType),
           service_type: apiServiceType,
           api_service_type: apiServiceType,
           credit: sCredit,
@@ -1025,8 +1224,7 @@ const fetchRemoteServicesHandler = async (req: any, res: any) => {
 router.get("/:id/fetch-services", fetchRemoteServicesHandler);
 router.post("/:id/fetch-services", fetchRemoteServicesHandler);
 
-// Helper to build comprehensive provider export JSON
-async function buildProviderExportData(provider: any, includeRaw = true) {
+export async function buildProviderExportData(provider: any, includeRaw = true) {
   // 1. Fetch DB services
   const dbServices = await prisma.dhruService.findMany({
     where: { providerId: provider.id },
@@ -1144,7 +1342,12 @@ async function buildProviderExportData(provider: any, includeRaw = true) {
   const typeCounts = {
     imei: enrichedServices.filter(s => (s.service_type === "imei" || s.category_name === "IMEI Service")).length,
     server: enrichedServices.filter(s => (s.service_type === "server" || s.category_name === "Server Service")).length,
-    remote: enrichedServices.filter(s => (s.service_type === "remote" || s.category_name === "Remote Service")).length
+    remote: enrichedServices.filter(s => (s.service_type === "remote" || s.category_name === "Remote Service")).length,
+    topups: enrichedServices.filter(s => s.service_type === "topups").length,
+    appstores: enrichedServices.filter(s => s.service_type === "appstores").length,
+    gamecodes: enrichedServices.filter(s => s.service_type === "gamecodes").length,
+    subscriptions: enrichedServices.filter(s => s.service_type === "subscriptions").length,
+    esim: enrichedServices.filter(s => s.service_type === "esim").length
   };
 
   return {
@@ -1164,7 +1367,7 @@ async function buildProviderExportData(provider: any, includeRaw = true) {
     },
     metadata: {
       exportedAt: new Date().toISOString(),
-      system: "Arab Tech Pro Server",
+      system: "BORAI STORE",
       totalServices: enrichedServices.length,
       totalPackages: packages.length,
       servicesByType: typeCounts
@@ -1192,7 +1395,7 @@ router.get("/export-all-data", async (req, res) => {
     const fullExport = {
       metadata: {
         exportedAt: new Date().toISOString(),
-        system: "Arab Tech Pro Server",
+        system: "BORAI STORE",
         totalProviders: providers.length,
         totalServicesAcrossProviders: exportList.reduce((acc, p) => acc + (p.metadata?.totalServices || 0), 0)
       },
@@ -1357,7 +1560,16 @@ export async function persistProviderServicesList(
   exchangeRate = 1
 ) {
   // Ensure standard categories exist
-  const categoryNames = ["IMEI Service", "Server Service", "Remote Service"];
+  const categoryNames = [
+    "IMEI Service",
+    "Server Service",
+    "Remote Service",
+    "In-Game Top-Ups",
+    "Game Codes",
+    "App Stores",
+    "Subscriptions",
+    "eSIM"
+  ];
   const categoryMap = new Map<string, string>();
 
   for (const name of categoryNames) {
@@ -1387,7 +1599,8 @@ export async function persistProviderServicesList(
     const dhruId = buildProviderServiceId(provider.id, remoteServiceId);
 
     const serviceName = s.name || s.service_name || "";
-    const groupName = s.group_name || s.groupName || "General";
+    const rawGroupName = s.group_name || s.groupName || "General";
+    const groupName = refinePackageGroupName(rawGroupName, serviceName);
     let credit = (parseFloat(s.credit || s.price) || 0) * (exchangeRate > 0 ? exchangeRate : 1);
     const time = s.time || "";
     const info = s.info || "";
@@ -1401,11 +1614,13 @@ export async function persistProviderServicesList(
     const requiresCustomStr = customFieldsList && customFieldsList.length > 0
       ? JSON.stringify(customFieldsList)
       : (s.requiresCustom || null);
-    const apiServiceType = normalizeProviderApiServiceType(s.api_service_type ?? s.service_type);
-    const categoryName = apiServiceType === "imei"
-      ? "IMEI Service"
-      : (apiServiceType === "remote" ? "Remote Service" : "Server Service");
-    const categoryId = categoryMap.get(categoryName)!;
+    const apiServiceType = detectProviderServiceType(
+      s.api_service_type ?? s.service_type,
+      serviceName,
+      groupName
+    );
+    const categoryName = getCategoryNameForServiceType(apiServiceType);
+    const categoryId = categoryMap.get(categoryName) || categoryMap.get("Server Service")!;
     const cleanName = cleanServiceName(serviceName, info, groupName);
 
     const existing = existingMap.get(dhruId);
@@ -1565,7 +1780,16 @@ router.post("/:id/import-services", async (req, res) => {
     const rate = parseFloat(exchange_rate) || 1;
 
     // Ensure categories
-    const categoryNames = ["IMEI Service", "Server Service", "Remote Service"];
+    const categoryNames = [
+      "IMEI Service",
+      "Server Service",
+      "Remote Service",
+      "In-Game Top-Ups",
+      "Game Codes",
+      "App Stores",
+      "Subscriptions",
+      "eSIM"
+    ];
     const categoryMap = new Map<string, string>();
     for (const name of categoryNames) {
       let cat = await prisma.dhruCategory.findFirst({ where: { name } });
@@ -1580,16 +1804,19 @@ router.post("/:id/import-services", async (req, res) => {
       const dhruId = buildProviderServiceId(provider.id, remoteServiceId);
 
       const serviceName = String(s.name || s.service_name || "").trim();
-      const groupName = String(s.group_name || s.groupName || "General").trim();
+      const rawGroupName = String(s.group_name || s.groupName || "General").trim();
+      const groupName = refinePackageGroupName(rawGroupName, serviceName);
       let credit = (parseFloat(s.credit || s.price) || 0) * rate;
       const margin = markup > 0 ? Number(((credit * markup) / 100).toFixed(2)) : 0;
       const cleanName = cleanServiceName(serviceName, s.info || "", groupName);
       
-      const apiServiceType = normalizeProviderApiServiceType(s.api_service_type ?? s.service_type);
-      const categoryName = apiServiceType === "imei"
-        ? "IMEI Service"
-        : (apiServiceType === "remote" ? "Remote Service" : "Server Service");
-      const categoryId = categoryMap.get(categoryName)!;
+      const apiServiceType = detectProviderServiceType(
+        s.api_service_type ?? s.service_type,
+        serviceName,
+        groupName
+      );
+      const categoryName = getCategoryNameForServiceType(apiServiceType);
+      const categoryId = categoryMap.get(categoryName) || categoryMap.get("Server Service")!;
 
       let customFieldsList = s.customFields && Array.isArray(s.customFields)
         ? s.customFields.map(normalizeCustomField).filter(Boolean)
@@ -1699,25 +1926,28 @@ router.get("/:id/services", async (req, res) => {
       orderBy: { name: "asc" }
     });
 
+    const mappedDbServices = services.map((service) => {
+      const qtyConfig = getServiceQuantityConfig(service);
+      return {
+        ...service,
+        price: service.credit,
+        providerPrice: service.credit,
+        category_name: service.dhruCategory?.name || null,
+        service_type: service.apiServiceType || getProviderServiceType(service.dhruCategory?.name),
+        api_service_type: service.apiServiceType || null,
+        supportsQty: qtyConfig.supportsQty,
+        supports_quantity: qtyConfig.supportsQty,
+        minQty: qtyConfig.minQty,
+        maxQty: qtyConfig.maxQty,
+        min_quantity: qtyConfig.min_quantity,
+        max_quantity: qtyConfig.max_quantity
+      };
+    });
+
     return res.json({
       success: true,
-      services: services.map((service) => {
-        const qtyConfig = getServiceQuantityConfig(service);
-        return {
-          ...service,
-          price: service.credit,
-          providerPrice: service.credit,
-          category_name: service.dhruCategory?.name || null,
-          service_type: service.apiServiceType || getProviderServiceType(service.dhruCategory?.name),
-          api_service_type: service.apiServiceType || null,
-          supportsQty: qtyConfig.supportsQty,
-          supports_quantity: qtyConfig.supportsQty,
-          minQty: qtyConfig.minQty,
-          maxQty: qtyConfig.maxQty,
-          min_quantity: qtyConfig.min_quantity,
-          max_quantity: qtyConfig.max_quantity
-        };
-      })
+      services: mappedDbServices,
+      servicesCount: mappedDbServices.length
     });
   } catch (error: any) {
     console.error("Fetch provider services error:", error);
@@ -1752,13 +1982,15 @@ router.post("/:id/toggle-packages", async (req, res) => {
       }
     });
 
+
+
     invalidateDhruServicesCache();
     return res.json({
       success: true,
       count: result.count,
       message: nextActive
-        ? `تم إظهار وتفعيل ${result.count} خدمة ضمن (${groupNames.length} باقة) للعملاء بنجاح!`
-        : `تم إخفاء ${result.count} خدمة ضمن (${groupNames.length} باقة) عن العملاء بنجاح.`
+        ? `تم إظهار وتفعيل الباقات المحددة للعملاء بنجاح!`
+        : `تم إخفاء الباقات المحددة عن العملاء بنجاح.`
     });
   } catch (error: any) {
     console.error("Toggle packages error:", error);

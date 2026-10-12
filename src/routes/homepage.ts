@@ -3,19 +3,103 @@ import fs from 'fs';
 import path from 'path';
 import { isAdmin } from '../middleware/auth';
 import { prisma } from '../utils/prisma';
+import { SITE_CONTACTS } from '../utils/site-contacts';
 
 const router = Router();
 const CONFIG_FILE = path.join(__dirname, '../../data/homepage_config.json');
 
+const storeDefaults = {
+  announcementBar: {
+    enabled: true,
+    title: "تطبيق BORAI STORE:",
+    linkText: "لتحميل تطبيقنا اضغط هنا",
+    linkUrl: "#"
+  },
+  heroSlider: [
+    { id: 1, image: "/images/zoalna/slide_1.png", link: "/pricing", alt: "Slide 1" },
+    { id: 2, image: "/images/zoalna/slide_2.png", link: "/pricing?cat=imei", alt: "Slide 2" },
+    { id: 3, image: "/images/zoalna/slide_3.png", link: "/pricing?cat=server", alt: "Slide 3" }
+  ],
+  sideMenu: [
+    { icon: "account", text: "الحساب", link: "/profile" },
+    { icon: "wallet", text: "المحفظة", link: "/wallet" },
+    { icon: "orders", text: "الطلبات", link: "/orders" }
+  ],
+  searchPlaceholder: "ابحث عن لعبتك أو بطاقتك المفضلة (فري فاير، ببجي، ايتونز، ستيم...)",
+  banner1: {
+    image: "/images/zoalna/banner_hero_1.webp",
+    alt: "شحن الألعاب الفوري",
+    link: ""
+  },
+  gamesGroup1: [
+    { title: "فري فاير", image: "/images/zoalna/game_freefire.webp", href: "/pricing?search=Free%20Fire", query: "فري فاير free fire" },
+    { title: "ببجي موبايل", image: "/images/zoalna/game_pubg.webp", href: "/pricing?search=PUBG", query: "ببجي pubg mobile" },
+    { title: "موبايل ليجند", image: "/images/zoalna/game_mobilelegends.webp", href: "/pricing?search=Mobile%20Legends", query: "موبايل ليجند mobile legends" },
+    { title: "جنشن امباكت", image: "/images/zoalna/game_genshin.webp", href: "/pricing?search=Genshin", query: "جنشن genshin impact" },
+    { title: "يلا ليدو", image: "/images/zoalna/game_yallaludo.webp", href: "/pricing?search=Yalla%20Ludo", query: "يلا ليدو yalla ludo" },
+    { title: "جواكر", image: "/images/zoalna/game_jawaker.webp", href: "/pricing?search=Jawaker", query: "جواكر jawaker" },
+    { title: "لوردس موبايل", image: "/images/zoalna/game_lordsmobile.webp", href: "/pricing?search=Lords%20Mobile", query: "لوردس lords mobile" },
+    { title: "بلود استريك", image: "/images/zoalna/game_bloodstrike.webp", href: "/pricing?search=Blood%20Strike", query: "بلود استريك blood strike" },
+    { title: "فيزا", image: "/images/zoalna/game_redotpay.webp", href: "/pricing?search=Visa", query: "فيزا redotpay visa" }
+  ],
+  banner2: {
+    image: "/images/zoalna/banner_hero_2.webp",
+    alt: "عروض وتحديثات الألعاب",
+    link: ""
+  },
+  gamesGroup2: [
+    { title: "كلاش اوف كلانس", image: "/images/zoalna/game_clashofclans.webp", href: "/pricing?search=Clash%20of%20Clans", query: "كلاش اوف كلانس clash of clans" },
+    { title: "كلاش رويال", image: "/images/zoalna/game_clashroyale.webp", href: "/pricing?search=Clash%20Royale", query: "كلاش رويال clash royale" },
+    { title: "فيفا موبايل", image: "/images/zoalna/game_fifa.webp", href: "/pricing?search=FC%20Mobile", query: "فيفا fifa ea fc mobile" },
+    { title: "بيس موبايل", image: "/images/zoalna/game_pes.webp", href: "/pricing?search=eFootball", query: "بيس pes efootball mobile" },
+    { title: "براول ستارز", image: "/images/zoalna/game_brawlstars.webp", href: "/pricing?search=Brawl%20Stars", query: "براول ستارز brawl stars" },
+    { title: "تيك توك", image: "/images/zoalna/game_tiktok.webp", href: "/pricing?search=TikTok", query: "تيك توك tiktok coins" },
+    { title: "تجديد استارلينك", image: "/images/zoalna/game_starlink.webp", href: "/pricing?search=Starlink", query: "استارلينك starlink internet" }
+  ],
+  banner3: {
+    image: "/images/zoalna/banner_hero_3.webp",
+    alt: "كروت الألعاب والاشتراكات",
+    link: ""
+  },
+  digitalCards: [
+    { title: "كروت ايتونز", image: "/images/zoalna/card_itunes.webp", href: "/pricing?search=iTunes", query: "ايتونز itunes apple" },
+    { title: "ريزر جولد", image: "/images/zoalna/card_razergold.webp", href: "/pricing?search=Razer%20Gold", query: "ريزر جولد razer gold" },
+    { title: "كروت استيم", image: "/images/zoalna/card_steam.webp", href: "/pricing?search=Steam", query: "استيم steam wallet" },
+    { title: "كروت بلايستيشن", image: "/images/zoalna/card_playstation.webp", href: "/pricing?search=PlayStation", query: "بلايستيشن playstation psn" },
+    { title: "كروت اكس بوكس", image: "/images/zoalna/card_xbox.webp", href: "/pricing?search=Xbox", query: "اكس بوكس xbox live" }
+  ],
+  subscriptionsCard: {
+    image: "/images/zoalna/card_subscriptions.webp",
+    title: "الاشتراكات الرقمية",
+    description: "خدمات بث، موسيقى، ترفيه وألعاب… معالجة سريعة ودعم فني.",
+    buttonText: "تصفح الآن",
+    buttonUrl: "/pricing?cat=store"
+  },
+  floatingWhatsapp: {
+    enabled: true,
+    phone: SITE_CONTACTS.phone,
+    label: "واتساب"
+  },
+  appModal: {
+    enabled: true,
+    title: "جرّب تطبيق BORAI STORE الجديد!",
+    description: "تم إطلاق التحديث الجديد لتجربة شحن أسرع، متابعة لحظية لطلباتك، وإشعارات مباشرة بمحفظتك.",
+    buttonText: "تنزيل التطبيق الآن",
+    downloadUrl: "#"
+  }
+};
+
 const defaultConfig = {
+  ...storeDefaults,
   noticeBar: {
     text1En: "Instant automated 24/7 delivery for IMEI & server services",
     text1Ar: "تسليم فوري وتلقائي لمعظم خدمات الـ IMEI والسيرفر على مدار 24/7",
     text2En: "100% Secure checkout + instant wallet funding & refund protection",
     text2Ar: "دفع آمن 100% + شحن فوري للمحفظة مع ضمان استرجاع الرصيد",
-    whatsapp: "+16728972935",
-    telegram: "@ARABTECHSUPPURT2",
-    email: "arabtechserver@gmail.com"
+    whatsapp: SITE_CONTACTS.phone,
+    telegram: `@${SITE_CONTACTS.telegramUsername}`,
+    whatsappGroupUrl: SITE_CONTACTS.whatsappGroupUrl,
+    email: ""
   },
   heroSection: {
     liveTagEn: "All-in-One Platform for GSM Services",
@@ -53,7 +137,7 @@ const defaultConfig = {
     supportTitleAr: "هل تحتاج إجابة سريعة؟",
     supportBtnEn: "Chat with GSM Team",
     supportBtnAr: "تحدث مع الدعم الفني",
-    whatsappUrl: "https://api.whatsapp.com/send/?phone=16728972935&text&type=phone_number&app_absent=0"
+    whatsappUrl: SITE_CONTACTS.whatsappUrl
   },
   serviceLanes: {
     imeiTitleEn: "IMEI Services",
@@ -408,47 +492,67 @@ function normalizeSupportedTools(tools: any): any[] {
 }
 
 async function loadConfig() {
+  let loaded = { ...defaultConfig };
   try {
     const dbSetting = await prisma.setting.findUnique({ where: { key: 'homepage_config' } });
     if (dbSetting?.value) {
       const parsed = JSON.parse(dbSetting.value);
-      const merged = { ...defaultConfig, ...parsed };
-      merged.campaigns = normalizeCampaigns(parsed.campaigns !== undefined ? parsed.campaigns : defaultConfig.campaigns);
-      merged.featuredPackages = normalizeFeaturedPackages(parsed.featuredPackages !== undefined ? parsed.featuredPackages : defaultConfig.featuredPackages);
-      merged.supportedTools = normalizeSupportedTools(parsed.supportedTools !== undefined ? parsed.supportedTools : defaultConfig.supportedTools);
-      return merged;
-    }
-  } catch (dbErr) {
-    console.warn("Could not read homepage config from DB, falling back to file:", dbErr);
-  }
-
-  try {
-    if (fs.existsSync(CONFIG_FILE)) {
+      loaded = { ...defaultConfig, ...parsed };
+      loaded.campaigns = normalizeCampaigns(parsed.campaigns !== undefined ? parsed.campaigns : defaultConfig.campaigns);
+      loaded.featuredPackages = normalizeFeaturedPackages(parsed.featuredPackages !== undefined ? parsed.featuredPackages : defaultConfig.featuredPackages);
+      loaded.supportedTools = normalizeSupportedTools(parsed.supportedTools !== undefined ? parsed.supportedTools : defaultConfig.supportedTools);
+    } else if (fs.existsSync(CONFIG_FILE)) {
       const data = fs.readFileSync(CONFIG_FILE, 'utf-8');
       const parsed = JSON.parse(data);
-      const merged = { ...defaultConfig, ...parsed };
-      merged.campaigns = normalizeCampaigns(parsed.campaigns !== undefined ? parsed.campaigns : defaultConfig.campaigns);
-      merged.featuredPackages = normalizeFeaturedPackages(parsed.featuredPackages !== undefined ? parsed.featuredPackages : defaultConfig.featuredPackages);
-      merged.supportedTools = normalizeSupportedTools(parsed.supportedTools !== undefined ? parsed.supportedTools : defaultConfig.supportedTools);
-      return merged;
+      loaded = { ...defaultConfig, ...parsed };
+      loaded.campaigns = normalizeCampaigns(parsed.campaigns !== undefined ? parsed.campaigns : defaultConfig.campaigns);
+      loaded.featuredPackages = normalizeFeaturedPackages(parsed.featuredPackages !== undefined ? parsed.featuredPackages : defaultConfig.featuredPackages);
+      loaded.supportedTools = normalizeSupportedTools(parsed.supportedTools !== undefined ? parsed.supportedTools : defaultConfig.supportedTools);
     }
   } catch (err) {
-    console.error("Error reading homepage config from file:", err);
+    console.error("Error reading homepage config:", err);
   }
-  return defaultConfig;
+
+  // Ensure all store defaults exist
+  for (const [key, val] of Object.entries(storeDefaults)) {
+    if ((loaded as any)[key] === undefined) {
+      (loaded as any)[key] = val;
+    }
+  }
+
+  const rawString = JSON.stringify(loaded);
+  if (rawString.includes('/gaming')) {
+    const cleaned = rawString
+      .replace(/http:\/\/localhost:3000\/(?:en|ar)\/gaming\?section=PUBG%20Mobile/g, '/pricing?search=PUBG')
+      .replace(/\/(?:en|ar)\/gaming\?section=PUBG%20Mobile/g, '/pricing?search=PUBG')
+      .replace(/\/gaming\?section=[^"&]+/g, '/pricing')
+      .replace(/\/gaming/g, '/pricing');
+    try {
+      loaded = JSON.parse(cleaned);
+      await prisma.setting.upsert({
+        where: { key: 'homepage_config' },
+        update: { value: cleaned },
+        create: { key: 'homepage_config', value: cleaned }
+      });
+    } catch {}
+  }
+
+  return loaded;
 }
 
 async function saveConfig(config: any) {
-  if (config && config.campaigns !== undefined) {
-    config.campaigns = normalizeCampaigns(config.campaigns);
+  const current = await loadConfig();
+  const merged = { ...current, ...config };
+  if (merged.campaigns !== undefined) {
+    merged.campaigns = normalizeCampaigns(merged.campaigns);
   }
-  if (config && config.featuredPackages !== undefined) {
-    config.featuredPackages = normalizeFeaturedPackages(config.featuredPackages);
+  if (merged.featuredPackages !== undefined) {
+    merged.featuredPackages = normalizeFeaturedPackages(merged.featuredPackages);
   }
-  if (config && config.supportedTools !== undefined) {
-    config.supportedTools = normalizeSupportedTools(config.supportedTools);
+  if (merged.supportedTools !== undefined) {
+    merged.supportedTools = normalizeSupportedTools(merged.supportedTools);
   }
-  const serialized = JSON.stringify(config, null, 2);
+  const serialized = JSON.stringify(merged, null, 2);
 
   // 1. Save to Backend File
   try {

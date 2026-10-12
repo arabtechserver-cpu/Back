@@ -1,8 +1,10 @@
 import https from "https";
+import { SITE_CONTACTS } from "./site-contacts";
 
 // Resend Configuration (100% Resend Powered)
 const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
-const RESEND_FROM = process.env.RESEND_FROM || "arabtechproserver.tech <arabtechproserver@arabtechproserver.tech>";
+const RESEND_FROM = process.env.RESEND_FROM || "BORAI STORE <onboarding@resend.dev>";
+const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
 
 interface OtpPayload {
   code: string;
@@ -44,10 +46,10 @@ function generateLuxuryEmailHtml({
       <tr>
         <td style="background: linear-gradient(135deg, #1e3a8a 0%, #0284c7 100%); padding: 30px 20px; text-align: center;">
           <div style="display: inline-block; padding: 6px 16px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(56, 189, 248, 0.4); border-radius: 30px; color: #38bdf8; font-size: 12px; font-weight: bold; margin-bottom: 10px; letter-spacing: 1px;">
-            ARAB TECH PRO SERVER
+            BORAI STORE
           </div>
-          <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 800; letter-spacing: 0.5px;">عرب تك برو سيرفر</h1>
-          <p style="margin: 5px 0 0 0; color: #bae6fd; font-size: 13px; font-family: monospace;">arabtechproserver.tech</p>
+          <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 800; letter-spacing: 0.5px;">بورعي ستور | BORAI STORE</h1>
+          <p style="margin: 5px 0 0 0; color: #bae6fd; font-size: 13px; font-family: monospace;">BORAI STORE</p>
         </td>
       </tr>
 
@@ -83,8 +85,8 @@ function generateLuxuryEmailHtml({
       <!-- FOOTER -->
       <tr>
         <td style="background-color: #090d16; padding: 22px 20px; text-align: center; border-top: 1px solid #1e293b;">
-          <p style="margin: 0; color: #64748b; font-size: 12px;">© 2026 <strong>عرب تك برو سيرفر - ARAB TECH PRO</strong>. جميع الحقوق محفوظة.</p>
-          <p style="margin: 6px 0 0 0; color: #64748b; font-size: 12px;">الدعم الفني المباشر: <a href="mailto:arabtechserver@gmail.com" style="color: #38bdf8; text-decoration: none;">arabtechserver@gmail.com</a></p>
+          <p style="margin: 0; color: #64748b; font-size: 12px;">© 2026 <strong>BORAI STORE - بورعي ستور</strong>. جميع الحقوق محفوظة.</p>
+          <p style="margin: 6px 0 0 0; color: #64748b; font-size: 12px;">الدعم الفني المباشر: <a href="${SITE_CONTACTS.whatsappUrl}" style="color: #38bdf8; text-decoration: none;" dir="ltr">${SITE_CONTACTS.phone}</a> | <a href="${SITE_CONTACTS.telegramUrl}" style="color: #38bdf8; text-decoration: none;">تلجرام</a> | <a href="${SITE_CONTACTS.whatsappGroupUrl}" style="color: #38bdf8; text-decoration: none;">مجموعة واتساب</a></p>
         </td>
       </tr>
     </table>
@@ -112,7 +114,7 @@ export async function sendEmail({
 
     const postData = JSON.stringify({
       from: RESEND_FROM,
-      reply_to: "arabtechserver@gmail.com",
+      reply_to: "support@BORAI STORE",
       to: [to.trim().toLowerCase()],
       subject,
       html
@@ -140,7 +142,7 @@ export async function sendEmail({
         } else {
           console.warn(`[Resend Error] Email provider returned status ${res.statusCode}`);
           if (data && data.includes("domain is not verified")) {
-            console.warn(`[Resend Action Required] The domain arabtechproserver.tech is unverified in Resend. Please verify DNS records at https://resend.com/domains.`);
+            console.warn(`[Resend Action Required] The domain BORAI STORE is unverified in Resend. Please verify DNS records at https://resend.com/domains.`);
           }
           resolve(false);
         }
@@ -227,12 +229,12 @@ export const sendOtpEmail = async (email: string, payload: OtpPayload): Promise<
     message,
     badgeText: payload.code,
     actionText: payload.actionLabel || "تأكيد الحساب والدخول",
-    actionUrl: "https://arabtechproserver.tech/login"
+    actionUrl: "https://BORAI STORE/login"
   });
 
   const sent = await sendEmail({
     to: cleanEmail,
-    subject: `عرب تك برو سيرفر | ${payload.actionLabel || 'كود التحقق'}: ${payload.code}`,
+    subject: `BORAI STORE | ${payload.actionLabel || 'كود التحقق'}: ${payload.code}`,
     html
   });
 
@@ -258,19 +260,19 @@ export const addContactToLoops = async (email: string, firstName?: string): Prom
 export const sendWelcomeNewsletterEmail = async (email: string, name?: string): Promise<boolean> => {
   const cleanEmail = email.trim().toLowerCase();
   const username = name || "عزيزنا العميل";
-  const message = "أهلاً بك في النشرة الإخبارية الرسمية لعرب تك برو سيرفر! ستصلك أحدث عروض الأدوات وتحديثات السيرفر والخدمات الجديدة فور إضافتها مباشرة على بريدك الإلكتروني.";
+  const message = "أهلاً بك في النشرة الإخبارية الرسمية لBORAI STORE! ستصلك أحدث عروض الأدوات وتحديثات السيرفر والخدمات الجديدة فور إضافتها مباشرة على بريدك الإلكتروني.";
 
   const html = generateLuxuryEmailHtml({
-    title: "مرحباً بك في عرب تك برو سيرفر",
+    title: "مرحباً بك في BORAI STORE",
     username,
     message,
     actionText: "زيارة الموقع وتصفح الخدمات",
-    actionUrl: "https://arabtechproserver.tech"
+    actionUrl: "https://BORAI STORE"
   });
 
   return sendEmail({
     to: cleanEmail,
-    subject: "عرب تك برو سيرفر | أهلاً بك معنا!",
+    subject: "BORAI STORE | أهلاً بك معنا!",
     html
   });
 };
@@ -294,12 +296,12 @@ export const sendNewsletterBroadcastEmail = async (
     username: "عزيزنا العميل",
     message: payload.message,
     actionText: payload.actionText || "عرض التفاصيل في الموقع",
-    actionUrl: payload.actionUrl || "https://arabtechproserver.tech"
+    actionUrl: payload.actionUrl || "https://BORAI STORE"
   });
 
   return sendEmail({
     to: cleanEmail,
-    subject: `عرب تك برو سيرفر | ${payload.subject}`,
+    subject: `BORAI STORE | ${payload.subject}`,
     html
   });
 };
@@ -328,12 +330,12 @@ export const sendOrderConfirmationEmail = async (
     message,
     badgeText: `#${payload.orderId}`,
     actionText: "متابعة حالة الطلب في الموقع",
-    actionUrl: "https://arabtechproserver.tech/dashboard/orders"
+    actionUrl: "https://BORAI STORE/dashboard/orders"
   });
 
   return sendEmail({
     to: cleanEmail,
-    subject: `عرب تك برو سيرفر | تم استلام طلبك #${payload.orderId} بنجاح`,
+    subject: `BORAI STORE | تم استلام طلبك #${payload.orderId} بنجاح`,
     html
   });
 };
@@ -360,12 +362,12 @@ export const sendDepositApprovalEmail = async (
     message,
     badgeText: `+$${payload.amount.toFixed(2)} USD`,
     actionText: "فتح المحفظة والطلب الآن",
-    actionUrl: "https://arabtechproserver.tech/dashboard/wallet"
+    actionUrl: "https://BORAI STORE/dashboard/wallet"
   });
 
   return sendEmail({
     to: cleanEmail,
-    subject: `عرب تك برو سيرفر | تم اعتماد شحن رصيدك (+$${payload.amount.toFixed(2)} USD)`,
+    subject: `BORAI STORE | تم اعتماد شحن رصيدك (+$${payload.amount.toFixed(2)} USD)`,
     html
   });
 };
@@ -391,12 +393,12 @@ export const sendDepositPendingEmail = async (
     message,
     badgeText: `قيد المراجعة`,
     actionText: "متابعة حالة الطلب في الموقع",
-    actionUrl: "https://arabtechproserver.tech/dashboard/wallet"
+    actionUrl: "https://BORAI STORE/dashboard/wallet"
   });
 
   return sendEmail({
     to: cleanEmail,
-    subject: `عرب تك برو سيرفر | طلب إيداعك قيد المراجعة ($${payload.amount.toFixed(2)} USD)`,
+    subject: `BORAI STORE | طلب إيداعك قيد المراجعة ($${payload.amount.toFixed(2)} USD)`,
     html
   });
 };

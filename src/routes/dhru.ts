@@ -19,39 +19,27 @@ import { syncDhruServices, cleanServiceName } from '../scripts/syncDhruServices'
 import { serializeAdminServiceCategories, serializePricingServiceCategories } from "../utils/admin-service-response";
 import { getServiceQuantityConfig, enrichCustomFieldsWithQuantity } from '../utils/provider-quantity';
 
-// In-memory cache for ultra-fast pricing responses without database re-querying
-let pricingCache: { data: any; timestamp: number; etag: string } | null = null;
-const PRICING_CACHE_TTL = 60 * 1000; // 60 seconds TTL
+// Store one encoded public response; simultaneous cache misses share one query.
+type PricingPayload = { body: string; timestamp: number; etag: string };
+let pricingCache: PricingPayload | null = null;
+let pricingPending: Promise<PricingPayload> | null = null;
+let pricingVersion = 0;
+const PRICING_CACHE_TTL = 60 * 1000;
+const PRICING_CACHE_MAX_BYTES = 8 * 1024 * 1024;
 
 export function invalidateDhruServicesCache() {
   pricingCache = null;
+  pricingPending = null;
+  pricingVersion++;
 }
 
-router.get('/services', (req, res, next) => {
-  if (req.query.all === 'true') return isAdmin(req, res, next);
-  return next();
-}, async (req, res) => {
-  try {
-    const { all } = req.query;
-    const isPricingView = req.query.view === "pricing" || all !== 'true';
-
-    // Instant in-memory cache check for pricing/public view
-    if (isPricingView && all !== 'true' && pricingCache && (Date.now() - pricingCache.timestamp < PRICING_CACHE_TTL)) {
-      const clientEtag = req.headers['if-none-match'];
-      res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');
-      res.setHeader('ETag', pricingCache.etag);
-      if (clientEtag && clientEtag === pricingCache.etag) {
-        return res.status(304).end();
-      }
-      return res.json(pricingCache.data);
-    }
-
+async function loadServiceCategories(allRecords: boolean, isPricingView: boolean) {
     const categories = await prisma.dhruCategory.findMany({
       select: {
         id: true,
         name: true,
         dhruServices: {
-          where: all === 'true' ? {} : { isActive: true },
+          where: allRecords ? {} : { isActive: true },
           orderBy: { name: 'asc' },
           select: {
             id: true,
@@ -68,7 +56,8 @@ router.get('/services', (req, res, next) => {
             supportsQty: true,
             minQty: true,
             maxQty: true,
-            originalPrice: true
+            originalPrice: true,
+            apiServiceType: true
           }
         }
       },
@@ -78,18 +67,40 @@ router.get('/services', (req, res, next) => {
       ? serializePricingServiceCategories(categories, cleanServiceName, false)
       : serializeAdminServiceCategories(categories, cleanServiceName);
 
-    if (isPricingView && all !== 'true') {
-      const etag = `"${Buffer.from(`${Date.now()}_${cleanedCategories.length}`).toString('base64')}"`;
-      pricingCache = {
-        data: cleanedCategories,
-        timestamp: Date.now(),
-        etag
-      };
-      res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');
-      res.setHeader('ETag', etag);
-    }
+    return cleanedCategories;
+}
 
-    res.json(cleanedCategories);
+async function loadPublicPricing(): Promise<PricingPayload> {
+  if (pricingCache && Date.now() - pricingCache.timestamp < PRICING_CACHE_TTL) return pricingCache;
+  if (pricingPending) return pricingPending;
+  const version = pricingVersion;
+  const pending = loadServiceCategories(false, true).then(categories => {
+    const body = JSON.stringify(categories);
+    const timestamp = Date.now();
+    const payload = { body, timestamp, etag: '"' + timestamp + '_' + body.length + '"' };
+    if (version === pricingVersion) pricingCache = Buffer.byteLength(body) <= PRICING_CACHE_MAX_BYTES ? payload : null;
+    return payload;
+  });
+  pricingPending = pending;
+  try { return await pending; }
+  finally { if (pricingPending === pending) pricingPending = null; }
+}
+
+router.get('/services', (req, res, next) => {
+  if (req.query.all === 'true') return isAdmin(req, res, next);
+  return next();
+}, async (req, res) => {
+  try {
+    const allRecords = req.query.all === 'true';
+    const isPricingView = req.query.view === 'pricing' || !allRecords;
+    if (!allRecords) {
+      const payload = await loadPublicPricing();
+      res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');
+      res.setHeader('ETag', payload.etag);
+      if (req.headers['if-none-match'] === payload.etag) return res.status(304).end();
+      return res.type('json').send(payload.body);
+    }
+    return res.json(await loadServiceCategories(true, isPricingView));
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch Dhru services from DB' });
   }
@@ -525,13 +536,13 @@ router.post('/services/notify', isAdmin, async (req, res) => {
     const price = (credit + margin).toFixed(2);
 
     const title = `خدمة وتفعيل جديد: ${service.name}`;
-    const message = customMessage || `يسرنا إعلامكم بتوفر خدمة وتفعيل (${service.name}) عبر سيرفر عرب تك برو بسعر $${price} USD وبتسليم فوري.\n\nتفضل بطلب الخدمة الآن عبر المنصة.`;
+    const message = customMessage || `يسرنا إعلامكم بتوفر خدمة وتفعيل (${service.name}) عبر متجر BORAI STORE بسعر $${price} USD وبتسليم فوري.\n\nتفضل بطلب الخدمة الآن عبر المنصة.`;
 
     const result = await broadcastNewItemToSubscribers({
       title,
       message,
       category: 'Service Update',
-      actionUrl: `https://arabtechproserver.tech/ar/pricing?search=${encodeURIComponent(service.name)}`,
+      actionUrl: `${process.env.FRONTEND_URL || "http://localhost:3000"}/ar/pricing?search=${encodeURIComponent(service.name)}`,
       actionText: 'طلب الخدمة الآن'
     });
 

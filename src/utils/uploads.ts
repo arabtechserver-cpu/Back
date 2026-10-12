@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { iterateRows } from './batched-rows';
 
 function isDirectoryWritable(dirPath: string): boolean {
   try {
@@ -112,18 +113,17 @@ export function getUploadFilePath(filename: string): string | null {
 export async function restoreImagesToDisk(prismaClient: any): Promise<number> {
   try {
     const uploadDir = ensureUploadDir();
-    const images = await prismaClient.storedImage.findMany({
-      select: { filename: true, data: true }
-    });
 
     let restoredCount = 0;
     let failedCount = 0;
-    for (const img of images) {
-      if (!img.filename || !img.data) continue;
+    for await (const img of iterateRows(prismaClient.storedImage, { select: { id: true, filename: true } })) {
+      if (!img.filename) continue;
       const targetPath = path.join(uploadDir, img.filename);
       if (!fs.existsSync(targetPath)) {
         try {
-          const buffer = Buffer.from(img.data, 'base64');
+          const imageData = await prismaClient.storedImage.findUnique({ where: { id: img.id }, select: { data: true } });
+          if (!imageData?.data) continue;
+          const buffer = Buffer.from(imageData.data, 'base64');
           fs.writeFileSync(targetPath, buffer);
           restoredCount++;
         } catch (e: any) {

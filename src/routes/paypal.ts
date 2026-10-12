@@ -25,7 +25,7 @@ router.post('/create-order', authenticateToken, async (req: any, res) => {
       return res.status(400).json({ error: 'الحد الأدنى لمبلغ الإيداع عبر PayPal هو $1.00 USD' });
     }
 
-    const originHost = req.headers.origin || 'https://arabtechproserver.tech';
+    const originHost = req.headers.origin || 'https://borai.store';
     const returnUrl = `${originHost}/ar/wallet?paypal=success`;
     const cancelUrl = `${originHost}/ar/wallet?paypal=cancel`;
 

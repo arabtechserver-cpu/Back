@@ -52,11 +52,11 @@ export async function createPayPalOrder(amountUSD: number, returnUrl: string, ca
               currency_code: 'USD',
               value: formattedAmount
             },
-            description: 'شحن رصيد محفظة - سيرفر عرب تك برو (Arab Tech Pro Server)'
+            description: 'شحن رصيد محفظة - BORAI STORE (متجر بورعي)'
           }
         ],
         application_context: {
-          brand_name: 'Arab Tech Pro Server',
+          brand_name: 'BORAI STORE',
           locale: 'ar-EG',
           user_action: 'PAY_NOW',
           return_url: returnUrl,

@@ -129,8 +129,7 @@ router.post('/post', isAdmin, async (req, res) => {
     const data = req.body;
     
     // Process any base64 images in HTML and save them to /public/uploads
-    // Assuming backend runs on port 3001
-    const baseUrl = 'https://api.arabtechproserver.tech';
+    const baseUrl = process.env.BACKEND_PUBLIC_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:5000' : 'https://api.borai.store');
     
     const processedContentEn = processBase64Images(data.contentEn, baseUrl);
     const processedContentAr = processBase64Images(data.contentAr, baseUrl);
@@ -168,9 +167,9 @@ router.post('/post', isAdmin, async (req, res) => {
     // Notify subscribers in background about the new article
     broadcastNewItemToSubscribers({
       title: `مقال جديد: ${post.titleAr || post.titleEn}`,
-      message: `${post.excerptAr || post.excerptEn}\n\nتم نشر مقال جديد في مدونة عرب تك برو سيرفر. اضغط على الرابط لقراءة المقال كاملاً والاستفادة من الشرح.`,
+      message: `${post.excerptAr || post.excerptEn}\n\nتم نشر مقال جديد في مدونة BORAI STORE. اضغط على الرابط لقراءة المقال كاملاً والاستفادة من الشرح.`,
       category: "Blog",
-      actionUrl: `https://arabtechproserver.tech/ar/blog/${post.id}`,
+      actionUrl: `${process.env.FRONTEND_URL || "http://localhost:3000"}/ar/blog/${post.id}`,
       actionText: "قراءة المقال الآن"
     }).catch((err) => console.error("Error sending blog newsletter:", err));
 
@@ -197,9 +196,9 @@ router.post('/tutorial', isAdmin, async (req, res) => {
     // Notify subscribers in background about the new video tutorial
     broadcastNewItemToSubscribers({
       title: `فيديو وشرح تعليمي جديد: ${tutorial.titleAr || tutorial.titleEn}`,
-      message: `تم إضافة فيديو وشرح تعليمي جديد في أكاديمية عرب تك برو: ${tutorial.titleAr || tutorial.titleEn}. شاهد الفيديو الآن وتعلم طريقة التنفيذ خطوة بخطوة.`,
+      message: `تم إضافة فيديو وشرح تعليمي جديد في مركز شروحات BORAI STORE: ${tutorial.titleAr || tutorial.titleEn}. شاهد الفيديو الآن وتعلم طريقة التنفيذ خطوة بخطوة.`,
       category: "Tutorial",
-      actionUrl: `https://arabtechproserver.tech/ar/tutorials/${tutorial.id}`,
+      actionUrl: `${process.env.FRONTEND_URL || "http://localhost:3000"}/ar/tutorials/${tutorial.id}`,
       actionText: "مشاهدة الفيديو التعليمي"
     }).catch((err) => console.error("Error sending tutorial newsletter:", err));
 
@@ -214,7 +213,7 @@ router.put('/posts/:id', isAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const data = req.body;
-    const baseUrl = 'https://api.arabtechproserver.tech';
+    const baseUrl = process.env.BACKEND_PUBLIC_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:5000' : 'https://api.borai.store');
     
     const processedContentEn = processBase64Images(data.contentEn, baseUrl);
     const processedContentAr = processBase64Images(data.contentAr, baseUrl);

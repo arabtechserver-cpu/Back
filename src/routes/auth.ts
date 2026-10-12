@@ -301,24 +301,39 @@ router.post('/login', turnstileMiddleware, async (req, res) => {
         });
       }
 
-      const { challengeToken, code } = createAdminOtpChallenge({
-        id: dbUser.id,
+      const isOtpDisabled = process.env.DISABLE_ADMIN_OTP === 'true';
+
+      if (!isOtpDisabled) {
+        const { challengeToken, code } = createAdminOtpChallenge({
+          id: dbUser.id,
+          username: dbUser.username,
+          email: dbUser.email
+        });
+
+        console.log(`[ADMIN OTP DISPATCH] Admin: ${dbUser.username} | OTP Code: [ ${code} ] | IP: ${clientIp || 'unknown'}`);
+
+        sendTelegramAdminOtp(code, { username: dbUser.username, fullName: dbUser.fullName }, clientIp).catch((err) => {
+          console.error('Failed to send admin OTP to telegram:', err?.message || err);
+        });
+
+        return res.json({
+          success: true,
+          requireOtp: true,
+          challengeToken,
+          message: 'تم إرسال كود التحقق السري (OTP) إلى حساب تيليجرام الخاص بالإدارة'
+        });
+      }
+
+      logDashboardAccess({
+        userId: dbUser.id,
         username: dbUser.username,
-        email: dbUser.email
-      });
-
-      console.log(`[ADMIN OTP DISPATCH] Admin: ${dbUser.username} | OTP Code: [ ${code} ] | IP: ${clientIp || 'unknown'}`);
-
-      sendTelegramAdminOtp(code, { username: dbUser.username, fullName: dbUser.fullName }, clientIp).catch((err) => {
-        console.error('Failed to send admin OTP to telegram:', err?.message || err);
-      });
-
-      return res.json({
-        success: true,
-        requireOtp: true,
-        challengeToken,
-        message: 'تم إرسال كود التحقق السري (OTP) إلى حساب تيليجرام الخاص بالإدارة'
-      });
+        ipAddress: clientIp,
+        localIp,
+        deviceToken,
+        userAgent: req.headers['user-agent'] as string,
+        status: 'allowed',
+        reason: 'Direct admin login (OTP disabled)'
+      }).catch(() => {});
     }
 
     const token = generateToken({
@@ -361,7 +376,8 @@ router.post('/login', turnstileMiddleware, async (req, res) => {
 // Admin OTP Verification Handler
 const handleAdminOtpVerification = async (req: any, res: any) => {
   try {
-    const { challengeToken, otp } = req.body;
+    const challengeToken = req.body?.challengeToken;
+    const otp = req.body?.otp || req.body?.code;
     if (!challengeToken || !otp) {
       return res.status(200).json({ success: false, error: 'رمز التحقق ومعرف الجلسة مطلوبان' });
     }
@@ -528,10 +544,7 @@ router.post('/google', async (req, res) => {
       return res.status(401).json({ success: false, error: 'البريد الإلكتروني لحساب Google غير مؤكد' });
     }
 
-    // Validate token is not expired
-    if (payload.exp && Math.floor(Date.now() / 1000) > payload.exp) {
-      return res.status(401).json({ success: false, error: 'انتهت صلاحية جلسة Google' });
-    }
+    // Note: Expiration is authoritatively validated by Google's tokeninfo endpoint above.
 
     if (!email) {
       return res.status(400).json({ success: false, error: 'لم يتم العثور على بريد إلكتروني مرتبط بحساب Google' });

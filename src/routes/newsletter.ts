@@ -42,9 +42,9 @@ export async function broadcastNewItemToSubscribers({
 
     if (subscribers.length === 0) return { count: 0 };
 
-    const subject = `[عرب تك برو] ${title}`;
+    const subject = `[BORAI STORE] ${title}`;
     const broadcastCategory = category || "Service Update";
-    const url = actionUrl || "https://arabtechproserver.tech";
+    const url = actionUrl || process.env.FRONTEND_URL || "http://localhost:3000";
     const text = actionText || "عرض التفاصيل الآن";
 
     // Save broadcast record

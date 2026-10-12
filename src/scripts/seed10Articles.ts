@@ -15,7 +15,7 @@ export const tenArticles = [
 
       <div class="bg-primary/10 border-r-4 border-primary p-4 rounded-xl my-6">
         <h4 class="text-primary font-bold text-lg mb-1">تفعيل فوري وتلقائي 24/7</h4>
-        <p class="text-sm">يمكنك تفعيل حسابك على أداة UnlockTool فورياً وبأفضل سعر وكيل رسمي مباشرة عبر سيرفر عرب تك برو واستلام التفعيل خلال ثوانٍ معدودة.</p>
+        <p class="text-sm">يمكنك تفعيل حسابك على أداة UnlockTool فورياً وبأفضل سعر وكيل رسمي مباشرة عبر سيرفر BORAI STORE واستلام التفعيل خلال ثوانٍ معدودة.</p>
       </div>
 
       <h3>أبرز المعالجات والأجهزة المدعومة:</h3>
@@ -47,7 +47,7 @@ export const tenArticles = [
 
       <div class="bg-primary/10 border-l-4 border-primary p-4 rounded-xl my-6">
         <h4 class="text-primary font-bold text-lg mb-1">Instant Automated Server Activation</h4>
-        <p class="text-sm">Activate your official UnlockTool account instantly at official reseller prices 24/7 on Arab Tech Pro Server.</p>
+        <p class="text-sm">Activate your official UnlockTool account instantly at official reseller prices 24/7 on BORAI STORE.</p>
       </div>
 
       <h3>Key Supported Chipsets and Architectures:</h3>
@@ -264,7 +264,7 @@ export const tenArticles = [
 
       <div class="bg-emerald-500/10 border-r-4 border-emerald-500 p-4 rounded-xl my-6">
         <h4 class="text-emerald-400 font-bold text-lg mb-1">ضمان استرجاع الرصيد 100%</h4>
-        <p class="text-sm">جميع خدمات فك سامسونج FRP على سيرفر عرب تك برو مضمونة بالكامل، وفي حالة عدم نجاح الخدمة لأي سبب يتم إرجاع المبلغ لمحفظتك تلقائياً.</p>
+        <p class="text-sm">جميع خدمات فك سامسونج FRP على سيرفر BORAI STORE مضمونة بالكامل، وفي حالة عدم نجاح الخدمة لأي سبب يتم إرجاع المبلغ لمحفظتك تلقائياً.</p>
       </div>
 
       <div class="p-6 rounded-2xl bg-surface-container-high border border-outline-variant/30 text-center my-8">
@@ -353,7 +353,7 @@ export const tenArticles = [
       <h3>طريقة الفك الرسمي بالسيرفر (Permanent Server Removal):</h3>
       <ol>
         <li>اضغط على أيقونة القفل في شاشة الهاتف 10 مرات متتالية حتى يظهر رمز القفل المكون من 12 إلى 16 رقماً وحرفاً.</li>
-        <li>انسخ الرمز بدقة وقدمه في قسم خدمات شاومي على سيرفر عرب تك برو.</li>
+        <li>انسخ الرمز بدقة وقدمه في قسم خدمات شاومي على سيرفر BORAI STORE.</li>
         <li>يقوم السيرفر بفك ارتباط الهاتف بالحساب نهائياً من خوادم Xiaomi Cloud خلال وقت قياسي.</li>
         <li>بعد اكتمال الطلب، قم بتوصيل الهاتف بشبكة الواي فاي وسيعمل الهاتف فوراً كأنه جديد.</li>
       </ol>
@@ -471,17 +471,17 @@ export const tenArticles = [
   },
   {
     id: "start-gsm-software-reseller-business",
-    titleAr: "كيف تبدأ مشروع خدمات السوفت وير وتحقق أرباحاً كوكيل معتمد عبر عرب تك برو سيرفر",
-    titleEn: "How to Start a Profitable GSM Software Business with Arab Tech Pro Server",
+    titleAr: "كيف تبدأ مشروع خدمات السوفت وير وتحقق أرباحاً كوكيل معتمد عبر BORAI STORE",
+    titleEn: "How to Start a Profitable GSM Software Business with BORAI STORE",
     excerptAr: "دليل عملي للمبتدئين وأصحاب المحلات لزيادة دخلهم اليومي من خدمات فك الشفرات وتفعيل الأدوات، وربط السيرفر مع موقعك عبر الـ API.",
-    excerptEn: "Actionable roadmap for repair shops and entrepreneurs to maximize profit margins using Arab Tech Pro wholesale server API integration.",
+    excerptEn: "Actionable roadmap for repair shops and entrepreneurs to maximize profit margins using BORAI STORE wholesale server API integration.",
     category: "Reseller & Business Guide",
     imageUrl: "https://images.unsplash.com/photo-1558494949-ef010cbdcc31?w=800&auto=format&fit=crop&q=80",
     contentAr: `
       <h2>ابدأ عملك في مجال الـ GSM وحقق دخلاً متميزاً من خدمات السيرفر</h2>
-      <p>سوق صيانة وسوفت وير الهواتف الذكية يشهد طلباً يومياً متزايداً على خدمات فك الحمايات، تفعيل البرامج، وتجاوز القيود. يوفر لك <strong>عرب تك برو سيرفر</strong> كل الأدوات التي تحتاجها للبدء فوراً وبأعلى هامش ربح:</p>
+      <p>سوق صيانة وسوفت وير الهواتف الذكية يشهد طلباً يومياً متزايداً على خدمات فك الحمايات، تفعيل البرامج، وتجاوز القيود. يوفر لك <strong>BORAI STORE</strong> كل الأدوات التي تحتاجها للبدء فوراً وبأعلى هامش ربح:</p>
 
-      <h3>لماذا تختار منصة عرب تك برو سيرفر كشريك لعملك؟</h3>
+      <h3>لماذا تختار منصة BORAI STORE كشريك لعملك؟</h3>
       <ul>
         <li><strong>أسعار جملة تنافسية:</strong> تخفيضات خاصة تضمن لك تحقيق أفضل أرباح عند تقديم الخدمات لزبائنك.</li>
         <li><strong>تنفيذ أوتوماتيكي سريع:</strong> السيرفر يعمل 24 ساعة يومياً متصلاً بأقوى المصادر العالمية لتنفيذ طلباتك في ثوانٍ.</li>
@@ -506,9 +506,9 @@ export const tenArticles = [
     `,
     contentEn: `
       <h2>Launch & Scale Your GSM Software Services Business</h2>
-      <p>The smartphone repair industry demands high-speed access to digital tool licenses, carrier unlocks, and security bypasses. <strong>Arab Tech Pro Server</strong> provides the wholesale backend infrastructure you need:</p>
+      <p>The smartphone repair industry demands high-speed access to digital tool licenses, carrier unlocks, and security bypasses. <strong>BORAI STORE</strong> provides the wholesale backend infrastructure you need:</p>
 
-      <h3>Why Partner with Arab Tech Pro Server?</h3>
+      <h3>Why Partner with BORAI STORE?</h3>
       <ul>
         <li><strong>Wholesale Tier Pricing:</strong> High profit margins on all digital licenses and server credits.</li>
         <li><strong>24/7 Automated Execution:</strong> Direct API connection delivering instant order fulfillment.</li>

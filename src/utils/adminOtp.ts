@@ -43,6 +43,16 @@ export function createAdminOtpChallenge(user: { id: string; username: string; em
   return { challengeToken, code };
 }
 
+function toEnglishDigits(str: string): string {
+  const arabicDigits = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
+  const persianDigits = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'];
+  let res = String(str || '').trim();
+  for (let i = 0; i < 10; i++) {
+    res = res.replaceAll(arabicDigits[i], String(i)).replaceAll(persianDigits[i], String(i));
+  }
+  return res.replace(/\D/g, '');
+}
+
 export function verifyAdminOtp(
   challengeToken: string,
   inputCode: string
@@ -64,8 +74,10 @@ export function verifyAdminOtp(
     return { success: false, error: 'تجاوزت الحد الأقصى للمحاولات الخاطئة، يرجى تسجيل الدخول مجدداً' };
   }
 
-  const cleanInput = String(inputCode || '').trim();
-  if (cleanInput !== challenge.code) {
+  const cleanInput = toEnglishDigits(inputCode);
+  const matchesCode = cleanInput === challenge.code;
+
+  if (!matchesCode) {
     challenge.attempts += 1;
     const remaining = MAX_ATTEMPTS - challenge.attempts;
     if (remaining <= 0) {

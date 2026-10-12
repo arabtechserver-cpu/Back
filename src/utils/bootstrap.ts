@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import { syncDhruServices } from '../scripts/syncDhruServices';
 import { extractQuantityLimits, enrichCustomFieldsWithQuantity } from './provider-quantity';
 import { refreshAdminIds } from './telegramService';
+import { iterateRows } from './batched-rows';
 
 export async function bootstrapDatabase() {
   try {
@@ -78,7 +79,7 @@ export async function bootstrapDatabase() {
 
     // 2.5 Auto-backfill quantity support & limits for DhruService records
     try {
-      const allServices = await prisma.dhruService.findMany({
+      const serviceRows = iterateRows(prisma.dhruService, {
         select: {
           id: true,
           name: true,
@@ -93,7 +94,7 @@ export async function bootstrapDatabase() {
       });
 
       let updatedCount = 0;
-      for (const s of allServices) {
+      for await (const s of serviceRows) {
         const limits = extractQuantityLimits(s);
         if (s.supportsQty !== limits.supportsQty || s.minQty !== limits.minQty || s.maxQty !== limits.maxQty) {
           let enrichedCustom = s.requiresCustom;

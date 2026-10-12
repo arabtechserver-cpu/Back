@@ -5,5 +5,6 @@ backups/
 telegram_admins.json
 *.db
 *.sqlite
-  
- 
+uploads/receipts/*
+!uploads/receipts/.gitkeep
+*.bak

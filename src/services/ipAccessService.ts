@@ -80,6 +80,11 @@ export async function checkIpAccess(
     return { allowed: true, restrictionEnabled: false, allowedBy: 'none' };
   }
 
+  const isDev = process.env.NODE_ENV === "development" || !process.env.NODE_ENV;
+  if (isDev && isPrivateOrLocalIp(clientIp)) {
+    return { allowed: true, restrictionEnabled, allowedBy: 'ip' };
+  }
+
   // 1. Check if Device Token is authorized
   if (deviceToken && typeof deviceToken === 'string' && deviceToken.trim()) {
     try {

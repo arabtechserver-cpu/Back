@@ -15,6 +15,7 @@ import { checkAndAutoUpgradeMembership } from '../utils/membershipUpgrade';
 import { sendDepositApprovalEmail, sendDepositPendingEmail } from '../utils/emailService';
 import { buildAdminTransactionPageQuery, normalizeTransactionListQuery } from '../utils/transaction-query';
 import { getUploadDir, ensureUploadDir } from '../utils/uploads';
+import { buildDepositTelegramLinks } from '../utils/telegram-deposit-links';
 
 const router = Router();
 
@@ -308,19 +309,7 @@ router.post('/', authenticateToken, async (req: any, res) => {
     let newTransaction: any;
     try {
       newTransaction = await prisma.$transaction(async (tx) => {
-        const existingSameRef = await tx.transaction.findFirst({
-          where: {
-            refNo: { equals: cleanRefNo, mode: 'insensitive' },
-            status: { in: ['pending', 'completed'] }
-          }
-        });
-
-        if (existingSameRef) {
-          throw new Error(existingSameRef.status === 'pending'
-            ? `DUPLICATE_PENDING:${cleanRefNo}`
-            : `DUPLICATE_COMPLETED:${cleanRefNo}`);
-        }
-
+        // The reference may repeat; each receipt is a separate request for admin review.
         const thirtySecondsAgo = new Date(Date.now() - 30 * 1000);
         const recentPendingTx = await tx.transaction.findFirst({
           where: {
@@ -347,16 +336,6 @@ router.post('/', authenticateToken, async (req: any, res) => {
         });
       }, { isolationLevel: 'Serializable' });
     } catch (txErr: any) {
-      if (txErr.message.startsWith('DUPLICATE_PENDING:')) {
-        return res.status(400).json({
-          error: `رقم المعاملة أو الإشعار (${cleanRefNo}) مسجل مسبقا وهو قيد المراجعة حاليا من قبل الإدارة.`
-        });
-      }
-      if (txErr.message.startsWith('DUPLICATE_COMPLETED:')) {
-        return res.status(400).json({
-          error: `تم اعتماد هذا الإشعار/الرقم المرجعي (${cleanRefNo}) مسبقا وشحن الرصيد به. لا يمكن إعادة استخدامه.`
-        });
-      }
       if (txErr.message === 'SPAM_COOLDOWN') {
         return res.status(429).json({
           error: 'تم إرسال طلب إيداع من حسابك قبل قليل وهو قيد المراجعة. يرجى الانتظار بضع لحظات قبل إرسال طلب جديد.'
@@ -375,9 +354,10 @@ router.post('/', authenticateToken, async (req: any, res) => {
     const safeMethod = escapeHtml(method);
     const safeRefNo = escapeHtml(refNo);
 
-    const receiptLink = savedReceiptPath
-      ? `\nصورة الإيصال: <a href="https://arabtechproserver.tech${savedReceiptPath}">عرض الصورة كاملة</a>`
-      : '';
+    const { receiptUrl, replyMarkup } = buildDepositTelegramLinks(newTransaction.id, savedReceiptPath);
+    const receiptLink = receiptUrl
+      ? `\nصورة الإيصال: <a href="${escapeHtml(receiptUrl)}">عرض الصورة كاملة</a>`
+      : "";
 
     const caption = `
 <b>إيداع جديد قيد المراجعة (New Deposit Pending)</b>
@@ -392,19 +372,6 @@ ${receiptLink}
 
 <b>الحالة:</b> قيد المراجعة - يرجى فتح لوحة التحكم أو استخدام الأزرار أدناه.
     `.trim();
-
-    const inlineKeyboard: any[][] = [];
-    if (savedReceiptPath) {
-      inlineKeyboard.push([
-        { text: "فتح الإيصال بالدقة الكاملة", url: `https://arabtechproserver.tech${savedReceiptPath}` }
-      ]);
-    }
-    inlineKeyboard.push([
-      { text: "موافقة وشحن الرصيد", callback_data: `approve_tx_${newTransaction.id}` },
-      { text: "رفض الإيداع", callback_data: `reject_tx_${newTransaction.id}` }
-    ]);
-
-    const replyMarkup = { inline_keyboard: inlineKeyboard };
 
     sendTelegramPhotoNotification({
       imageSource: receiptImage || undefined,

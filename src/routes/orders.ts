@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import { prisma } from "../utils/prisma";
 import { placeImeiOrder, placeServerOrder, getImeiOrder, getServerOrder, normalizeProviderCustomFields, DHRU_API_URL } from '../utils/dhru-api';
-import { getFoxreloadOrderDetails } from '../services/foxreloadService';
 import { getProviderRemoteServiceId } from '../utils/provider-service-id';
 import { buildOrderFieldDetails, resolveOrderServiceType, parseOrderMetadata } from '../utils/order-response';
 import { sendTelegramPhotoNotification } from '../utils/telegramService';
@@ -797,49 +796,40 @@ router.post('/refund', isAdmin, async (req, res) => {
 
     let providerCheckResult: any = null;
     if (verifyProviderFirst && order.apiOrderId) {
-      const isFoxreload =
-        order.source === 'foxreload' ||
-        String(order.serviceId || '').startsWith('foxreload:') ||
-        String(order.notes || '').toLowerCase().includes('foxreload') ||
-        String(order.serviceName || '').toLowerCase().includes('foxreload');
-      if (isFoxreload) {
-        providerCheckResult = await getFoxreloadOrderDetails(order.apiOrderId);
-      } else {
-        const dhruService = await prisma.dhruService.findFirst({
-          where: {
-            OR: [{ id: String(order.serviceId) }, { dhruId: String(order.serviceId) }]
-          },
-          include: { dhruCategory: true, apiProvider: true }
-        });
+      const dhruService = await prisma.dhruService.findFirst({
+        where: {
+          OR: [{ id: String(order.serviceId) }, { dhruId: String(order.serviceId) }]
+        },
+        include: { dhruCategory: true, apiProvider: true }
+      });
 
-        const providerConfig = dhruService?.apiProvider
-          ? {
-              apiUrl: dhruService.apiProvider.apiUrl,
-              username: dhruService.apiProvider.username,
-              apiKey: dhruService.apiProvider.apiKey
+      const providerConfig = dhruService?.apiProvider
+        ? {
+            apiUrl: dhruService.apiProvider.apiUrl,
+            username: dhruService.apiProvider.username,
+            apiKey: dhruService.apiProvider.apiKey
+          }
+        : undefined;
+
+      const serviceType = dhruService
+        ? resolveOrderServiceType(dhruService.apiServiceType, dhruService.dhruCategory?.name, dhruService.groupName)
+        : 'unknown';
+
+      if (providerConfig || DHRU_API_URL) {
+        if (dhruService && serviceType === 'imei') {
+          providerCheckResult = await getImeiOrder(order.apiOrderId, providerConfig);
+          if (!providerCheckResult || providerCheckResult.SUCCESS === false || providerCheckResult.ERROR || providerCheckResult.Error) {
+            const fallback = await getServerOrder(order.apiOrderId, providerConfig);
+            if (fallback && (fallback.SUCCESS || fallback.RESULT)) {
+              providerCheckResult = fallback;
             }
-          : undefined;
-
-        const serviceType = dhruService
-          ? resolveOrderServiceType(dhruService.apiServiceType, dhruService.dhruCategory?.name, dhruService.groupName)
-          : 'unknown';
-
-        if (providerConfig || DHRU_API_URL) {
-          if (dhruService && serviceType === 'imei') {
-            providerCheckResult = await getImeiOrder(order.apiOrderId, providerConfig);
-            if (!providerCheckResult || providerCheckResult.SUCCESS === false || providerCheckResult.ERROR || providerCheckResult.Error) {
-              const fallback = await getServerOrder(order.apiOrderId, providerConfig);
-              if (fallback && (fallback.SUCCESS || fallback.RESULT)) {
-                providerCheckResult = fallback;
-              }
-            }
-          } else {
-            providerCheckResult = await getServerOrder(order.apiOrderId, providerConfig);
-            if (!providerCheckResult || providerCheckResult.SUCCESS === false || providerCheckResult.ERROR || providerCheckResult.Error) {
-              const fallback = await getImeiOrder(order.apiOrderId, providerConfig);
-              if (fallback && (fallback.SUCCESS || fallback.RESULT)) {
-                providerCheckResult = fallback;
-              }
+          }
+        } else {
+          providerCheckResult = await getServerOrder(order.apiOrderId, providerConfig);
+          if (!providerCheckResult || providerCheckResult.SUCCESS === false || providerCheckResult.ERROR || providerCheckResult.Error) {
+            const fallback = await getImeiOrder(order.apiOrderId, providerConfig);
+            if (fallback && (fallback.SUCCESS || fallback.RESULT)) {
+              providerCheckResult = fallback;
             }
           }
         }
@@ -1037,36 +1027,6 @@ router.post('/check-status', isAdmin, async (req, res) => {
 
     if (!order.apiOrderId) {
       return res.status(400).json({ error: 'هذا الطلب لم يتم إرساله إلى أي مزود بعد' });
-    }
-
-    const isFoxreload =
-      order.source === 'foxreload' ||
-      String(order.serviceId || '').startsWith('foxreload:') ||
-      String(order.notes || '').toLowerCase().includes('foxreload') ||
-      String(order.serviceName || '').toLowerCase().includes('foxreload');
-    if (isFoxreload) {
-      const foxResult = await getFoxreloadOrderDetails(order.apiOrderId);
-      if (!foxResult.success) {
-        return res.status(400).json({
-          error: foxResult.error || 'فشل الاستعلام من مزود FoxReload'
-        });
-      }
-
-      let nextStatus = order.status;
-      if (foxResult.status === 'completed') nextStatus = 'completed';
-      else if (foxResult.status === 'rejected') nextStatus = 'rejected';
-
-      const reply = foxResult.reply || order.reply || (nextStatus === 'completed' ? 'تم التفعيل والشحن بنجاح' : undefined);
-      const updatedOrder = await prisma.order.update({
-        where: { id: orderId },
-        data: { status: nextStatus, reply }
-      });
-
-      return res.json({
-        success: true,
-        order: updatedOrder,
-        message: nextStatus === 'completed' ? 'تم اكتمال الطلب بنجاح' : (nextStatus === 'rejected' ? 'تم رفض الطلب' : 'الطلب قيد المعالجة لدى المزود')
-      });
     }
 
     const dhruService = await prisma.dhruService.findFirst({
