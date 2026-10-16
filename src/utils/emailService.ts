@@ -48,7 +48,7 @@ function generateLuxuryEmailHtml({
           <div style="display: inline-block; padding: 6px 16px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(56, 189, 248, 0.4); border-radius: 30px; color: #38bdf8; font-size: 12px; font-weight: bold; margin-bottom: 10px; letter-spacing: 1px;">
             BORAI STORE
           </div>
-          <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 800; letter-spacing: 0.5px;">بورعي ستور | BORAI STORE</h1>
+          <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 800; letter-spacing: 0.5px;">برعي ستور | BORAI STORE</h1>
           <p style="margin: 5px 0 0 0; color: #bae6fd; font-size: 13px; font-family: monospace;">BORAI STORE</p>
         </td>
       </tr>
@@ -85,7 +85,7 @@ function generateLuxuryEmailHtml({
       <!-- FOOTER -->
       <tr>
         <td style="background-color: #090d16; padding: 22px 20px; text-align: center; border-top: 1px solid #1e293b;">
-          <p style="margin: 0; color: #64748b; font-size: 12px;">© 2026 <strong>BORAI STORE - بورعي ستور</strong>. جميع الحقوق محفوظة.</p>
+          <p style="margin: 0; color: #64748b; font-size: 12px;">© 2026 <strong>BORAI STORE - برعي ستور</strong>. جميع الحقوق محفوظة.</p>
           <p style="margin: 6px 0 0 0; color: #64748b; font-size: 12px;">الدعم الفني المباشر: <a href="${SITE_CONTACTS.whatsappUrl}" style="color: #38bdf8; text-decoration: none;" dir="ltr">${SITE_CONTACTS.phone}</a> | <a href="${SITE_CONTACTS.telegramUrl}" style="color: #38bdf8; text-decoration: none;">تلجرام</a> | <a href="${SITE_CONTACTS.whatsappGroupUrl}" style="color: #38bdf8; text-decoration: none;">مجموعة واتساب</a></p>
         </td>
       </tr>

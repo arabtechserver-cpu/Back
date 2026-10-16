@@ -52,7 +52,7 @@ export async function createPayPalOrder(amountUSD: number, returnUrl: string, ca
               currency_code: 'USD',
               value: formattedAmount
             },
-            description: 'شحن رصيد محفظة - BORAI STORE (متجر بورعي)'
+            description: 'شحن رصيد محفظة - BORAI STORE (متجر برعي)'
           }
         ],
         application_context: {

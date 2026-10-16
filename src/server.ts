@@ -151,8 +151,10 @@ import externalApiRoutes from './routes/externalApi';
 import couponsRoutes from './routes/coupons';
 import settingsRoutes from './routes/settings';
 import ipAccessRoutes from './routes/ipAccess';
+import cartRoutes from './routes/cart';
 
 app.use('/api/auth', authRoutes);
+app.use('/api/cart', cartRoutes);
 app.use('/api/coupons', couponsRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/orders', ordersRoutes);
