@@ -1,8 +1,28 @@
 import { Router } from 'express';
 import { prisma } from '../utils/prisma';
 import { authenticateToken } from '../middleware/auth';
+import { getServiceQuantityConfig } from '../utils/provider-quantity';
+import crypto from 'crypto';
 
 const router = Router();
+
+export function quoteCartItem(item: any, service: any, user: any) {
+  if (!user || user.status === 'suspended') throw new Error('SERVICE_UNAVAILABLE');
+  if (!service?.isActive) throw new Error('SERVICE_UNAVAILABLE');
+  const quantity = Number(item.quantity);
+  const config = getServiceQuantityConfig(service);
+  if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > 1_000_000 ||
+      (!config.supportsQty && quantity !== 1) ||
+      (config.supportsQty && (quantity < config.minQty || (config.maxQty > 0 && quantity > config.maxQty)))) {
+    throw new Error('INVALID_QUANTITY');
+  }
+  const base = Number(service.credit) + Number(service.margin);
+  if (!Number.isFinite(base) || base <= 0) throw new Error('PRICE_UNAVAILABLE');
+  const discount = Math.max(0, Math.min(100, Math.max(user.customDiscount || 0, user.membershipTier?.discountPercentage || 0)));
+  const price = base * (1 - discount / 100);
+  const total = price > 0 ? Math.max(0.01, Number((price * quantity).toFixed(2))) : 0;
+  return { ...item, serviceName: service.name, groupName: service.groupName, quantity, price, total };
+}
 
 function safeJsonParse(val: any, fallback: any = null) {
   if (!val) return fallback;
@@ -62,8 +82,11 @@ router.post('/', authenticateToken, async (req: any, res) => {
       return res.status(400).json({ success: false, error: 'الخدمة واسمها مطلوبان لإضافتها للسلة' });
     }
 
-    const qty = Math.max(1, parseInt(String(quantity), 10) || 1);
-    const parsedPrice = Math.max(0, parseFloat(String(price)) || 0);
+    const qty = Number(quantity);
+    const service = await prisma.dhruService.findUnique({ where: { id: String(serviceId) } });
+    const user = await prisma.user.findUnique({ where: { id: userId }, include: { membershipTier: true } });
+    const quoted = quoteCartItem({ quantity: qty }, service, user);
+    const parsedPrice = quoted.price;
     const serializedCustom = customFields ? (typeof customFields === 'string' ? customFields : JSON.stringify(customFields)) : null;
     const cleanTarget = targetInput ? String(targetInput).trim() : '';
 
@@ -79,6 +102,7 @@ router.post('/', authenticateToken, async (req: any, res) => {
 
     let item;
     if (existing) {
+      quoteCartItem({ quantity: existing.quantity + qty }, service, user);
       item = await prisma.cartItem.update({
         where: { id: existing.id },
         data: {
@@ -91,8 +115,8 @@ router.post('/', authenticateToken, async (req: any, res) => {
         data: {
           userId,
           serviceId: String(serviceId),
-          serviceName: String(serviceName).trim(),
-          groupName: groupName ? String(groupName).trim() : null,
+          serviceName: service!.name,
+          groupName: service!.groupName,
           targetInput: cleanTarget || null,
           customFields: serializedCustom,
           quantity: qty,
@@ -114,6 +138,7 @@ router.post('/', authenticateToken, async (req: any, res) => {
       message: 'تمت إضافة المنتج إلى السلة بنجاح',
     });
   } catch (error: any) {
+    if (['SERVICE_UNAVAILABLE', 'INVALID_QUANTITY', 'PRICE_UNAVAILABLE'].includes(error.message)) return res.status(400).json({ success: false, error: 'الخدمة غير متاحة أو السعر أو الكمية غير صالح' });
     console.error('Error adding to cart:', error);
     return res.status(500).json({ success: false, error: 'حدث خطأ أثناء إضافة العنصر إلى السلة' });
   }
@@ -131,14 +156,15 @@ router.put('/:id', authenticateToken, async (req: any, res) => {
       return res.status(404).json({ success: false, error: 'العنصر غير موجود في السلة' });
     }
 
-    const qty = parseInt(String(quantity), 10);
-    if (qty <= 0) {
+    const qty = quantity === undefined ? undefined : Number(quantity);
+    if (qty !== undefined && (!Number.isSafeInteger(qty) || qty > 1_000_000)) return res.status(400).json({ error: 'Invalid quantity' });
+    if (qty !== undefined && qty <= 0) {
       await prisma.cartItem.delete({ where: { id } });
       return res.json({ success: true, message: 'تم حذف العنصر من السلة', deleted: true });
     }
 
     const updateData: any = {};
-    if (!isNaN(qty)) updateData.quantity = qty;
+    if (qty !== undefined) updateData.quantity = qty;
     if (targetInput !== undefined) updateData.targetInput = String(targetInput).trim();
     if (customFields !== undefined) {
       updateData.customFields = typeof customFields === 'string' ? customFields : JSON.stringify(customFields);
@@ -201,6 +227,8 @@ router.post('/sync', authenticateToken, async (req: any, res) => {
   try {
     const userId = req.user.id;
     const { items = [] } = req.body;
+    if (!Array.isArray(items) || items.length > 100) return res.status(400).json({ error: 'Invalid cart size' });
+    const user = await prisma.user.findUnique({ where: { id: userId }, include: { membershipTier: true } });
 
     if (!Array.isArray(items) || items.length === 0) {
       const userItems = await prisma.cartItem.findMany({ where: { userId } });
@@ -214,8 +242,9 @@ router.post('/sync', authenticateToken, async (req: any, res) => {
     for (const item of items) {
       if (!item.serviceId || !item.serviceName) continue;
 
-      const qty = Math.max(1, parseInt(String(item.quantity), 10) || 1);
-      const price = Math.max(0, parseFloat(String(item.price)) || 0);
+      const qty = Number(item.quantity ?? 1);
+      const service = await prisma.dhruService.findUnique({ where: { id: String(item.serviceId) } });
+      const price = quoteCartItem({ quantity: qty }, service, user).price;
       const cleanTarget = item.targetInput ? String(item.targetInput).trim() : '';
       const serializedCustom = item.customFields
         ? typeof item.customFields === 'string'
@@ -233,6 +262,7 @@ router.post('/sync', authenticateToken, async (req: any, res) => {
       });
 
       if (existing) {
+        quoteCartItem({ quantity: existing.quantity + qty }, service, user);
         await prisma.cartItem.update({
           where: { id: existing.id },
           data: {
@@ -245,8 +275,8 @@ router.post('/sync', authenticateToken, async (req: any, res) => {
           data: {
             userId,
             serviceId: String(item.serviceId),
-            serviceName: String(item.serviceName).trim(),
-            groupName: item.groupName ? String(item.groupName).trim() : null,
+            serviceName: service!.name,
+            groupName: service!.groupName,
             targetInput: cleanTarget || null,
             customFields: serializedCustom,
             quantity: qty,
@@ -275,6 +305,7 @@ router.post('/sync', authenticateToken, async (req: any, res) => {
     });
   } catch (error: any) {
     console.error('Error syncing cart:', error);
+    if (['SERVICE_UNAVAILABLE', 'INVALID_QUANTITY', 'PRICE_UNAVAILABLE'].includes(error.message)) return res.status(400).json({ success: false, error: 'الخدمة غير متاحة أو السعر أو الكمية غير صالح' });
     return res.status(500).json({ success: false, error: 'حدث خطأ أثناء مزامنة عناصر السلة' });
   }
 });
@@ -290,32 +321,17 @@ router.post('/checkout', authenticateToken, async (req: any, res) => {
       whereClause.id = { in: itemIds };
     }
 
-    const cartItems = await prisma.cartItem.findMany({ where: whereClause });
-    if (cartItems.length === 0) {
-      return res.status(400).json({ success: false, error: 'السلة فارغة، لا توجد عناصر للشراء' });
-    }
-
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user) {
-      return res.status(404).json({ success: false, error: 'المستخدم غير موجود' });
-    }
-
-    const totalCost = cartItems.reduce(
-      (acc, it) => acc + (it.price || 0) * (it.quantity || 1),
-      0
-    );
-    const roundedTotal = Number(totalCost.toFixed(2));
-
-    if (user.balance < roundedTotal) {
-      return res.status(400).json({
-        success: false,
-        error: `رصيد المحفظة غير كافٍ. المبلغ المطلوب: $${roundedTotal} USD، والرصيد المتاح: $${user.balance.toFixed(2)} USD. يرجى شحن المحفظة أولاً.`,
-      });
-    }
-
     const createdOrderIds: string[] = [];
-
+    let itemsCount = 0;
     await prisma.$transaction(async (tx) => {
+      const storedItems = await tx.cartItem.findMany({ where: whereClause, take: 101 });
+      if (!storedItems.length || storedItems.length > 100) throw new Error('INVALID_CART');
+      const user = await tx.user.findUnique({ where: { id: userId }, include: { membershipTier: true } });
+      const services = await tx.dhruService.findMany({ where: { id: { in: storedItems.map(item => item.serviceId) } } });
+      const serviceMap = new Map(services.map(service => [service.id, service]));
+      const cartItems = storedItems.map(item => quoteCartItem(item, serviceMap.get(item.serviceId), user));
+      const roundedTotal = Number(cartItems.reduce((sum, item) => sum + item.total, 0).toFixed(2));
+      itemsCount = cartItems.length;
       // 1. Deduct balance
       const updateResult = await tx.user.updateMany({
         where: { id: userId, balance: { gte: roundedTotal } },
@@ -328,7 +344,7 @@ router.post('/checkout', authenticateToken, async (req: any, res) => {
 
       // 2. Create Order for each cart item
       for (const item of cartItems) {
-        const itemTotal = Number(((item.price || 0) * (item.quantity || 1)).toFixed(2));
+        const itemTotal = item.total;
         const customFieldsObj = safeJsonParse(item.customFields, null);
 
         const structuredNotes = JSON.stringify({
@@ -361,7 +377,7 @@ router.post('/checkout', authenticateToken, async (req: any, res) => {
           type: `شراء سلة مشتريات (${cartItems.length} منتجات)`,
           amount: roundedTotal,
           method: 'رصيد المحفظة',
-          refNo: `CART-#${Date.now().toString().slice(-6)}`,
+          refNo: `CART-${crypto.randomUUID()}`,
           status: 'completed',
         },
       });
@@ -370,7 +386,7 @@ router.post('/checkout', authenticateToken, async (req: any, res) => {
       await tx.cartItem.deleteMany({
         where: { id: { in: cartItems.map((c) => c.id) } },
       });
-    });
+    }, { isolationLevel: 'Serializable' });
 
     const updatedUser = await prisma.user.findUnique({
       where: { id: userId },
@@ -382,10 +398,12 @@ router.post('/checkout', authenticateToken, async (req: any, res) => {
       message: 'تم إتمام الشراء بنجاح وخصم التكلفة من المحفظة!',
       orderIds: createdOrderIds,
       newBalance: updatedUser?.balance || 0,
-      itemsCount: cartItems.length,
+      itemsCount,
     });
   } catch (error: any) {
     console.error('Error checking out cart:', error);
+    if (error.code === 'P2034') return res.status(409).json({ success: false, error: 'تم تعديل السلة بالتزامن. راجع طلباتك قبل المحاولة مجدداً.' });
+    if (['SERVICE_UNAVAILABLE', 'INVALID_QUANTITY', 'PRICE_UNAVAILABLE', 'INVALID_CART'].includes(error.message)) return res.status(400).json({ success: false, error: 'تحقق من توفر الخدمات وأسعارها والكميات المطلوبة في السلة' });
     if (error.message === 'INSUFFICIENT_BALANCE') {
       return res.status(400).json({ success: false, error: 'رصيد المحفظة غير كافٍ لإتمام العملية' });
     }

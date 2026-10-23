@@ -5,6 +5,8 @@ import { isAdmin, authenticateToken } from "../middleware/auth";
 import { dashboardIpGuard } from "../middleware/dashboardIpGuard";
 import { checkAndAutoUpgradeMembership } from "../utils/membershipUpgrade";
 import { prepareApiActivation } from "../utils/api-activation";
+import { validPlainText, validEmail, validPassword } from '../utils/account-input';
+import { loginLimiter } from '../middleware/abuseLimits';
 
 const router = Router();
 
@@ -151,12 +153,19 @@ router.get("/profile", authenticateToken, async (req: any, res) => {
 });
 
 // POST /api/users/update-credentials - Update self profile credentials
-router.post("/update-credentials", authenticateToken, async (req: any, res) => {
+router.post("/update-credentials", authenticateToken, loginLimiter, async (req: any, res) => {
   try {
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ error: "غير مصرح لك" });
 
     const { fullName, username, email, phone, newPassword, currentPassword } = req.body;
+    if ((fullName !== undefined && !validPlainText(fullName, 2, 100)) ||
+        (username !== undefined && (typeof username !== 'string' || !/^[a-zA-Z0-9_.-]{3,40}$/.test(username.trim()))) ||
+        (email !== undefined && !validEmail(email)) ||
+        (phone != null && phone !== '' && (typeof phone !== 'string' || !/^\+?[0-9 ()-]{6,25}$/.test(phone))) ||
+        (newPassword && !validPassword(newPassword)) || typeof currentPassword !== 'string' || Buffer.byteLength(currentPassword, 'utf8') > 72) {
+      return res.status(400).json({ error: 'بيانات الحساب غير صالحة' });
+    }
     if (!currentPassword) {
       return res.status(400).json({ error: "الرجاء إدخال كلمة المرور الحالية للتأكيد" });
     }
@@ -224,7 +233,7 @@ router.post("/update-credentials", authenticateToken, async (req: any, res) => {
 router.post("/toggle-status", isAdmin, async (req: any, res) => {
   try {
     const { userId, newStatus } = req.body;
-    if (!userId || !newStatus) {
+    if (!userId || !['active', 'suspended'].includes(newStatus)) {
       return res.status(400).json({ error: "userId and newStatus are required" });
     }
 

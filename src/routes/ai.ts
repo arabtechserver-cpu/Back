@@ -1,10 +1,8 @@
 import { Router } from 'express';
-import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
 import { prisma } from "../utils/prisma";
-import { sendTelegramPhotoNotification, sendTelegramAlert } from '../utils/telegramService';
-
-const JWT_SECRET = process.env.JWT_SECRET;
+import { sendTelegramPhotoNotification, sendTelegramAlert, escapeHtml } from '../utils/telegramService';
+import { optionalAuth } from '../middleware/auth';
 
 const router = Router();
 
@@ -15,33 +13,10 @@ const aiChatLimiter = rateLimit({
   validate: { xForwardedForHeader: false }
 });
 
-// Optional Customer Auth Middleware for AI chat
-const optionalAuth = async (req: any, res: any, next: any) => {
-  try {
-    const authHeader = req.headers['authorization'];
-    if (authHeader && JWT_SECRET) {
-      const token = authHeader.split(' ')[1];
-      if (token) {
-        const decoded: any = jwt.verify(token, JWT_SECRET);
-        if (decoded && decoded.id) {
-          const user = await prisma.user.findUnique({ where: { id: decoded.id } });
-          if (user) {
-            if (user.status === 'suspended') {
-              return res.status(403).json({ error: 'عذراً، هذا الحساب موقوف حالياً' });
-            }
-            if (decoded.tokenVersion !== undefined && user.tokenVersion !== undefined && decoded.tokenVersion !== user.tokenVersion) {
-              return res.status(401).json({ error: 'انتهت صلاحية الجلسة' });
-            }
-            req.user = user;
-          }
-        }
-      }
-    }
-  } catch (e) {
-    // Guest user
-  }
-  next();
-};
+const complaintCooldown = new Map<string, number>();
+setInterval(() => {
+  for (const [id, until] of complaintCooldown) if (until <= Date.now()) complaintCooldown.delete(id);
+}, 60_000).unref();
 
 const SYSTEM_PROMPT = `
 أنت "المساعد الذكي للدعم الفني وخدمة العملاء" لمتجر "BORAI STORE - برعي ستور" (برعي ستور لشحن الألعاب والبطاقات الرقمية والخدمات التقنية).
@@ -143,7 +118,7 @@ function formatOrderStatus(status: string) {
 }
 
 // Tool Execution Logic
-async function executeToolCall(toolCall: any, userId?: string, guestInfo: any = {}) {
+export async function executeToolCall(toolCall: any, userId?: string, guestInfo: any = {}) {
   const name = toolCall.function.name;
   let args: any = {};
 
@@ -157,17 +132,19 @@ async function executeToolCall(toolCall: any, userId?: string, guestInfo: any = 
 
   try {
     if (name === 'submit_complaint') {
+      if (!userId) return { error: 'يرجى تسجيل الدخول لتقديم شكوى للإدارة' };
+      if ((complaintCooldown.get(userId) || 0) > Date.now() || complaintCooldown.size >= 10000) return { error: 'لديك تذكرة حديثة. يرجى انتظار رد الإدارة قبل إرسال تذكرة أخرى.' };
       const subject = String(args.subject || '').trim();
       const details = String(args.details || '').trim();
-      if (!subject || !details) return { error: 'Subject and details are required' };
+      if (!subject || !details || subject.length > 150 || details.length > 3000) return { error: 'Subject and details are required and must fit the permitted length' };
 
       const orderId = args.order_id || null;
       const category = args.category || 'دعم فني وشكاوى';
       const urgency = args.urgency || 'متوسطة';
 
-      let customerName = args.customer_name || guestInfo.name || 'عميل الموقع';
-      let customerEmail = args.customer_email || guestInfo.email || '';
-      let customerPhone = args.customer_phone || guestInfo.phone || '';
+      let customerName = String(args.customer_name || guestInfo.name || 'عميل الموقع').slice(0, 100);
+      let customerEmail = String(args.customer_email || guestInfo.email || '').slice(0, 254);
+      let customerPhone = String(args.customer_phone || guestInfo.phone || '').slice(0, 25);
 
       if (userId) {
         const user = await prisma.user.findUnique({ where: { id: userId } });
@@ -176,6 +153,7 @@ async function executeToolCall(toolCall: any, userId?: string, guestInfo: any = 
           customerEmail = user.email || customerEmail;
         }
       }
+      complaintCooldown.set(userId, Date.now() + 10 * 60_000);
 
       const ticketId = `TICK-${Date.now().toString().slice(-6)}`;
 
@@ -183,14 +161,14 @@ async function executeToolCall(toolCall: any, userId?: string, guestInfo: any = 
       const tgMsg = 
         `[TICKET] <b>تذكرة دعم فني / شكوى جديدة #${ticketId}</b>\n` +
         `━━━━━━━━━━━━━━━━━━━━━━\n` +
-        `<b>العميل:</b> ${customerName}\n` +
-        (customerEmail ? `<b>البريد:</b> <code>${customerEmail}</code>\n` : '') +
-        (customerPhone ? `<b>الهاتف:</b> <code>${customerPhone}</code>\n` : '') +
-        (orderId ? `<b>رقم الطلب:</b> <code>#${orderId}</code>\n` : '') +
-        `<b>القسم:</b> <b>${category}</b>\n` +
-        `<b>الأولوية:</b> <b>${urgency}</b>\n\n` +
-        `<b>عنوان التذكرة:</b>\n<b>${subject}</b>\n\n` +
-        `<b>التفاصيل:</b>\n${details}\n` +
+        `<b>العميل:</b> ${escapeHtml(customerName)}\n` +
+        (customerEmail ? `<b>البريد:</b> <code>${escapeHtml(customerEmail)}</code>\n` : '') +
+        (customerPhone ? `<b>الهاتف:</b> <code>${escapeHtml(customerPhone)}</code>\n` : '') +
+        (orderId ? `<b>رقم الطلب:</b> <code>#${escapeHtml(orderId)}</code>\n` : '') +
+        `<b>القسم:</b> <b>${escapeHtml(category)}</b>\n` +
+        `<b>الأولوية:</b> <b>${escapeHtml(urgency)}</b>\n\n` +
+        `<b>عنوان التذكرة:</b>\n<b>${escapeHtml(subject)}</b>\n\n` +
+        `<b>التفاصيل:</b>\n${escapeHtml(details)}\n` +
         `━━━━━━━━━━━━━━━━━━━━━━\n` +
         `<i>تم الاستلام والإرسال فورياً عبر المساعد الذكي AI</i>`;
 
@@ -381,7 +359,7 @@ router.post('/chat', aiChatLimiter, optionalAuth, async (req: any, res: any) => 
     const userId = req.user?.id;
     const guestInfo = { name: guest_name, email: guest_email, phone: guest_phone };
 
-    if (!message) {
+    if (typeof message !== 'string' || !message.trim() || message.length > 3000) {
       return res.status(400).json({ error: 'Message is required' });
     }
 

@@ -25,7 +25,7 @@ export function buildDepositTelegramLinks(transactionId: string, receiptPath: st
   const inlineKeyboard: any[][] = [];
   if (receiptUrl) inlineKeyboard.push([{ text: 'فتح الإيصال بالدقة الكاملة', url: receiptUrl }]);
   inlineKeyboard.push([
-    { text: 'موافقة وشحن الرصيد', callback_data: 'approve_tx_' + transactionId },
+    { text: 'تأكدت من وصول المبلغ — موافقة', callback_data: 'approve_tx_' + transactionId },
     { text: 'رفض الإيداع', callback_data: 'reject_tx_' + transactionId }
   ]);
   return { receiptUrl, replyMarkup: { inline_keyboard: inlineKeyboard } };

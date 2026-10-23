@@ -1,4 +1,5 @@
 import { serializeProviderParameters } from '../utils/provider-api-parameters';
+import { getProviderPrice } from '../utils/service-price';
 import { Router } from "express";
 import { prisma } from "../utils/prisma";
 import { cleanServiceName } from "../scripts/syncDhruServices";
@@ -1083,7 +1084,7 @@ export function parseAllProviderServices(imeiRes: any, serverRes: any, remoteRes
         const sName = String(s.SERVICENAME || s.name || s.NAME || "").trim();
         if (!sId || !sName) continue;
 
-        const sCredit = parseFloat(s.CREDIT || s.credit || s.PRICE || s.price || "0") || 0;
+        const sCredit = getProviderPrice(s) ?? 0;
         const sTime = String(s.TIME || s.time || "1-24 Hours");
         const sInfo = String(s.INFO || s.info || "");
         const apiServiceType = detectProviderServiceType(
@@ -1609,7 +1610,7 @@ export async function persistProviderServicesList(
     const serviceName = s.name || s.service_name || "";
     const rawGroupName = s.group_name || s.groupName || "General";
     const groupName = refinePackageGroupName(rawGroupName, serviceName);
-    let credit = (parseFloat(s.credit || s.price) || 0) * (exchangeRate > 0 ? exchangeRate : 1);
+    let credit = (getProviderPrice(s) ?? 0) * (exchangeRate > 0 ? exchangeRate : 1);
     const time = s.time || "";
     const info = s.info || "";
     let customFieldsList = s.customFields && Array.isArray(s.customFields)
@@ -1654,7 +1655,7 @@ export async function persistProviderServicesList(
           minQty: qtyLimits.minQty,
           maxQty: qtyLimits.maxQty,
           isActive: existing.isActive,
-          margin: computedMargin
+          margin: credit === 0 && existing.credit > 0 ? existing.margin : computedMargin
         }
       });
     } else {
@@ -1814,7 +1815,7 @@ router.post("/:id/import-services", async (req, res) => {
       const serviceName = String(s.name || s.service_name || "").trim();
       const rawGroupName = String(s.group_name || s.groupName || "General").trim();
       const groupName = refinePackageGroupName(rawGroupName, serviceName);
-      let credit = (parseFloat(s.credit || s.price) || 0) * rate;
+      let credit = (getProviderPrice(s) ?? 0) * rate;
       const margin = markup > 0 ? Number(((credit * markup) / 100).toFixed(2)) : 0;
       const cleanName = cleanServiceName(serviceName, s.info || "", groupName);
       
@@ -1861,7 +1862,7 @@ router.post("/:id/import-services", async (req, res) => {
           name: cleanName,
           originalName: serviceName,
           groupName,
-          credit,
+          credit: credit > 0 ? credit : undefined,
           time: s.time || "",
           info: s.info || "",
           categoryId,
@@ -1872,7 +1873,7 @@ router.post("/:id/import-services", async (req, res) => {
           minQty: qtyLimits.minQty,
           maxQty: qtyLimits.maxQty,
           isActive: true,
-          margin
+          margin: credit > 0 ? margin : undefined
         }
       });
       count++;

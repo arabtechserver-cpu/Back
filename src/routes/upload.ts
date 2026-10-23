@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
+import { sanitizeImageDataUrl, InvalidImageError, ImageBusyError } from '../utils/safe-image';
 import { prisma } from "../utils/prisma";
 import { isAdmin } from '../middleware/auth';
 import { getUploadDir, ensureUploadDir, saveBufferToUploads, getUploadFilePath } from '../utils/uploads';
@@ -17,44 +19,9 @@ router.post('/', isAdmin, async (req, res) => {
 
     ensureUploadDir();
 
-    // Extract mime type and clean Base64 data
-    const matches = image.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
-    if (!matches || matches.length !== 3) {
-      return res.status(400).json({ success: false, error: 'يجب رفع صورة بصيغة Base64 صالحة' });
-    }
-
-    const mimeType = matches[1].toLowerCase();
-    const allowedMimeTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
-    if (!allowedMimeTypes.has(mimeType)) {
-      return res.status(400).json({ success: false, error: 'نوع الصورة غير مسموح' });
-    }
-
-    const base64Data = matches[2];
-    const buffer = Buffer.from(base64Data, 'base64');
-    if (buffer.length === 0 || buffer.length > 10 * 1024 * 1024) {
-      return res.status(413).json({ success: false, error: 'حجم الصورة يجب ألا يتجاوز 10 ميجابايت' });
-    }
-
-    // Verify image magic bytes signature
-    const isValidSignature = (
-      (mimeType === 'image/jpeg' && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) ||
-      (mimeType === 'image/png' && buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) ||
-      (mimeType === 'image/gif' && buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46) ||
-      (mimeType === 'image/webp' && buffer.length >= 12 && buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46 && buffer[8] === 0x57 && buffer[9] === 0x45 && buffer[10] === 0x42 && buffer[11] === 0x50)
-    );
-
-    if (!isValidSignature) {
-      return res.status(400).json({ success: false, error: 'محتوى الملف لا يطابق صيغة الصورة المصرح بها' });
-    }
-
-    const mimeToExt: Record<string, string> = {
-      'image/jpeg': '.jpg',
-      'image/png': '.png',
-      'image/webp': '.webp',
-      'image/gif': '.gif'
-    };
-    const cleanBasename = (filename || 'uploaded_image').replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_');
-    const uniqueFilename = `${Date.now()}_${cleanBasename}${mimeToExt[mimeType] || '.jpg'}`;
+    const { buffer, mimeType } = await sanitizeImageDataUrl(image, true);
+    const base64Data = buffer.toString('base64');
+    const uniqueFilename = `image_${crypto.randomUUID()}.webp`;
 
     // 1. Save directly into persistent volume /app/uploads on disk
     try {
@@ -83,6 +50,8 @@ router.post('/', isAdmin, async (req, res) => {
       filename: uniqueFilename 
     });
   } catch (error: any) {
+    if (error instanceof ImageBusyError) return res.status(429).json({ success: false, error: error.message });
+    if (error instanceof InvalidImageError) return res.status(400).json({ success: false, error: error.message });
     console.error('Error uploading image:', error);
     return res.status(500).json({ success: false, error: 'فشل رفع وحفظ الصورة' });
   }
@@ -127,12 +96,12 @@ router.get('/:id', async (req, res) => {
         res.setHeader('Cache-Control', 'private, no-store');
         return res.status(403).json({ error: 'Receipts require authenticated transaction access' });
       }
-      const imgBuffer = Buffer.from(stored.data, 'base64');
-      res.setHeader('Content-Type', stored.mimeType || 'image/jpeg');
-      res.setHeader('Content-Length', imgBuffer.length);
+      const safeImage = await sanitizeImageDataUrl(`data:${stored.mimeType};base64,${stored.data}`, true);
+      res.setHeader('Content-Type', safeImage.mimeType);
+      res.setHeader('Content-Length', safeImage.buffer.length);
       res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
       res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-      return res.end(imgBuffer);
+      return res.end(safeImage.buffer);
     }
 
     return res.status(404).json({ error: 'Image not found' });
@@ -174,6 +143,9 @@ router.delete('/:id', isAdmin, async (req, res) => {
     });
 
     const targetFilename = existing?.filename || id;
+    if (path.basename(targetFilename) !== targetFilename || /[\\/:\0]/.test(targetFilename)) {
+      return res.status(400).json({ error: 'Invalid filename' });
+    }
     const diskPath = getUploadFilePath(targetFilename);
     if (diskPath && fs.existsSync(diskPath)) {
       try {

@@ -149,6 +149,7 @@ model Transaction {
   status       String   @default("pending")
   refNo        String
   receiptImage String?
+  receiptHash  String?
   adminActorId String?
   notes        String?
   createdAt    DateTime @default(now())
@@ -156,6 +157,7 @@ model Transaction {
   user         User     @relation(fields: [userId], references: [id], onDelete: Restrict)
 
   @@index([refNo])
+  @@index([receiptHash])
   @@index([createdAt])
   @@index([status, createdAt])
 }

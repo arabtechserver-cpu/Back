@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { getAccountInfo, getImeiServiceList } from '../utils/dhru-api';
 import { isAdmin, optionalAuth } from '../middleware/auth';
+import { sellingPrice } from '../utils/service-price';
 
 const router = Router();
 
@@ -428,7 +429,7 @@ router.get('/services/:id', optionalAuth, async (req: any, res) => {
 
     const credit = typeof service.credit === 'number' ? service.credit : parseFloat(service.credit as any) || 0;
     const margin = typeof service.margin === 'number' ? service.margin : parseFloat(service.margin as any) || 0;
-    const finalPrice = Number((credit + margin).toFixed(2));
+    const finalPrice = sellingPrice(credit, margin);
 
     let sanitizedRequiresCustom: string | null = service.requiresCustom;
     if (sanitizedRequiresCustom) {
@@ -511,51 +512,8 @@ router.post('/sync', isAdmin, async (req, res) => {
   }
 });
 
-import { broadcastNewItemToSubscribers } from './newsletter';
-
-// POST /api/dhru/services/notify - Admin notify subscribers about a specific service or tool
-router.post('/services/notify', isAdmin, async (req, res) => {
-  try {
-    const { serviceId, customMessage } = req.body;
-    if (!serviceId) {
-      return res.status(400).json({ error: 'serviceId is required' });
-    }
-
-    const service = await prisma.dhruService.findFirst({
-      where: {
-        OR: [{ id: serviceId }, { dhruId: serviceId }]
-      }
-    });
-
-    if (!service) {
-      return res.status(404).json({ error: 'Service not found' });
-    }
-
-    const credit = typeof service.credit === 'number' ? service.credit : parseFloat(service.credit as any) || 0;
-    const margin = typeof service.margin === 'number' ? service.margin : parseFloat(service.margin as any) || 0;
-    const price = (credit + margin).toFixed(2);
-
-    const title = `خدمة وتفعيل جديد: ${service.name}`;
-    const message = customMessage || `يسرنا إعلامكم بتوفر خدمة وتفعيل (${service.name}) عبر متجر BORAI STORE بسعر $${price} USD وبتسليم فوري.\n\nتفضل بطلب الخدمة الآن عبر المنصة.`;
-
-    const result = await broadcastNewItemToSubscribers({
-      title,
-      message,
-      category: 'Service Update',
-      actionUrl: `${process.env.FRONTEND_URL || "http://localhost:3000"}/ar/pricing?search=${encodeURIComponent(service.name)}`,
-      actionText: 'طلب الخدمة الآن'
-    });
-
-    res.json({
-      success: true,
-      message: `تم إرسال إشعار الخدمة بنجاح إلى ${result.count} مشترك!`,
-      sentCount: result.count
-    });
-  } catch (error) {
-    console.error('Notify service error:', error);
-    res.status(500).json({ error: 'Failed to broadcast service notification' });
-  }
-});
+// Newsletter subscriptions and broadcasts have been retired.
+router.post('/services/notify', isAdmin, (_req, res) => res.status(410).json({ error: 'تم إلغاء النشرة الإخبارية' }));
 
 // POST /api/dhru/services/delete-all - Delete all services & categories
 router.post('/services/delete-all', isAdmin, async (req: any, res) => {

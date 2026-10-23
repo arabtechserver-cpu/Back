@@ -1,6 +1,10 @@
 import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
+import { sanitizeImageDataUrl, InvalidImageError, ImageBusyError } from '../utils/safe-image';
+import { depositIpLimiter, depositAccountLimiter } from '../middleware/abuseLimits';
+import { validPlainText } from '../utils/account-input';
 import { prisma } from "../utils/prisma";
 import {
   sendTelegramPhotoNotification,
@@ -128,7 +132,10 @@ router.get('/:transactionId/receipt', authenticateToken, async (req: any, res) =
       return res.status(403).json({ error: 'غير مصرح لك بعرض هذا الإيصال' });
     }
 
-    const sendReceipt = () => res.json({ success: true, receiptImage: transaction.receiptImage });
+    const sendReceipt = () => {
+      res.setHeader('Cache-Control', 'private, no-store');
+      return res.json({ success: true, receiptImage: transaction.receiptImage });
+    };
     if (!isOwner && isAdminUser) {
       return dashboardIpGuard(req, res, sendReceipt);
     }
@@ -158,15 +165,13 @@ router.get('/:transactionId/receipt-file', authenticateToken, async (req: any, r
       return res.status(403).json({ error: 'غير مصرح لك بالوصول' });
     }
 
-    const streamFile = () => {
+    const streamFile = async () => {
       res.setHeader('Cache-Control', 'private, no-store, max-age=0');
 
       if (transaction.receiptImage!.startsWith('data:image/')) {
-        const match = transaction.receiptImage!.match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,(.+)$/s);
-        if (match) {
-          res.setHeader('Content-Type', match[1]);
-          return res.send(Buffer.from(match[2], 'base64'));
-        }
+        const safeImage = await sanitizeImageDataUrl(transaction.receiptImage);
+        res.setHeader('Content-Type', safeImage.mimeType);
+        return res.send(safeImage.buffer);
       }
 
       const filename = path.basename(transaction.receiptImage!);
@@ -197,11 +202,14 @@ router.get('/:transactionId/receipt-file', authenticateToken, async (req: any, r
 router.get('/receipts/:filename', authenticateToken, async (req: any, res) => {
   try {
     const authUser = req.user;
-    const filename = path.basename(String(req.params.filename));
+    const filename = String(req.params.filename);
+    if (!/^receipt_[a-zA-Z0-9_-]+\.(?:jpg|jpeg|png|webp)$/.test(filename)) {
+      return res.status(400).json({ error: 'اسم ملف غير صالح' });
+    }
 
     const transaction = await prisma.transaction.findFirst({
       where: {
-        receiptImage: { contains: filename }
+        receiptImage: `/api/transactions/receipts/${filename}`
       },
       select: { id: true, userId: true, receiptImage: true }
     });
@@ -236,7 +244,9 @@ router.get('/receipts/:filename', authenticateToken, async (req: any, res) => {
 });
 
 // POST /api/transactions - Submit New Deposit Transaction
-router.post('/', authenticateToken, async (req: any, res) => {
+router.post('/', depositIpLimiter, authenticateToken, depositAccountLimiter, async (req: any, res) => {
+  let savedFilePath: string | null = null;
+  let committed = false;
   try {
     const { amount, method, refNo, receiptImage, type } = req.body;
 
@@ -253,64 +263,39 @@ router.post('/', authenticateToken, async (req: any, res) => {
       return res.status(401).json({ error: 'يُرجى تسجيل الدخول بحسابك أولاً لإتمام طلب الشحن' });
     }
 
-    const cleanRefNo = String(refNo).trim();
-    const cleanMethod = String(method).trim();
-    const parsedAmount = parseFloat(amount);
+    if (!validPlainText(refNo, 3, 100) || !validPlainText(method, 2, 80)) {
+      return res.status(400).json({ error: 'رقم المرجع أو طريقة الدفع غير صالح' });
+    }
+    const cleanRefNo = refNo.trim().toUpperCase();
+    const cleanMethod = method.trim();
+    const parsedAmount = typeof amount === 'number' || typeof amount === 'string' ? Number(amount) : NaN;
 
-    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0 || parsedAmount > 100000 || Math.abs(parsedAmount * 100 - Math.round(parsedAmount * 100)) > 0.000001) {
       return res.status(400).json({ error: 'المبلغ غير صالح، يرجى إدخال قيمة صحيحة' });
     }
 
-    let savedReceiptPath: string | null = null;
-    if (receiptImage && typeof receiptImage === 'string') {
-      if (!receiptImage.startsWith('data:image/')) {
-        return res.status(400).json({ error: 'صيغة الصورة غير صالحة. يجب أن تكون Base64 تبدأ بـ data:image/' });
-      }
-      try {
-        const match = receiptImage.match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,(.+)$/s);
-        if (match) {
-          const mimeType = match[1].toLowerCase();
-          const allowedMimeTypes: Record<string, string> = {
-            'image/jpeg': 'jpg',
-            'image/jpg': 'jpg',
-            'image/png': 'png',
-            'image/webp': 'webp'
-          };
-
-          const ext = allowedMimeTypes[mimeType];
-          if (!ext) {
-            return res.status(400).json({ error: 'نوع صورة الإيصال غير مدعوم. يسمح فقط بصيغ JPG و PNG و WEBP.' });
-          }
-
-          const base64Data = match[2];
-          const buffer = Buffer.from(base64Data, 'base64');
-          if (buffer.length === 0 || buffer.length > 10 * 1024 * 1024) {
-            return res.status(400).json({ error: 'حجم صورة الإيصال يجب ألا يتجاوز 10 ميجابايت.' });
-          }
-
-          const receiptsDir = path.join(getUploadDir(), 'receipts');
-          if (!fs.existsSync(receiptsDir)) {
-            fs.mkdirSync(receiptsDir, { recursive: true });
-          }
-
-          const filename = `receipt_${Date.now()}_${Math.floor(Math.random() * 10000)}.${ext}`;
-          const filePath = path.join(receiptsDir, filename);
-          fs.writeFileSync(filePath, buffer);
-          savedReceiptPath = `/api/transactions/receipts/${filename}`;
-        } else {
-          return res.status(400).json({ error: 'تنسيق الصورة (Base64) غير صالح أو معطوب.' });
-        }
-      } catch (saveErr) {
-        console.error('[Transactions] Error saving receipt image to disk:', saveErr);
-        return res.status(500).json({ error: 'فشل في حفظ صورة الإيصال.' });
-      }
-    }
+    const safeImage = await sanitizeImageDataUrl(receiptImage);
+    const receiptHash = crypto.createHash('sha256').update(safeImage.buffer).digest('hex');
+    const filename = `receipt_${crypto.randomUUID()}.webp`;
+    const savedReceiptPath = `/api/transactions/receipts/${filename}`;
 
     let newTransaction: any;
     try {
       newTransaction = await prisma.$transaction(async (tx) => {
-        // The reference may repeat; each receipt is a separate request for admin review.
-        const thirtySecondsAgo = new Date(Date.now() - 30 * 1000);
+        // Serializable reads prevent concurrent submissions from bypassing these checks.
+        const duplicate = await tx.transaction.findFirst({
+          where: {
+            status: { in: ['pending', 'completed'] },
+            OR: [
+              { refNo: { equals: cleanRefNo, mode: 'insensitive' }, method: { equals: cleanMethod, mode: 'insensitive' } },
+              { receiptHash }
+            ]
+          }, select: { id: true }
+        });
+        if (duplicate) throw new Error('DUPLICATE_RECEIPT');
+        const pendingCount = await tx.transaction.count({ where: { userId: targetUserId, status: 'pending', receiptImage: { not: null } } });
+        if (pendingCount >= 3) throw new Error('PENDING_LIMIT');
+        const thirtySecondsAgo = new Date(Date.now() - 5 * 60 * 1000);
         const recentPendingTx = await tx.transaction.findFirst({
           where: {
             userId: targetUserId,
@@ -323,24 +308,33 @@ router.post('/', authenticateToken, async (req: any, res) => {
           throw new Error('SPAM_COOLDOWN');
         }
 
+        const receiptsDir = path.join(ensureUploadDir(), 'receipts');
+        fs.mkdirSync(receiptsDir, { recursive: true });
+        savedFilePath = path.join(receiptsDir, filename);
+        fs.writeFileSync(savedFilePath, safeImage.buffer, { flag: 'wx', mode: 0o600 });
         return tx.transaction.create({
           data: {
             userId: targetUserId,
-            type: type || 'شحن محفظة',
+            type: 'شحن محفظة',
             amount: parsedAmount,
             method: cleanMethod,
             refNo: cleanRefNo,
             receiptImage: savedReceiptPath,
+            receiptHash,
             status: 'pending'
           }
         });
       }, { isolationLevel: 'Serializable' });
+      committed = true;
     } catch (txErr: any) {
       if (txErr.message === 'SPAM_COOLDOWN') {
         return res.status(429).json({
           error: 'تم إرسال طلب إيداع من حسابك قبل قليل وهو قيد المراجعة. يرجى الانتظار بضع لحظات قبل إرسال طلب جديد.'
         });
       }
+      if (txErr.message === 'DUPLICATE_RECEIPT') return res.status(409).json({ error: 'تم تقديم نفس الإيصال أو رقم المرجع بالفعل؛ لا يمكن استخدامه مرتين.' });
+      if (txErr.message === 'PENDING_LIMIT') return res.status(429).json({ error: 'لديك طلبات إيداع معلقة؛ يرجى انتظار مراجعتها.' });
+      if (txErr.code === 'P2034') return res.status(409).json({ error: 'تم إرسال طلب متزامن؛ يرجى مراجعة سجل الإيداعات قبل المحاولة مجدداً.' });
       throw txErr;
     }
 
@@ -370,11 +364,12 @@ router.post('/', authenticateToken, async (req: any, res) => {
 - <b>التاريخ:</b> ${new Date().toLocaleString('ar-EG')}
 ${receiptLink}
 
-<b>الحالة:</b> قيد المراجعة - يرجى فتح لوحة التحكم أو استخدام الأزرار أدناه.
+<b>الحالة:</b> قيد المراجعة. صورة الإيصال ليست تأكيداً للدفع؛ تحقق من وصول المبلغ في حساب البنك أو المحفظة قبل الموافقة.
     `.trim();
 
     sendTelegramPhotoNotification({
-      imageSource: receiptImage || undefined,
+      imageSource: safeImage.dataUrl,
+      validatedImage: safeImage,
       caption,
       replyMarkup
     }).catch((err) => console.error('[Telegram Async Error]:', err));
@@ -393,8 +388,12 @@ ${receiptLink}
       transaction: newTransaction
     });
   } catch (error: any) {
+    if (error instanceof ImageBusyError) return res.status(429).json({ error: error.message });
+    if (error instanceof InvalidImageError) return res.status(400).json({ error: error.message });
     console.error('Error creating transaction:', error);
     return res.status(500).json({ error: 'حدث خطأ أثناء حفظ العملية في قاعدة البيانات' });
+  } finally {
+    if (!committed && savedFilePath) fs.rmSync(savedFilePath, { force: true });
   }
 });
 
@@ -413,6 +412,9 @@ router.post('/approve', isAdmin, async (req, res) => {
 
     if (tx.status === 'completed') {
       return res.status(400).json({ error: 'العملية مكتملة بالفعل' });
+    }
+    if (!tx.receiptImage || !Number.isFinite(tx.amount) || tx.amount <= 0) {
+      return res.status(400).json({ error: 'لا يمكن اعتماد إيداع بدون إيصال ومبلغ صالح' });
     }
 
     // Fix Race Condition & Lost Updates: Atomic update to prevent double-approving
@@ -453,7 +455,7 @@ router.post('/approve', isAdmin, async (req, res) => {
 [إشعار إداري]
 <b>تمت الموافقة وإضافة الرصيد بنجاح</b>
 
-- <b>العميل:</b> ${updatedUser.fullName} (@${updatedUser.username})
+- <b>العميل:</b> ${escapeHtml(updatedUser.fullName)} (@${escapeHtml(updatedUser.username)})
 - <b>المبلغ المضاف:</b> <code>+$${tx.amount.toFixed(2)} USD</code>
 - <b>رصيد الحساب الجديد:</b> <code>$${updatedUser.balance.toFixed(2)} USD</code>
 ${upgradedUser?.membershipTier ? `- <b>العضوية الحالية:</b> ${upgradedUser.membershipTier.nameAr || upgradedUser.membershipTier.name} (${upgradedUser.membershipTier.discountPercentage}% خصم)` : ''}

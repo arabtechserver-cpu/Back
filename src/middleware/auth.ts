@@ -9,7 +9,7 @@ export interface AuthRequest extends Request {
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
-if (!JWT_SECRET || JWT_SECRET.length < 32) {
+if (!JWT_SECRET || JWT_SECRET.length < 32 || /your_super|replace_with|change.?me|^secret$/i.test(JWT_SECRET)) {
   throw new Error('JWT_SECRET must be configured with at least 32 characters');
 }
 
@@ -95,7 +95,7 @@ export const authenticateToken = async (req: AuthRequest, res: Response, next: N
 
   for (const token of candidateTokens) {
     try {
-      const decoded: any = jwt.verify(token, JWT_SECRET);
+      const decoded: any = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
       if (decoded && (decoded.id || decoded.email)) {
         let user = null;
         if (decoded.id) {
@@ -129,7 +129,7 @@ export const optionalAuth = async (req: AuthRequest, res: Response, next: NextFu
 
   for (const token of candidateTokens) {
     try {
-      const decoded: any = jwt.verify(token, JWT_SECRET);
+      const decoded: any = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
       if (decoded && (decoded.id || decoded.email)) {
         let user = null;
         if (decoded.id) {

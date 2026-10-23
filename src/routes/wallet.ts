@@ -35,32 +35,7 @@ router.get('/', authenticateToken, async (req: any, res) => {
 });
 
 router.post('/', authenticateToken, async (req: any, res) => {
-  try {
-    const userId = req.user?.id;
-    if (!userId) {
-      return res.status(401).json({ error: 'Authentication required' });
-    }
-
-    const { amount, type } = req.body;
-    const parsedAmount = parseFloat(amount);
-    if (isNaN(parsedAmount) || parsedAmount <= 0) {
-      return res.status(400).json({ error: 'Invalid amount' });
-    }
-
-    const tx = await prisma.transaction.create({
-      data: {
-        userId,
-        amount: parsedAmount,
-        type: String(type || 'طلب إيداع').trim(),
-        method: 'تحويل محفظة',
-        refNo: `TX_REQ_${Date.now()}_${Math.floor(Math.random() * 10000)}`,
-        status: 'pending'
-      }
-    });
-    res.status(201).json(tx);
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to create transaction' });
-  }
+  return res.status(410).json({ error: 'يرجى تقديم الإيداع مع الإيصال ورقم المرجع عبر /api/transactions' });
 });
 
 export default router;

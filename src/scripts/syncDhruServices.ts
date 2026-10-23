@@ -4,6 +4,7 @@ import { extractCustomFields, normalizeCustomField } from '../routes/providers';
 import { extractQuantityLimits, enrichCustomFieldsWithQuantity } from '../utils/provider-quantity';
 
 import { prisma } from '../utils/prisma';
+import { getProviderPrice } from '../utils/service-price';
 
 export function cleanServiceName(serviceName: string, info: string, groupName: string): string {
   let name = (serviceName || '').trim();
@@ -100,8 +101,7 @@ export async function syncDhruServices() {
       seenDhruIds.add(dhruId);
 
       const serviceName = service.SERVICENAME || "";
-      let credit = parseFloat(service.CREDIT);
-      if (isNaN(credit)) credit = 0;
+      const credit = getProviderPrice(service) ?? 0;
 
       const time = service.TIME || "";
       const info = service.INFO || "";

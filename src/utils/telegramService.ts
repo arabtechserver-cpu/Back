@@ -9,6 +9,7 @@ import { sendDepositApprovalEmail, sendOrderConfirmationEmail } from './emailSer
 import { checkAndAutoUpgradeMembership } from './membershipUpgrade';
 import { normalizeTelegramAdminChatIds } from './telegram-config';
 import { getUploadDir } from './uploads';
+import { sanitizeImageDataUrl } from './safe-image';
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 const TELEGRAM_API_URL = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
@@ -314,6 +315,11 @@ export async function handleIncomingTelegramUpdate(update: any) {
           return;
         }
 
+        if (!tx.receiptImage || !Number.isFinite(tx.amount) || tx.amount <= 0) {
+          await sendTelegramMessage(chatId, 'لا يمكن اعتماد إيداع بدون إيصال ومبلغ صالح.');
+          return;
+        }
+
         // Atomic Status Update & Balance Increment
         let updatedUser: any;
         let uTx: any;
@@ -321,7 +327,7 @@ export async function handleIncomingTelegramUpdate(update: any) {
         try {
           [uTx, updatedUser] = await prisma.$transaction(async (t) => {
             const updatedTxResult = await t.transaction.updateMany({
-              where: { id: txId, status: { not: 'completed' } },
+              where: { id: txId, status: 'pending' },
               data: { status: 'completed' }
             });
 
@@ -352,7 +358,7 @@ export async function handleIncomingTelegramUpdate(update: any) {
 
         await sendTelegramMessage(
           chatId,
-          `<b>تمت الموافقة وشحن الرصيد بنجاح عبر التلجرام!</b>\n\n<b>العميل:</b> ${updatedUser.fullName} (<code>${updatedUser.email}</code>)\n<b>المبلغ المضاف:</b> <code>+$${tx.amount.toFixed(2)} USD</code>\n<b>رصيد الحساب الجديد:</b> <code>$${updatedUser.balance.toFixed(2)} USD</code>\n${tierInfo}`
+          `<b>تمت الموافقة وشحن الرصيد بنجاح عبر التلجرام!</b>\n\n<b>العميل:</b> ${escapeHtml(updatedUser.fullName)} (<code>${escapeHtml(updatedUser.email)}</code>)\n<b>المبلغ المضاف:</b> <code>+$${tx.amount.toFixed(2)} USD</code>\n<b>رصيد الحساب الجديد:</b> <code>$${updatedUser.balance.toFixed(2)} USD</code>\n${tierInfo}`
         );
 
         if (updatedUser.email) {
@@ -731,129 +737,26 @@ export async function sendTelegramAlert(text: string) {
 
 // Helper to convert any image representation to a Buffer
 async function resolveImageBuffer(imageSource?: string | null): Promise<{ buffer: Buffer; filename: string; mimeType: string } | null> {
-  if (!imageSource || typeof imageSource !== 'string') return null;
-
+  if (!imageSource) return null;
+  // Deposit notifications supply raster data directly. Never fetch a user URL or read a user path.
   try {
-    // 1. Data URL (Base64)
-    if (imageSource.startsWith('data:image/')) {
-      const match = imageSource.match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,(.+)$/s);
-      if (match) {
-        const mimeType = match[1];
-        const ext = mimeType.split('/')[1]?.replace('jpeg', 'jpg') || 'jpg';
-        return {
-          buffer: Buffer.from(match[2], 'base64'),
-          filename: `receipt.${ext}`,
-          mimeType
-        };
-      }
-      const raw = imageSource.split(';base64,').pop();
-      if (raw) {
-        return {
-          buffer: Buffer.from(raw, 'base64'),
-          filename: 'receipt.jpg',
-          mimeType: 'image/jpeg'
-        };
-      }
-    }
-
-    // 2. HTTP/HTTPS URL (SSRF Mitigated)
-    if (imageSource.startsWith('http://') || imageSource.startsWith('https://')) {
-      const urlObj = new URL(imageSource);
-      const isPrivate = (
-        urlObj.hostname === 'localhost' ||
-        urlObj.hostname === '127.0.0.1' ||
-        urlObj.hostname === '::1' ||
-        urlObj.hostname === '0.0.0.0' ||
-        urlObj.hostname.startsWith('10.') ||
-        urlObj.hostname.startsWith('192.168.') ||
-        /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(urlObj.hostname) ||
-        urlObj.hostname.startsWith('169.254.') ||
-        urlObj.hostname.endsWith('.internal') ||
-        urlObj.hostname.endsWith('.local')
-      );
-      if (isPrivate) {
-        throw new Error('SSRF Attempt Detected: Blocked private network address');
-      }
-
-      const res = await axios.get(imageSource, { responseType: 'arraybuffer', timeout: 15000 });
-      const rawType = res.headers['content-type'];
-      const contentType = typeof rawType === 'string' ? rawType : 'image/jpeg';
-      const ext = contentType.split('/')[1]?.replace('jpeg', 'jpg') || 'jpg';
-      return {
-        buffer: Buffer.from(res.data),
-        filename: `receipt.${ext}`,
-        mimeType: contentType
-      };
-    }
-
-    // 3. Direct local file path or persistent uploads volume (LFI Mitigated)
-    if (imageSource.includes('../') || imageSource.includes('..\\')) {
-      throw new Error('Path Traversal Attempt Detected');
-    }
-
-    const allowedRoots = [
-      path.resolve(process.cwd(), 'backend', 'public'),
-      path.resolve(process.cwd(), 'public'),
-      path.resolve(__dirname, '../../public'),
-      path.resolve(__dirname, '../../../public')
-    ];
-    
-    try {
-      allowedRoots.push(path.resolve(getUploadDir()));
-    } catch {}
-
-    const rawCheckPaths = [
-      imageSource,
-      path.join(process.cwd(), imageSource),
-      path.join(process.cwd(), 'backend', imageSource),
-      path.join(__dirname, '../../public', imageSource),
-      path.join(__dirname, '../../../public', imageSource)
-    ];
-
-    try {
-      if (imageSource.startsWith('/uploads/')) {
-        rawCheckPaths.push(path.join(getUploadDir(), imageSource.replace('/uploads/', '')));
-      } else {
-        rawCheckPaths.push(path.join(getUploadDir(), imageSource));
-      }
-    } catch {}
-
-    const checkPaths = rawCheckPaths.map(p => path.resolve(p)).filter(p => allowedRoots.some(root => p.startsWith(root)));
-
-    for (const p of checkPaths) {
-      if (fs.existsSync(p) && fs.statSync(p).isFile()) {
-        const buffer = fs.readFileSync(p);
-        const ext = path.extname(p).slice(1) || 'jpg';
-        return {
-          buffer,
-          filename: `receipt.${ext}`,
-          mimeType: ext === 'png' ? 'image/png' : 'image/jpeg'
-        };
-      }
-    }
-
-    // 4. Raw Base64 string without data prefix
-    if (/^[A-Za-z0-9+/=\s]+$/.test(imageSource.slice(0, 100)) && imageSource.length > 100) {
-      return {
-        buffer: Buffer.from(imageSource.trim(), 'base64'),
-        filename: 'receipt.jpg',
-        mimeType: 'image/jpeg'
-      };
-    }
-  } catch (err: any) {
-    console.warn('[Telegram Buffer Resolve Error]:', err?.message);
+    const image = await sanitizeImageDataUrl(imageSource);
+    return { buffer: image.buffer, filename: 'receipt.webp', mimeType: image.mimeType };
+  } catch {
+    console.warn('[Telegram] Rejected invalid image attachment');
+    return null;
   }
-
-  return null;
 }
 
 // Send Photo directly to Telegram with triple fallback guarantee
 export async function sendTelegramPhotoNotification({
   imageSource,
+  validatedImage,
   caption,
   replyMarkup
 }: {
   imageSource?: string | null;
+  validatedImage?: { buffer: Buffer; mimeType: string };
   caption: string;
   replyMarkup?: any;
 }) {
@@ -864,7 +767,9 @@ export async function sendTelegramPhotoNotification({
       throw new Error('No Telegram admin chat IDs are configured');
     }
 
-    const imageInfo = await resolveImageBuffer(imageSource);
+    const imageInfo = validatedImage
+      ? { buffer: validatedImage.buffer, mimeType: validatedImage.mimeType, filename: 'receipt.webp' }
+      : await resolveImageBuffer(imageSource);
     const sanitizedCaption = sanitizeTelegramHtml(caption);
     const trimmedCaption = sanitizedCaption.length > 1024
       ? sanitizeTelegramHtml(sanitizedCaption.slice(0, 1000)) + '...'

@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
+import { isAllowedOrigin, protectBrowserMutation } from './middleware/requestSecurity';
 import { prisma } from './utils/prisma';
 import { publicFileGuard } from './middleware/publicFileGuard';
 import { getTrustedProxies } from './utils/trustedProxy';
@@ -9,20 +10,6 @@ import { startTelegramBotPolling } from './utils/telegramService';
 const app = express();
 app.use(compression());
 const PORT = Number(process.env.PORT) || 5000;
-const allowedOrigins = [
-  'http://localhost:3000',
-  'http://127.0.0.1:3000',
-  'http://borai.local',
-  'http://borai.local:3000',
-  'http://borai-server.local',
-  'http://borai-server.local:3000',
-  'https://borai.store',
-  'https://www.borai.store',
-  ...(process.env.FRONTEND_URL || '')
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean),
-];
 
 app.set('trust proxy', getTrustedProxies());
 
@@ -43,20 +30,16 @@ app.use(cors({
   origin(origin, callback) {
     if (
       !origin ||
-      allowedOrigins.includes(origin) ||
-      /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) ||
-      /^https?:\/\/(.*\.)?borai\.store$/.test(origin) ||
-      /^https?:\/\/(\d{1,3}\.){3}\d{1,3}(:\d+)?$/.test(origin) ||
-      /^https?:\/\/.*(ngrok|localtunnel|nip\.io|\.local)(:\d+)?$/.test(origin) ||
-      process.env.ALLOW_ALL_ORIGINS === 'true'
+      isAllowedOrigin(origin)
     ) {
       return callback(null, true);
     }
     console.warn(`[CORS Blocked] Origin: ${origin}`);
-    return callback(new Error(`Origin ${origin} is not allowed by CORS`));
+    return callback(Object.assign(new Error('Request origin is not allowed'), { status: 403 }));
   },
   credentials: true,
 }));
+app.use(protectBrowserMutation);
 const generalJsonParser = express.json({ limit: '5mb' });
 const imageJsonParser = express.json({ limit: '15mb' });
 
@@ -132,9 +115,7 @@ app.use((req, res, next) => {
 import authRoutes from './routes/auth';
 import ordersRoutes from './routes/orders';
 import walletRoutes from './routes/wallet';
-import blogRoutes from './routes/blog';
 import dhruRoutes from './routes/dhru';
-import videoRoutes from './routes/video';
 import homepageRoutes from './routes/homepage';
 import uploadRoutes from './routes/upload';
 import usersRoutes from './routes/users';
@@ -161,11 +142,11 @@ app.use('/api/orders', ordersRoutes);
 app.use('/api/currencies', currenciesRoutes);
 app.use('/api/wallet/paypal', paypalRoutes);
 app.use('/api/wallet', walletRoutes);
-app.use('/api/blog', blogRoutes);
+app.use('/api/blog', (_req, res) => res.status(410).json({ error: 'تم إلغاء قسم الأخبار' }));
 app.use('/api/dhru', dhruRoutes);
 app.use('/api/providers', providersRoutes);
 app.use('/api/api-providers', providersRoutes);
-app.use('/api/videos', videoRoutes);
+app.use('/api/videos', (_req, res) => res.status(410).json({ error: 'تم إلغاء قسم الفيديوهات' }));
 app.use('/api/homepage', homepageRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/users', usersRoutes);
@@ -199,17 +180,17 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
     message: err?.message || String(err),
     stack: err?.stack || 'No stack trace',
     ip: req.ip,
-    user: (req as any).user?.username || 'Guest',
-    body: req.body
+    user: (req as any).user?.username || 'Guest'
   });
 
   if (res.headersSent) {
     return next(err);
   }
 
-  const statusCode = Number(err?.status || err?.statusCode) || 500;
+  const candidateStatus = Number(err?.status || err?.statusCode);
+  const statusCode = candidateStatus >= 400 && candidateStatus <= 599 ? candidateStatus : 500;
   res.status(statusCode).json({
-    error: err?.message || 'حدث خطأ داخلي في الخادم'
+    error: statusCode >= 500 ? 'حدث خطأ داخلي في الخادم' : statusCode === 413 ? 'حجم الطلب أكبر من المسموح' : 'الطلب غير صالح أو غير مسموح'
   });
 });
 

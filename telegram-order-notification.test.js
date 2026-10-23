@@ -15,11 +15,11 @@ assert.deepEqual(
   "Telegram recipients must be unique and must not contain an empty chat ID"
 );
 
-const dockerfile = fs.readFileSync("Dockerfile", "utf8");
+const telegramSource = fs.readFileSync("src/utils/telegramService.ts", "utf8");
 assert.match(
-  dockerfile,
-  /COPY\s+telegram_admins\.json\s+\.\/telegram_admins\.json/,
-  "The runtime image must include persisted Telegram admin chat IDs"
+  telegramSource,
+  /prisma\.setting\.findUnique/,
+  "Telegram administrators must be loaded from persistent protected database settings"
 );
 
 const ordersSource = fs.readFileSync("src/routes/orders.ts", "utf8");

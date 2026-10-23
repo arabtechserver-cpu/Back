@@ -2,7 +2,7 @@ import { parseProviderParameters } from '../utils/provider-api-parameters';
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { prisma } from '../utils/prisma';
-import { sendTelegramPhotoNotification } from '../utils/telegramService';
+import { sendTelegramPhotoNotification, escapeHtml } from '../utils/telegramService';
 import { resolveOrderServiceType } from '../utils/order-response';
 
 const router = Router();
@@ -594,12 +594,15 @@ const handleDhruApiRequest = async (req: any, res: any) => {
 
         // Base provider cost + 8% margin
         const baseCost = Math.max(0, service.credit || 0);
+        if (!Number.isFinite(baseCost) || baseCost <= 0) {
+          return res.json({ ERROR: [{ MESSAGE: 'Service price is unavailable. Contact the administrator.' }] });
+        }
         const marginPercent = typeof user.apiMargin === 'number' && user.apiMargin >= 0
           ? user.apiMargin
           : 8.0;
 
         const unitPrice = Number((baseCost * (1 + (marginPercent / 100))).toFixed(4));
-        const finalTotalPrice = Number((unitPrice * finalQty).toFixed(2));
+        const finalTotalPrice = Math.max(0.01, Number((unitPrice * finalQty).toFixed(2)));
 
         // Balance validation
         if (user.balance < finalTotalPrice) {
@@ -762,13 +765,13 @@ const handleDhruApiRequest = async (req: any, res: any) => {
 [NEW API ORDER] <b>طلب API جديد في انتظار موافقة الإدارة! (New API Order Pending)</b>
 
 <b>رقم الطلب:</b> #${order.id.slice(-6)}
-<b>مصدر الطلب:</b> API (${user.apiSiteName || 'موقع عميل'})
-<b>رابط الموقع:</b> ${user.apiSiteUrl || 'N/A'}
-<b>العميل:</b> ${user.fullName} (@${user.username})
-<b>الإيميل:</b> <code>${user.email}</code>
-<b>اسم الخدمة:</b> ${order.serviceName}
-<b>المزود المربوط:</b> ${providerName} (ID: ${service.dhruId || 'N/A'})
-<b>البيانات / IMEI:</b> <code>${order.targetInput}</code>
+<b>مصدر الطلب:</b> API (${escapeHtml(user.apiSiteName || 'موقع عميل')})
+<b>رابط الموقع:</b> ${escapeHtml(user.apiSiteUrl || 'N/A')}
+<b>العميل:</b> ${escapeHtml(user.fullName)} (@${escapeHtml(user.username)})
+<b>الإيميل:</b> <code>${escapeHtml(user.email)}</code>
+<b>اسم الخدمة:</b> ${escapeHtml(order.serviceName)}
+<b>المزود المربوط:</b> ${escapeHtml(providerName)} (ID: ${escapeHtml(service.dhruId || 'N/A')})
+<b>البيانات / IMEI:</b> <code>${escapeHtml(order.targetInput)}</code>
 <b>الكمية:</b> ${order.quantity}
 <b>المبلغ المخصوم (تكلفة + 8% ربح):</b> <code>$${order.price.toFixed(2)} USD</code>
 <b>رصيد العميل المتبقي:</b> <code>$${(user.balance - finalTotalPrice).toFixed(2)} USD</code>

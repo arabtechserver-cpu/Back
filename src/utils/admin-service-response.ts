@@ -1,4 +1,5 @@
 import { getServiceQuantityConfig, enrichCustomFieldsWithQuantity } from "./provider-quantity";
+import { sellingPrice } from './service-price';
 
 type AdminService = {
   id: string;
@@ -31,7 +32,7 @@ export function serializeAdminServiceCategories(
     services: dhruServices.map((service) => {
       const credit = Number(service.credit) || 0;
       const margin = Number(service.margin) || 0;
-      const finalPrice = Number((credit + margin).toFixed(2));
+      const finalPrice = sellingPrice(credit, margin);
       
       let sanitizedCustom = service.requiresCustom;
       if (sanitizedCustom) {
@@ -102,7 +103,7 @@ export function serializePricingServiceCategories(
     services: dhruServices.map((service) => {
       const credit = Number(service.credit) || 0;
       const margin = Number(service.margin) || 0;
-      const finalPrice = Number((credit + margin).toFixed(2));
+      const finalPrice = sellingPrice(credit, margin);
 
       let sanitizedCustom = service.requiresCustom;
       if (sanitizedCustom) {

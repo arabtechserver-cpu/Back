@@ -18,5 +18,8 @@ export function publicFileGuard(req: Request, res: Response, next: NextFunction)
     res.setHeader('Cache-Control', 'private, no-store');
     return res.status(403).json({ error: 'Receipts require authenticated transaction access' });
   }
+  if (/\.(?:svg|html?|xhtml|xml|js|mjs|cjs|php\d*|phtml|phar|asp[x]?|jsp|exe|bat|cmd|ps1|sh)(?:$|\/)/i.test(pathname)) {
+    return res.status(403).json({ error: 'Active content is not served from public storage' });
+  }
   return next();
 }

@@ -64,6 +64,7 @@ export function ensureUploadDir(): string {
  * Saves a binary buffer to the persistent upload volume on the server.
  */
 export function saveBufferToUploads(filename: string, buffer: Buffer): string {
+  if (path.basename(filename) !== filename || /[\\/:\0]/.test(filename)) throw new Error('Invalid filename');
   const uploadDir = ensureUploadDir();
   const filePath = path.join(uploadDir, filename);
   try {
@@ -88,6 +89,7 @@ export function saveBufferToUploads(filename: string, buffer: Buffer): string {
  * Checks if a file exists in the uploads volume.
  */
 export function getUploadFilePath(filename: string): string | null {
+  if (path.basename(filename) !== filename || /[\\/:\0]/.test(filename) || !/\.(?:png|jpe?g|webp|gif)$/i.test(filename)) return null;
   const safeFilename = path.basename(filename);
   const uploadDir = getUploadDir();
   const primaryPath = path.join(uploadDir, safeFilename);
@@ -117,7 +119,7 @@ export async function restoreImagesToDisk(prismaClient: any): Promise<number> {
     let restoredCount = 0;
     let failedCount = 0;
     for await (const img of iterateRows(prismaClient.storedImage, { select: { id: true, filename: true } })) {
-      if (!img.filename) continue;
+      if (!img.filename || path.basename(img.filename) !== img.filename || /[\\/:\0]/.test(img.filename) || !/\.(?:png|jpe?g|webp|gif)$/i.test(img.filename)) continue;
       const targetPath = path.join(uploadDir, img.filename);
       if (!fs.existsSync(targetPath)) {
         try {

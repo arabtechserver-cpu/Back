@@ -3,7 +3,7 @@ import { prisma } from "../utils/prisma";
 import { getImeiOrder, getServerOrder, DHRU_API_URL } from '../utils/dhru-api';
 import { getProviderRemoteServiceId } from '../utils/provider-service-id';
 import { buildOrderFieldDetails, resolveOrderServiceType, parseOrderMetadata } from '../utils/order-response';
-import { sendTelegramPhotoNotification } from '../utils/telegramService';
+import { sendTelegramPhotoNotification, escapeHtml } from '../utils/telegramService';
 import { sendOrderConfirmationEmail } from '../utils/emailService';
 import { isAdmin, authenticateToken } from '../middleware/auth';
 import { dashboardIpGuard } from '../middleware/dashboardIpGuard';
@@ -281,15 +281,18 @@ router.post('/', authenticateToken, async (req, res) => {
     }
 
     // Prices are always calculated from the server-side service record.
-    let unitPrice = Number((dhruService.credit + dhruService.margin).toFixed(2));
+    let unitPrice = dhruService.credit + dhruService.margin;
+    if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
+      return res.status(400).json({ error: 'سعر الخدمة غير متاح حالياً. يرجى التواصل مع الإدارة قبل الطلب.' });
+    }
     const discountPercent = Math.max(
       dbUser.customDiscount || 0,
       dbUser.membershipTier?.discountPercentage || 0
     );
     if (discountPercent > 0) {
-      unitPrice = Number((unitPrice * (1 - discountPercent / 100)).toFixed(2));
+      unitPrice = unitPrice * (1 - Math.min(100, discountPercent) / 100);
     }
-    const rawTotalPrice = Number((unitPrice * finalQty).toFixed(2));
+    const rawTotalPrice = unitPrice > 0 ? Math.max(0.01, Number((unitPrice * finalQty).toFixed(2))) : 0;
 
     // 1. Wrap all state changes and coupon validation in a single Prisma Transaction to prevent Race Conditions
     let newOrder: any;
@@ -489,11 +492,11 @@ router.post('/', authenticateToken, async (req, res) => {
 <b>طلب خدمة جديد في انتظار موافقة الإدارة (New Order Pending)</b>
 
 - <b>رقم الطلب:</b> #${newOrder.id.slice(-6)}
-- <b>العميل:</b> ${dbUser.fullName} (@${dbUser.username})
-- <b>الإيميل:</b> <code>${dbUser.email}</code>
-- <b>اسم الخدمة:</b> ${newOrder.serviceName}
-- <b>المزود المربوط:</b> ${providerName} (ID: ${dhruService?.dhruId || 'N/A'})
-- <b>البيانات / IMEI:</b> <code>${newOrder.targetInput}</code>
+- <b>العميل:</b> ${escapeHtml(dbUser.fullName)} (@${escapeHtml(dbUser.username)})
+- <b>الإيميل:</b> <code>${escapeHtml(dbUser.email)}</code>
+- <b>اسم الخدمة:</b> ${escapeHtml(newOrder.serviceName)}
+- <b>المزود المربوط:</b> ${escapeHtml(providerName)} (ID: ${escapeHtml(dhruService?.dhruId || 'N/A')})
+- <b>البيانات / IMEI:</b> <code>${escapeHtml(newOrder.targetInput)}</code>
 - <b>الكمية:</b> ${newOrder.quantity}
 - <b>إجمالي التكلفة:</b> <code>$${newOrder.price.toFixed(2)} USD</code>
 - <b>رصيد العميل المتبقي:</b> <code>$${updatedUser.balance.toFixed(2)} USD</code>

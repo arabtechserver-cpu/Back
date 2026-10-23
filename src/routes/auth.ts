@@ -2,8 +2,10 @@ import { Router } from 'express';
 import crypto from 'crypto';
 import { prisma } from "../utils/prisma";
 import { generateToken, authenticateToken } from '../middleware/auth';
-import { sendOtpEmailViaLoops, addContactToLoops } from '../utils/emailService';
-import { sendTelegramAlert, sendTelegramAdminOtp, sendTelegramAdminLoginSuccess } from '../utils/telegramService';
+import { sendOtpEmailViaLoops } from '../utils/emailService';
+import { sendTelegramAlert, sendTelegramAdminOtp, sendTelegramAdminLoginSuccess, escapeHtml } from '../utils/telegramService';
+import { registrationLimiter, loginLimiter, otpSendLimiter } from '../middleware/abuseLimits';
+import { validPlainText, validEmail, validPassword } from '../utils/account-input';
 import { createAdminOtpChallenge, verifyAdminOtp, resendAdminOtp } from '../utils/adminOtp';
 
 import bcrypt from 'bcryptjs';
@@ -30,15 +32,18 @@ setInterval(() => {
 }, 15 * 60 * 1000).unref();
 
 // POST /api/auth/register - Direct & Fast Registration
-router.post('/register', async (req, res) => {
+router.post('/register', registrationLimiter, async (req, res) => {
   try {
     const { fullName, email, username, password, country, phone } = req.body;
 
-    if (!fullName || !email || !username || !password) {
+    if (!validPlainText(fullName, 2, 100) || !validEmail(email) ||
+        typeof username !== 'string' || !/^[a-zA-Z0-9_.-]{3,40}$/.test(username.trim()) ||
+        (country !== undefined && (typeof country !== 'string' || !/^[A-Z]{2}$/i.test(country))) ||
+        (phone != null && phone !== '' && (typeof phone !== 'string' || !/^\+?[0-9 ()-]{6,25}$/.test(phone)))) {
       return res.status(200).json({ success: false, error: 'الرجاء تعبئة جميع الحقول المطلوبة' });
     }
 
-    if (password.length < 8) {
+    if (!validPassword(password)) {
       return res.status(200).json({ success: false, error: 'كلمة المرور يجب أن لا تقل عن 8 أحرف' });
     }
 
@@ -72,17 +77,15 @@ router.post('/register', async (req, res) => {
       }
     });
 
-    addContactToLoops(cleanEmail, fullName.trim()).catch(() => {});
-
     // Notify Telegram Admins of new user registration
     const newRegMsg = `
 <b>عميل جديد انضم للموقع (New Registration)</b>
 
-- <b>الاسم:</b> ${newUser.fullName}
-- <b>البريد:</b> <code>${newUser.email}</code>
-- <b>اسم المستخدم:</b> @${newUser.username}
-- <b>الهاتف:</b> <code>${newUser.phone || 'غير مسجل'}</code>
-- <b>الدولة:</b> ${newUser.country}
+- <b>الاسم:</b> ${escapeHtml(newUser.fullName)}
+- <b>البريد:</b> <code>${escapeHtml(newUser.email)}</code>
+- <b>اسم المستخدم:</b> @${escapeHtml(newUser.username)}
+- <b>الهاتف:</b> <code>${escapeHtml(newUser.phone || 'غير مسجل')}</code>
+- <b>الدولة:</b> ${escapeHtml(newUser.country)}
 - <b>التاريخ:</b> ${new Date().toLocaleString('ar-EG')}
     `.trim();
 
@@ -118,10 +121,10 @@ router.post('/register', async (req, res) => {
 });
 
 // POST /api/auth/send-otp - Send OTP via Loops Email
-router.post('/send-otp', async (req, res) => {
+router.post('/send-otp', otpSendLimiter, async (req, res) => {
   try {
     const { email, username, type } = req.body;
-    if (!email || !email.includes('@')) {
+    if (!validEmail(email) || (username != null && !validPlainText(username, 1, 100))) {
       return res.status(200).json({ success: false, error: 'الرجاء إدخال بريد إلكتروني صحيح' });
     }
 
@@ -137,7 +140,13 @@ router.post('/send-otp', async (req, res) => {
     const otpCode = crypto.randomInt(100000, 1000000).toString();
     const expiresAt = Date.now() + 10 * 60 * 1000;
 
-    otpStore.set(cleanEmail, { code: otpCode, expiresAt, attempts: 0 });
+    const otpKey = `${type === 'forgot_password' ? 'reset' : 'verify'}:${cleanEmail}`;
+    const existingOtp = otpStore.get(otpKey);
+    if (existingOtp && existingOtp.expiresAt - Date.now() > 9 * 60 * 1000) {
+      return res.status(429).json({ success: false, error: 'يرجى الانتظار دقيقة قبل طلب كود آخر' });
+    }
+    if (otpStore.size >= 5000) return res.status(429).json({ success: false, error: 'يرجى المحاولة لاحقاً' });
+    otpStore.set(otpKey, { code: otpCode, expiresAt, attempts: 0 });
 
     console.log(`[AUTH OTP DISPATCH] Verification code queued for delivery`);
 
@@ -157,28 +166,29 @@ router.post('/send-otp', async (req, res) => {
 });
 
 // POST /api/auth/forgot-password - Reset password
-router.post('/forgot-password', async (req, res) => {
+router.post('/forgot-password', loginLimiter, async (req, res) => {
   try {
     const { email, otp, newPassword } = req.body;
 
-    if (!email || !otp || !newPassword) {
+    if (!validEmail(email) || typeof otp !== 'string' || !/^\d{6}$/.test(otp)) {
       return res.status(200).json({ success: false, error: 'البريد الإلكتروني، كود OTP، وكلمة المرور الجديدة مطلوبة' });
     }
 
-    if (newPassword.length < 8) {
+    if (!validPassword(newPassword)) {
       return res.status(200).json({ success: false, error: 'كلمة المرور الجديدة يجب أن لا تقل عن 8 أحرف' });
     }
 
     const cleanEmail = email.trim().toLowerCase();
-    const record = otpStore.get(cleanEmail);
+    const otpKey = `reset:${cleanEmail}`;
+    const record = otpStore.get(otpKey);
 
     if (!record || Date.now() > record.expiresAt) {
-      if (record) otpStore.delete(cleanEmail);
+      if (record) otpStore.delete(otpKey);
       return res.status(200).json({ success: false, error: 'كود التحقق (OTP) غير صحيح أو منتهي الصلاحية' });
     }
 
     if (record.attempts >= 5) {
-      otpStore.delete(cleanEmail);
+      otpStore.delete(otpKey);
       return res.status(200).json({ success: false, error: 'تم تجاوز الحد الأقصى للمحاولات الخاطئة. الرجاء طلب كود جديد' });
     }
 
@@ -187,6 +197,7 @@ router.post('/forgot-password', async (req, res) => {
       return res.status(200).json({ success: false, error: 'كود التحقق (OTP) غير صحيح' });
     }
 
+    otpStore.delete(otpKey);
     const userObj = await prisma.user.findUnique({ where: { email: cleanEmail } });
     if (!userObj) {
       return res.status(200).json({ success: false, error: 'لم يتم العثور على حساب بهذا البريد الإلكتروني' });
@@ -201,7 +212,7 @@ router.post('/forgot-password', async (req, res) => {
       }
     });
 
-    otpStore.delete(cleanEmail);
+    otpStore.delete(otpKey);
 
     return res.json({
       success: true,
@@ -230,10 +241,10 @@ router.post('/logout', authenticateToken, async (req: any, res) => {
 });
 
 // POST /api/auth/login - Fast Login Authentication
-router.post('/login', async (req, res) => {
+router.post('/login', loginLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
-    if (!email || !password) {
+    if (!validPlainText(email, 1, 254) || typeof password !== 'string' || Buffer.byteLength(password, 'utf8') > 72) {
       return res.status(200).json({ success: false, error: 'البريد الإلكتروني وكلمة المرور مطلوبان' });
     }
 
@@ -302,7 +313,7 @@ router.post('/login', async (req, res) => {
           email: dbUser.email
         });
 
-        console.log(`[ADMIN OTP DISPATCH] Admin: ${dbUser.username} | OTP Code: [ ${code} ] | IP: ${clientIp || 'unknown'}`);
+        console.log('[ADMIN OTP DISPATCH] Verification code queued for delivery');
 
         sendTelegramAdminOtp(code, { username: dbUser.username, fullName: dbUser.fullName }, clientIp).catch((err) => {
           console.error('Failed to send admin OTP to telegram:', err?.message || err);
@@ -333,7 +344,7 @@ router.post('/login', async (req, res) => {
       email: dbUser.email,
       role: dbUser.role,
       tokenVersion: dbUser.tokenVersion ?? 1
-    }, '7d');
+    }, isAdminAccount ? '12h' : '7d');
 
     const effectiveDiscount = Math.max(
       dbUser.customDiscount || 0,
@@ -468,8 +479,8 @@ const handleAdminOtpVerification = async (req: any, res: any) => {
   }
 };
 
-router.post('/admin/verify-otp', handleAdminOtpVerification);
-router.post('/verify-admin-otp', handleAdminOtpVerification);
+router.post('/admin/verify-otp', loginLimiter, handleAdminOtpVerification);
+router.post('/verify-admin-otp', loginLimiter, handleAdminOtpVerification);
 
 // Admin OTP Resend Handler
 const handleAdminOtpResend = async (req: any, res: any) => {
@@ -484,7 +495,7 @@ const handleAdminOtpResend = async (req: any, res: any) => {
       return res.status(200).json({ success: false, error: result.error || 'تعذر إعادة إرسال الكود' });
     }
 
-    console.log(`[ADMIN OTP RESEND] Admin: ${result.user.username} | OTP Code: [ ${result.code} ]`);
+    console.log('[ADMIN OTP RESEND] Verification code queued for delivery');
 
     const clientIp = extractClientIp(req);
     sendTelegramAdminOtp(result.code, { username: result.user.username }, clientIp).catch((err) => {
@@ -501,20 +512,20 @@ const handleAdminOtpResend = async (req: any, res: any) => {
   }
 };
 
-router.post('/admin/resend-otp', handleAdminOtpResend);
-router.post('/resend-admin-otp', handleAdminOtpResend);
+router.post('/admin/resend-otp', otpSendLimiter, handleAdminOtpResend);
+router.post('/resend-admin-otp', otpSendLimiter, handleAdminOtpResend);
 
 
 // POST /api/auth/google - Google Sign-In & One-Tap Authentication
-router.post('/google', async (req, res) => {
+router.post('/google', loginLimiter, async (req, res) => {
   try {
     const { credential } = req.body;
-    if (!credential) {
+    if (typeof credential !== 'string' || credential.length > 10000 || !credential) {
       return res.status(400).json({ success: false, error: 'Google credential token is required' });
     }
 
     // Verify token with Google's public tokeninfo endpoint
-    const verifyRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${credential}`);
+    const verifyRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`, { signal: AbortSignal.timeout(10000) });
     if (!verifyRes.ok) {
       return res.status(401).json({ success: false, error: 'فشل التحقق من حساب Google' });
     }
@@ -597,7 +608,6 @@ router.post('/google', async (req, res) => {
         }
       });
 
-      addContactToLoops(cleanEmail, name || cleanEmail.split('@')[0]).catch(() => {});
     }
 
     if (user.status === 'suspended') {
