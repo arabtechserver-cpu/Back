@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { getAccountInfo, getImeiServiceList } from '../utils/dhru-api';
 import { isAdmin, optionalAuth } from '../middleware/auth';
 import { sellingPrice } from '../utils/service-price';
+import { attachCatalogImages, catalogImageKey } from '../utils/catalog-images';
 
 const router = Router();
 
@@ -34,7 +35,7 @@ export function invalidateDhruServicesCache() {
   pricingVersion++;
 }
 
-async function loadServiceCategories(allRecords: boolean, isPricingView: boolean) {
+export async function loadServiceCategories(allRecords: boolean, isPricingView: boolean) {
     const categories = await prisma.dhruCategory.findMany({
       select: {
         id: true,
@@ -68,7 +69,7 @@ async function loadServiceCategories(allRecords: boolean, isPricingView: boolean
       ? serializePricingServiceCategories(categories, cleanServiceName, false)
       : serializeAdminServiceCategories(categories, cleanServiceName);
 
-    return cleanedCategories;
+    return attachCatalogImages(cleanedCategories);
 }
 
 async function loadPublicPricing(): Promise<PricingPayload> {
@@ -104,6 +105,38 @@ router.get('/services', (req, res, next) => {
     return res.json(await loadServiceCategories(true, isPricingView));
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch Dhru services from DB' });
+  }
+});
+
+// Catalog images are shared database assets; each target stores only its URL.
+router.post('/services/image', isAdmin, async (req, res) => {
+  try {
+    const { serviceId, categoryId, groupName, imageUrl } = req.body;
+    if ((serviceId !== undefined && (typeof serviceId !== 'string' || serviceId.length > 200)) ||
+        (!serviceId && (typeof categoryId !== 'string' || typeof groupName !== 'string' || groupName.length > 1000))) {
+      return res.status(400).json({ error: 'بيانات الخدمة أو الباقة غير صحيحة' });
+    }
+    const target = serviceId ? { serviceId } : { categoryId, groupName };
+    const exists = serviceId
+      ? await prisma.dhruService.count({ where: { id: serviceId } })
+      : await prisma.dhruService.count({ where: { categoryId, groupName } });
+    if (!exists) return res.status(404).json({ error: 'الخدمة أو الباقة غير موجودة' });
+    const key = catalogImageKey(target);
+    if (imageUrl === null) {
+      await prisma.setting.deleteMany({ where: { key } });
+    } else {
+      if (typeof imageUrl !== 'string' || !/^\/api\/upload\/catalog-[a-f0-9]{64}\.webp$/.test(imageUrl)) {
+        return res.status(400).json({ error: 'ارفع صورة من جهازك أولاً' });
+      }
+      const filename = imageUrl.split('/').pop()!;
+      const image = await prisma.storedImage.findFirst({ where: { filename }, select: { id: true } });
+      if (!image) return res.status(400).json({ error: 'الصورة غير محفوظة في قاعدة البيانات' });
+      await prisma.setting.upsert({ where: { key }, create: { key, value: imageUrl }, update: { value: imageUrl } });
+    }
+    invalidateDhruServicesCache();
+    return res.json({ success: true, imageUrl, message: imageUrl ? 'تم حفظ الصورة' : 'تمت إزالة الصورة' });
+  } catch {
+    return res.status(500).json({ error: 'تعذر حفظ صورة الخدمة' });
   }
 });
 

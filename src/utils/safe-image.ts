@@ -10,7 +10,7 @@ export class ImageBusyError extends InvalidImageError {}
 let activeDecoders = 0;
 
 /** Decode only raster formats, bound decompression, and discard metadata/trailing payloads. */
-export async function sanitizeImageDataUrl(input: unknown, allowGif = false) {
+export async function sanitizeImageDataUrl(input: unknown, allowGif = false, profile: 'original' | 'catalog' = 'original') {
   if (typeof input !== 'string' || input.length > Math.ceil(MAX_BYTES / 3) * 4 + 100) {
     throw new InvalidImageError('حجم الصورة يجب ألا يتجاوز 10 ميجابايت');
   }
@@ -38,7 +38,9 @@ export async function sanitizeImageDataUrl(input: unknown, allowGif = false) {
     if (!metadata.width || !metadata.height || metadata.width * metadata.height > MAX_PIXELS || (metadata.pages || 1) > 1) {
       throw new Error('Image dimensions or animation exceed limits');
     }
-    const cleaned = await image.rotate().webp({ quality: 90 }).toBuffer();
+    const pipeline = image.rotate();
+    if (profile === 'catalog') pipeline.resize({ width: 960, height: 960, fit: 'inside', withoutEnlargement: true });
+    const cleaned = await pipeline.webp({ quality: profile === 'catalog' ? 78 : 90 }).toBuffer();
     if (cleaned.length > MAX_BYTES) throw new Error('Output image too large');
     return { buffer: cleaned, mimeType: 'image/webp', extension: 'webp', dataUrl: `data:image/webp;base64,${cleaned.toString('base64')}` };
   } catch {

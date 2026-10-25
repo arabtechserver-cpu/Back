@@ -19,9 +19,11 @@ router.post('/', isAdmin, async (req, res) => {
 
     ensureUploadDir();
 
-    const { buffer, mimeType } = await sanitizeImageDataUrl(image, true);
+    const isCatalog = req.body.purpose === 'catalog';
+    const { buffer, mimeType } = await sanitizeImageDataUrl(image, true, isCatalog ? 'catalog' : 'original');
     const base64Data = buffer.toString('base64');
-    const uniqueFilename = `image_${crypto.randomUUID()}.webp`;
+    const contentId = isCatalog ? `catalog-${crypto.createHash('sha256').update(buffer).digest('hex')}` : crypto.randomUUID();
+    const uniqueFilename = isCatalog ? `${contentId}.webp` : `image_${contentId}.webp`;
 
     // 1. Save directly into persistent volume /app/uploads on disk
     try {
@@ -31,7 +33,10 @@ router.post('/', isAdmin, async (req, res) => {
     }
 
     // 2. Also save into PostgreSQL database as permanent fallback
-    const storedRecord = await prisma.storedImage.create({
+    const imageData = { id: contentId, filename: uniqueFilename, mimeType, data: base64Data, size: buffer.length };
+    const storedRecord = isCatalog ? await prisma.storedImage.upsert({
+      where: { id: contentId }, create: imageData, update: {}
+    }) : await prisma.storedImage.create({
       data: {
         filename: uniqueFilename,
         mimeType: mimeType,
@@ -40,14 +45,16 @@ router.post('/', isAdmin, async (req, res) => {
       }
     });
 
-    const imageUrl = `/uploads/${uniqueFilename}`;
+    const imageUrl = isCatalog ? `/api/upload/${uniqueFilename}` : `/uploads/${uniqueFilename}`;
     const fallbackApiUrl = `/api/upload/${storedRecord.id}`;
     return res.json({ 
       success: true, 
       id: storedRecord.id,
       url: imageUrl, 
       fallbackUrl: fallbackApiUrl,
-      filename: uniqueFilename 
+      filename: uniqueFilename,
+      size: buffer.length,
+      format: 'webp'
     });
   } catch (error: any) {
     if (error instanceof ImageBusyError) return res.status(429).json({ success: false, error: error.message });
@@ -97,6 +104,10 @@ router.get('/:id', async (req, res) => {
         return res.status(403).json({ error: 'Receipts require authenticated transaction access' });
       }
       const safeImage = await sanitizeImageDataUrl(`data:${stored.mimeType};base64,${stored.data}`, true);
+      // Restore the validated database copy so subsequent requests stream from disk.
+      if (/^catalog-[a-f0-9]{64}\.webp$/.test(stored.filename)) {
+        try { saveBufferToUploads(stored.filename, safeImage.buffer); } catch {}
+      }
       res.setHeader('Content-Type', safeImage.mimeType);
       res.setHeader('Content-Length', safeImage.buffer.length);
       res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
