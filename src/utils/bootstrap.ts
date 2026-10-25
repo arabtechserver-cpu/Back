@@ -127,7 +127,32 @@ export async function bootstrapDatabase() {
       console.error('[Bootstrap] Note on backfilling service quantity:', qntErr);
     }
 
-    // 3. Check & Sync Services if a Provider is configured
+    // 3. Remove legacy hardcoded Arab-Tech provider if present
+    try {
+      const legacyProviders = await prisma.apiProvider.findMany({
+        where: {
+          OR: [
+            { apiUrl: { contains: 'arab-tech1.online' } },
+            { name: { contains: 'عرب تيك' } },
+            { name: 'مزود الخدمات الرقمية (Dhru Fusion API)' }
+          ]
+        }
+      });
+      for (const legacy of legacyProviders) {
+        await prisma.dhruService.updateMany({
+          where: { providerId: legacy.id },
+          data: { providerId: null }
+        });
+        await prisma.apiProvider.delete({
+          where: { id: legacy.id }
+        });
+        console.log(`[Bootstrap] Cleaned up legacy provider: ${legacy.name}`);
+      }
+    } catch (cleanupErr) {
+      console.warn('[Bootstrap] Note on legacy provider cleanup:', cleanupErr);
+    }
+
+    // 4. Check & Sync Services if a Provider is configured
     const serviceCount = await prisma.dhruService.count();
     const activeProvider = await prisma.apiProvider.findFirst({ where: { isActive: true } });
     if (serviceCount === 0 && (activeProvider || (process.env.DHRU_API_URL && process.env.DHRU_API_KEY))) {

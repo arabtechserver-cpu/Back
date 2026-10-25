@@ -538,36 +538,6 @@ router.get("/", async (req, res) => {
       }
     });
 
-    // If empty, initialize the default primary provider
-    if (providers.length === 0) {
-      const realProvider = {
-        name: "مزود الخدمات الرقمية (Dhru Fusion API)",
-        apiUrl: process.env.DHRU_API_URL || "https://arab-tech1.online/api/v1",
-        username: process.env.DHRU_USERNAME || "",
-        apiKey: process.env.DHRU_API_KEY || "",
-        type: "dhru",
-        isActive: true,
-        balance: 23.21,
-        currency: "USD",
-        servicesCount: 2295
-      };
-
-      const created = await prisma.apiProvider.create({ data: realProvider });
-      await prisma.dhruService.updateMany({
-        where: { providerId: null },
-        data: { providerId: created.id }
-      });
-
-      providers = await prisma.apiProvider.findMany({
-        orderBy: { createdAt: "asc" },
-        include: {
-          _count: {
-            select: { services: true }
-          }
-        }
-      });
-    }
-
     return res.json({
       success: true,
       providers: providers.map(p => ({
