@@ -275,6 +275,7 @@ router.post('/services/update', isAdmin, async (req, res) => {
 });
 
 // POST /api/dhru/services/bundle - Create a new bundle with services and custom fields
+// POST /api/dhru/services/bundle - Create a new bundle or add services to existing bundle safely
 router.post('/services/bundle', isAdmin, async (req, res) => {
   try {
     const { categoryId, categoryName, bundleName, services } = req.body;
@@ -287,7 +288,9 @@ router.post('/services/bundle', isAdmin, async (req, res) => {
       return res.status(400).json({ error: 'يجب إضافة خدمة واحدة على الأقل داخل الباقة' });
     }
 
-    // Resolve or create category
+    const cleanBundleName = bundleName.trim();
+
+    // Resolve or create category safely
     let targetCategory: any = null;
     if (categoryId && typeof categoryId === 'string' && categoryId.trim()) {
       targetCategory = await prisma.dhruCategory.findUnique({ where: { id: categoryId.trim() } });
@@ -308,66 +311,79 @@ router.post('/services/bundle', isAdmin, async (req, res) => {
       }
     }
 
-    const createdServices: any[] = [];
-    const cleanBundleName = bundleName.trim();
+    const existingInPackage = await prisma.dhruService.count({
+      where: { categoryId: targetCategory.id, groupName: cleanBundleName }
+    });
 
-    for (let i = 0; i < services.length; i++) {
-      const s = services[i];
-      if (!s.name || typeof s.name !== 'string' || !s.name.trim()) {
-        continue;
-      }
+    const createdServices = await prisma.$transaction(async (tx) => {
+      const createdList: any[] = [];
 
-      const uniqueDhruId = `pkg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}_${i}`;
+      for (let i = 0; i < services.length; i++) {
+        const s = services[i];
+        if (!s.name || typeof s.name !== 'string' || !s.name.trim()) {
+          continue;
+        }
 
-      let requiresCustom: string | null = null;
-      if (Array.isArray(s.fields) && s.fields.length > 0) {
-        const fieldsObj: Record<string, any> = {};
-        s.fields.forEach((f: any, fIdx: number) => {
-          const rawKey = (f.fieldname || f.name || `field_${fIdx + 1}`).trim().replace(/\s+/g, '_');
-          if (rawKey) {
-            let options: string[] = [];
-            if (Array.isArray(f.options)) {
-              options = f.options.map((o: any) => String(o).trim()).filter(Boolean);
-            } else if (typeof f.options === 'string' && f.options.trim()) {
-              options = f.options.split(/[\r\n,|]+/).map((o: string) => o.trim()).filter(Boolean);
+        const uniqueDhruId = `pkg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}_${i}_${Math.floor(Math.random() * 10000)}`;
+
+        let requiresCustom: string | null = null;
+        if (Array.isArray(s.fields) && s.fields.length > 0) {
+          const fieldsObj: Record<string, any> = {};
+          s.fields.forEach((f: any, fIdx: number) => {
+            const rawKey = (f.fieldname || f.name || `field_${fIdx + 1}`).trim().replace(/\s+/g, '_');
+            if (rawKey) {
+              let options: string[] = [];
+              if (Array.isArray(f.options)) {
+                options = f.options.map((o: any) => String(o).trim()).filter(Boolean);
+              } else if (typeof f.options === 'string' && f.options.trim()) {
+                options = f.options.split(/[\r\n,|]+/).map((o: string) => o.trim()).filter(Boolean);
+              }
+
+              fieldsObj[rawKey] = {
+                label: (f.label || rawKey).trim(),
+                fieldname: rawKey,
+                fieldtype: f.fieldtype || 'text',
+                required: f.required !== false,
+                ...(options.length > 0 ? { options } : {})
+              };
             }
+          });
+          if (Object.keys(fieldsObj).length > 0) {
+            requiresCustom = JSON.stringify(fieldsObj);
+          }
+        } else if (s.requiresCustom) {
+          requiresCustom = typeof s.requiresCustom === 'string' ? s.requiresCustom : JSON.stringify(s.requiresCustom);
+        }
 
-            fieldsObj[rawKey] = {
-              label: (f.label || rawKey).trim(),
-              fieldname: rawKey,
-              fieldtype: f.fieldtype || 'text',
-              required: f.required !== false,
-              ...(options.length > 0 ? { options } : {})
-            };
+        const credit = Math.max(0, parseFloat(s.credit) || 0);
+        const margin = parseFloat(s.margin) || 0;
+        const supportsQty = Boolean(s.supportsQty);
+        const minQty = Math.max(1, parseInt(s.minQty) || 1);
+        const maxQty = Math.max(0, parseInt(s.maxQty) || 0);
+
+        const created = await tx.dhruService.create({
+          data: {
+            dhruId: uniqueDhruId,
+            name: s.name.trim(),
+            originalName: s.name.trim(),
+            groupName: cleanBundleName,
+            credit,
+            margin,
+            time: (s.time && String(s.time).trim()) || '1-24 Hours',
+            info: (s.info && String(s.info).trim()) || null,
+            isActive: s.isActive !== false,
+            categoryId: targetCategory.id,
+            requiresCustom,
+            supportsQty,
+            minQty,
+            maxQty
           }
         });
-        if (Object.keys(fieldsObj).length > 0) {
-          requiresCustom = JSON.stringify(fieldsObj);
-        }
-      } else if (s.requiresCustom) {
-        requiresCustom = typeof s.requiresCustom === 'string' ? s.requiresCustom : JSON.stringify(s.requiresCustom);
+        createdList.push(created);
       }
 
-      const credit = Math.max(0, parseFloat(s.credit) || 0);
-      const margin = parseFloat(s.margin) || 0;
-
-      const created = await prisma.dhruService.create({
-        data: {
-          dhruId: uniqueDhruId,
-          name: s.name.trim(),
-          originalName: s.name.trim(),
-          groupName: cleanBundleName,
-          credit,
-          margin,
-          time: (s.time && String(s.time).trim()) || '1-24 Hours',
-          info: (s.info && String(s.info).trim()) || null,
-          isActive: s.isActive !== false,
-          categoryId: targetCategory.id,
-          requiresCustom
-        }
-      });
-      createdServices.push(created);
-    }
+      return createdList;
+    });
 
     if (createdServices.length === 0) {
       return res.status(400).json({ error: 'لم يتم حفظ أي خدمة، يرجى التأكد من كتابة أسماء الخدمات بشكل صحيح' });
@@ -375,15 +391,20 @@ router.post('/services/bundle', isAdmin, async (req, res) => {
 
     invalidateDhruServicesCache();
 
+    const isAddedToExisting = existingInPackage > 0;
+    const msg = isAddedToExisting
+      ? `تمت إضافة ${createdServices.length} خدمة بنجاح إلى باقة (${cleanBundleName})`
+      : `تم إنشاء الباقة (${cleanBundleName}) بنجاح مع ${createdServices.length} خدمة`;
+
     res.json({
       success: true,
-      message: `تم إنشاء الباقة (${cleanBundleName}) بنجاح مع ${createdServices.length} خدمة`,
+      message: msg,
       category: targetCategory,
       services: createdServices
     });
   } catch (error) {
     console.error('Create bundle error:', error);
-    res.status(500).json({ error: 'حدث خطأ أثناء حفظ الباقة والخدمات' });
+    res.status(500).json({ error: 'حدث خطأ أثناء حفظ الباقة والخدمات في قاعدة البيانات' });
   }
 });
 
