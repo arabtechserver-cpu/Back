@@ -12,7 +12,7 @@
     "db:migrate": "npx prisma migrate deploy",
     "db:push": "npx prisma db push --skip-generate",
     "catalog:refresh": "node scripts/refresh-zoalna-catalog.cjs",
-    "test:manual-catalog": "node --test manual-catalog.test.cjs manual-cart-checkout.test.cjs",
+    "test:manual-catalog": "node --test manual-catalog.test.cjs manual-cart-checkout.test.cjs cart-schema.test.cjs",
     "ip:status": "tsx src/scripts/resetIpRestriction.ts --status",
     "ip:disable": "tsx src/scripts/resetIpRestriction.ts --disable",
     "ip:enable": "tsx src/scripts/resetIpRestriction.ts --enable",
