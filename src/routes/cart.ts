@@ -11,8 +11,11 @@ export function quoteCartItem(item: any, service: any, user: any) {
   if (!service?.isActive) throw new Error('SERVICE_UNAVAILABLE');
   const quantity = Number(item.quantity);
   const config = getServiceQuantityConfig(service);
+  // A manual package can be purchased more than once. This counts packages,
+  // independently from a provider's dynamic QNT field.
+  const manualPackage = service.providerId === null;
   if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > 1_000_000 ||
-      (!config.supportsQty && quantity !== 1) ||
+      (!manualPackage && !config.supportsQty && quantity !== 1) ||
       (config.supportsQty && (quantity < config.minQty || (config.maxQty > 0 && quantity > config.maxQty)))) {
     throw new Error('INVALID_QUANTITY');
   }
@@ -164,7 +167,13 @@ router.put('/:id', authenticateToken, async (req: any, res) => {
     }
 
     const updateData: any = {};
-    if (qty !== undefined) updateData.quantity = qty;
+    if (qty !== undefined) {
+      const service = await prisma.dhruService.findUnique({ where: { id: existing.serviceId } });
+      const user = await prisma.user.findUnique({ where: { id: userId }, include: { membershipTier: true } });
+      const quoted = quoteCartItem({ quantity: qty }, service, user);
+      updateData.quantity = qty;
+      updateData.price = quoted.price;
+    }
     if (targetInput !== undefined) updateData.targetInput = String(targetInput).trim();
     if (customFields !== undefined) {
       updateData.customFields = typeof customFields === 'string' ? customFields : JSON.stringify(customFields);
@@ -184,6 +193,7 @@ router.put('/:id', authenticateToken, async (req: any, res) => {
       },
     });
   } catch (error: any) {
+    if (['SERVICE_UNAVAILABLE', 'INVALID_QUANTITY', 'PRICE_UNAVAILABLE'].includes(error.message)) return res.status(400).json({ success: false, error: 'الخدمة غير متاحة أو السعر أو الكمية غير صالح' });
     console.error('Error updating cart item:', error);
     return res.status(500).json({ success: false, error: 'حدث خطأ أثناء تعديل عنصر السلة' });
   }
@@ -386,7 +396,7 @@ router.post('/checkout', authenticateToken, async (req: any, res) => {
       await tx.cartItem.deleteMany({
         where: { id: { in: cartItems.map((c) => c.id) } },
       });
-    }, { isolationLevel: 'Serializable' });
+    }, { isolationLevel: 'Serializable', timeout: 15000 });
 
     const updatedUser = await prisma.user.findUnique({
       where: { id: userId },
@@ -403,7 +413,13 @@ router.post('/checkout', authenticateToken, async (req: any, res) => {
   } catch (error: any) {
     console.error('Error checking out cart:', error);
     if (error.code === 'P2034') return res.status(409).json({ success: false, error: 'تم تعديل السلة بالتزامن. راجع طلباتك قبل المحاولة مجدداً.' });
-    if (['SERVICE_UNAVAILABLE', 'INVALID_QUANTITY', 'PRICE_UNAVAILABLE', 'INVALID_CART'].includes(error.message)) return res.status(400).json({ success: false, error: 'تحقق من توفر الخدمات وأسعارها والكميات المطلوبة في السلة' });
+    const cartErrors: Record<string, string> = {
+      SERVICE_UNAVAILABLE: 'إحدى خدمات السلة لم تعد متاحة. احذفها أو اختر باقة أخرى.',
+      INVALID_QUANTITY: 'كمية إحدى الباقات غير مسموح بها. راجع الكميات في السلة.',
+      PRICE_UNAVAILABLE: 'إحدى الباقات لم يتم تسعيرها بعد. يرجى التواصل مع الإدارة قبل الشراء.',
+      INVALID_CART: 'السلة فارغة أو تجاوزت الحد الأقصى (١٠٠ منتج).',
+    };
+    if (cartErrors[error.message]) return res.status(400).json({ success: false, error: cartErrors[error.message] });
     if (error.message === 'INSUFFICIENT_BALANCE') {
       return res.status(400).json({ success: false, error: 'رصيد المحفظة غير كافٍ لإتمام العملية' });
     }

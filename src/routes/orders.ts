@@ -265,7 +265,8 @@ router.post('/', authenticateToken, async (req, res) => {
       categoryName: dhruService.dhruCategory?.name
     });
 
-    const finalQty = qtyConfig.supportsQty ? qty : 1;
+    const finalQty = dhruService.providerId === null || qtyConfig.supportsQty ? qty : 1;
+    if (!Number.isSafeInteger(finalQty) || finalQty > 1_000_000) return res.status(400).json({ error: 'الكمية المدخلة غير صحيحة' });
 
     if (qtyConfig.supportsQty) {
       if (finalQty < qtyConfig.minQty) {

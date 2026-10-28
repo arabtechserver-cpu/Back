@@ -99,6 +99,7 @@ app.use((req, res, next) => {
 import path from 'path';
 import { getUploadDir, ensureUploadDir, restoreImagesToDisk } from './utils/uploads';
 import { bootstrapDatabase } from './utils/bootstrap';
+import { installManualCatalog } from './utils/install-manual-catalog';
 import { initOrderSyncCron } from './cron/orderSync';
 import { initBackupCron } from './cron/backupDb';
 
@@ -198,6 +199,11 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 
 async function startServer() {
   try {
+    // Required release data runs even when optional startup maintenance is off,
+    // regardless of whether this process was launched by npm, Docker or Node.
+    if (await installManualCatalog()) {
+      console.log('[Catalog] Installed four store pages and the manual services catalog.');
+    }
     if (process.env.STARTUP_MAINTENANCE_ENABLED !== 'false') {
       await bootstrapDatabase();
       await restoreImagesToDisk(prisma).catch(() => {});

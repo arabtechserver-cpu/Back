@@ -10,12 +10,13 @@ export function catalogImageKey(target: { serviceId?: string; categoryId?: strin
 
 export async function attachCatalogImages(categories: any[]) {
   const rows = await prisma.setting.findMany({
-    where: { key: { startsWith: CATALOG_IMAGE_PREFIX } }, select: { key: true, value: true }
+    where: { OR: [{ key: { startsWith: CATALOG_IMAGE_PREFIX } }, { key: { startsWith: 'catalog-product:' } }] }, select: { key: true, value: true }
   });
   const images = new Map(rows.map(row => [row.key, row.value]));
   return categories.map(category => ({ ...category, services: category.services.map((service: any) => ({
     ...service,
     imageUrl: images.get(catalogImageKey({ serviceId: service.id })) || null,
-    groupImageUrl: images.get(catalogImageKey({ categoryId: category.id, groupName: service.groupName })) || null
+    groupImageUrl: images.get(catalogImageKey({ categoryId: category.id, groupName: service.groupName })) || null,
+    productSlug: images.get(catalogImageKey({ categoryId: category.id, groupName: service.groupName }).replace(CATALOG_IMAGE_PREFIX, 'catalog-product:')) || null
   })) }));
 }
