@@ -3,8 +3,15 @@ import { prisma } from '../utils/prisma';
 import { authenticateToken } from '../middleware/auth';
 import { getServiceQuantityConfig } from '../utils/provider-quantity';
 import crypto from 'crypto';
+import { sendCartOrderNotifications } from '../utils/cart-order-notifications';
 
 const router = Router();
+
+const authenticateCart: typeof authenticateToken = (req, res, next) => authenticateToken(req, res, () => {
+  const expectedUser = req.headers['x-cart-user-id'];
+  if (expectedUser && expectedUser !== req.user?.id) return res.status(401).json({ success: false, error: 'جلسة الدخول لا تطابق حساب السلة. سجّل الدخول مجددًا.' });
+  next();
+});
 
 export function quoteCartItem(item: any, service: any, user: any) {
   if (!user || user.status === 'suspended') throw new Error('SERVICE_UNAVAILABLE');
@@ -38,7 +45,8 @@ function safeJsonParse(val: any, fallback: any = null) {
 }
 
 // GET /api/cart - Get user's cart items
-router.get('/', authenticateToken, async (req: any, res) => {
+router.get('/', authenticateCart, async (req: any, res) => {
+  res.setHeader('Cache-Control', 'private, no-store');
   try {
     const userId = req.user.id;
     const items = await prisma.cartItem.findMany({
@@ -46,19 +54,25 @@ router.get('/', authenticateToken, async (req: any, res) => {
       orderBy: { createdAt: 'desc' },
     });
 
-    const parsedItems = items.map((item) => ({
-      ...item,
-      customFields: safeJsonParse(item.customFields, {}),
-    }));
+    const user = await prisma.user.findUnique({ where: { id: userId }, include: { membershipTier: true } });
+    if (!user) return res.status(401).json({ success: false, error: 'يرجى تسجيل الدخول مجددًا' });
+    const services = await prisma.dhruService.findMany({ where: { id: { in: items.map(item => item.serviceId) } } });
+    const serviceMap = new Map(services.map(service => [service.id, service]));
+    const parsedItems = items.map(item => {
+      try { return { ...quoteCartItem(item, serviceMap.get(item.serviceId), user), customFields: safeJsonParse(item.customFields, {}) }; }
+      catch (error: any) { return { ...item, customFields: safeJsonParse(item.customFields, {}), total: 0, quoteError: error.message }; }
+    });
 
     const totalCount = parsedItems.reduce((acc, it) => acc + (it.quantity || 1), 0);
-    const totalPrice = parsedItems.reduce((acc, it) => acc + (it.price || 0) * (it.quantity || 1), 0);
+    const totalPrice = parsedItems.reduce((acc, it) => acc + it.total, 0);
 
     return res.json({
       success: true,
       items: parsedItems,
       count: totalCount,
       total: Number(totalPrice.toFixed(2)),
+      userId,
+      balance: user.balance,
     });
   } catch (error: any) {
     console.error('Error fetching cart:', error);
@@ -67,7 +81,7 @@ router.get('/', authenticateToken, async (req: any, res) => {
 });
 
 // POST /api/cart - Add item to cart
-router.post('/', authenticateToken, async (req: any, res) => {
+router.post('/', authenticateCart, async (req: any, res) => {
   try {
     const userId = req.user.id;
     const {
@@ -148,7 +162,7 @@ router.post('/', authenticateToken, async (req: any, res) => {
 });
 
 // PUT /api/cart/:id - Update cart item quantity or details
-router.put('/:id', authenticateToken, async (req: any, res) => {
+router.put('/:id', authenticateCart, async (req: any, res) => {
   try {
     const userId = req.user.id;
     const { id } = req.params;
@@ -200,7 +214,7 @@ router.put('/:id', authenticateToken, async (req: any, res) => {
 });
 
 // DELETE /api/cart/:id - Remove item from cart
-router.delete('/:id', authenticateToken, async (req: any, res) => {
+router.delete('/:id', authenticateCart, async (req: any, res) => {
   try {
     const userId = req.user.id;
     const { id } = req.params;
@@ -221,7 +235,7 @@ router.delete('/:id', authenticateToken, async (req: any, res) => {
 });
 
 // DELETE /api/cart - Clear entire cart
-router.delete('/', authenticateToken, async (req: any, res) => {
+router.delete('/', authenticateCart, async (req: any, res) => {
   try {
     const userId = req.user.id;
     await prisma.cartItem.deleteMany({ where: { userId } });
@@ -233,7 +247,7 @@ router.delete('/', authenticateToken, async (req: any, res) => {
 });
 
 // POST /api/cart/sync - Sync guest cart items into user's DB cart on login
-router.post('/sync', authenticateToken, async (req: any, res) => {
+router.post('/sync', authenticateCart, async (req: any, res) => {
   try {
     const userId = req.user.id;
     const { items = [] } = req.body;
@@ -321,10 +335,13 @@ router.post('/sync', authenticateToken, async (req: any, res) => {
 });
 
 // POST /api/cart/checkout - Execute batch order from cart using wallet balance
-router.post('/checkout', authenticateToken, async (req: any, res) => {
+router.post('/checkout', authenticateCart, async (req: any, res) => {
+  let quotedBalance: number | undefined;
+  let requiredTotal: number | undefined;
   try {
     const userId = req.user.id;
-    const { itemIds } = req.body;
+    const { itemIds, expectedTotal } = req.body;
+    if (expectedTotal !== undefined && (typeof expectedTotal !== 'number' || !Number.isFinite(expectedTotal) || expectedTotal < 0)) return res.status(400).json({ success: false, error: 'إجمالي السلة غير صالح' });
 
     const whereClause: any = { userId };
     if (Array.isArray(itemIds) && itemIds.length > 0) {
@@ -332,6 +349,8 @@ router.post('/checkout', authenticateToken, async (req: any, res) => {
     }
 
     const createdOrderIds: string[] = [];
+    const createdOrders: any[] = [];
+    let customer: any;
     let itemsCount = 0;
     await prisma.$transaction(async (tx) => {
       const storedItems = await tx.cartItem.findMany({ where: whereClause, take: 101 });
@@ -341,6 +360,10 @@ router.post('/checkout', authenticateToken, async (req: any, res) => {
       const serviceMap = new Map(services.map(service => [service.id, service]));
       const cartItems = storedItems.map(item => quoteCartItem(item, serviceMap.get(item.serviceId), user));
       const roundedTotal = Number(cartItems.reduce((sum, item) => sum + item.total, 0).toFixed(2));
+      quotedBalance = user!.balance;
+      customer = user;
+      requiredTotal = roundedTotal;
+      if (expectedTotal !== undefined && Math.abs(expectedTotal - roundedTotal) > 0.000001) throw new Error('CART_PRICE_CHANGED');
       itemsCount = cartItems.length;
       // 1. Deduct balance
       const updateResult = await tx.user.updateMany({
@@ -378,6 +401,7 @@ router.post('/checkout', authenticateToken, async (req: any, res) => {
         });
 
         createdOrderIds.push(newOrder.id);
+        createdOrders.push(newOrder);
       }
 
       // 3. Record transaction
@@ -403,6 +427,18 @@ router.post('/checkout', authenticateToken, async (req: any, res) => {
       select: { balance: true },
     });
 
+    // The payment is committed before contacting Telegram. A delivery failure
+    // must never make the customer repeat an already paid purchase.
+    const delivery = sendCartOrderNotifications(createdOrders, { ...customer, balance: updatedUser?.balance }).catch((notificationError: any) => {
+      console.error('[Cart Order Notification Error]:', notificationError?.message);
+    });
+    let notificationTimeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      // A slow Telegram connection must not time out a paid checkout. Delivery
+      // continues in this server process after the response when necessary.
+      await Promise.race([delivery, new Promise<void>(resolve => { notificationTimeout = setTimeout(resolve, 3000); })]);
+    } finally { clearTimeout(notificationTimeout); }
+
     return res.json({
       success: true,
       message: 'تم إتمام الشراء بنجاح وخصم التكلفة من المحفظة!',
@@ -421,8 +457,9 @@ router.post('/checkout', authenticateToken, async (req: any, res) => {
     };
     if (cartErrors[error.message]) return res.status(400).json({ success: false, error: cartErrors[error.message] });
     if (error.message === 'INSUFFICIENT_BALANCE') {
-      return res.status(400).json({ success: false, error: 'رصيد المحفظة غير كافٍ لإتمام العملية' });
+      return res.status(400).json({ success: false, code: 'INSUFFICIENT_BALANCE', error: `رصيد المحفظة غير كافٍ: الحالي $${(quotedBalance ?? 0).toFixed(2)}، والمطلوب $${(requiredTotal ?? 0).toFixed(2)}.`, balance: quotedBalance, requiredTotal });
     }
+    if (error.message === 'CART_PRICE_CHANGED') return res.status(409).json({ success: false, code: 'CART_PRICE_CHANGED', error: 'تغير سعر السلة. راجع الإجمالي المحدث قبل تأكيد الشراء.', balance: quotedBalance, requiredTotal });
     return res.status(500).json({ success: false, error: 'حدث خطأ أثناء تنفيذ عملية الشراء' });
   }
 });

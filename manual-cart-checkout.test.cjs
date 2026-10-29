@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 process.env.DATABASE_URL = 'postgresql://test:test@127.0.0.1:1/unused';
 process.env.JWT_SECRET = 'manual-cart-isolated-test-secret-12345678';
 const { prisma } = require('./dist/utils/prisma');
+const notifications = require('./dist/utils/cart-order-notifications');
 const { quoteCartItem, default: router } = require('./dist/routes/cart');
 after(() => prisma.$disconnect());
 const user = { id:'test-user', status:'active', balance:20, customDiscount:0, membershipTier:null };
@@ -24,8 +25,26 @@ test('provider quantity limits remain enforced for provider-linked services', ()
 });
 const handler = route => router.stack.find(layer => layer.route?.path === route && layer.route.methods.post).route.stack.at(-1).handle;
 const response = () => ({statusCode:200,status(n){this.statusCode=n;return this;},json(body){this.body=body;return this;}});
+
+test('cart identity must match the displayed account even if another valid account cookie is present',async()=>{
+ const jwt=require('jsonwebtoken');
+ const original=prisma.user.findUnique;
+ const authenticate=router.stack.find(layer=>layer.route?.path==='/'&&layer.route.methods.get).route.stack[0].handle;
+ let nextCalls=0;
+ try{
+  prisma.user.findUnique=async({where})=>({...user,id:where.id,tokenVersion:1});
+  const token=jwt.sign({id:'other-account',tokenVersion:1},process.env.JWT_SECRET);
+  const res=response();
+  await authenticate({headers:{cookie:'admin_token='+token,'x-cart-user-id':user.id},originalUrl:'/api/cart',query:{}},res,()=>nextCalls++);
+  assert.equal(res.statusCode,401);assert.equal(nextCalls,0);
+  const ownToken=jwt.sign({id:user.id,tokenVersion:1},process.env.JWT_SECRET);
+  await authenticate({headers:{cookie:'user_token='+ownToken,'x-cart-user-id':user.id},originalUrl:'/api/cart',query:{}},response(),()=>nextCalls++);
+  assert.equal(nextCalls,1);
+ }finally{prisma.user.findUnique=original;}
+});
 test('cart checkout creates pending manual orders, deducts once, stores target data and clears only purchased items', async () => {
- const originalTransaction = prisma.$transaction, originalUser = prisma.user.findUnique;
+ const originalTransaction = prisma.$transaction, originalUser = prisma.user.findUnique, originalNotify = notifications.sendCartOrderNotifications;
+ const alerts=[];let committed=false;
  const items = [
   {id:'cart-1',serviceId:manual.id,quantity:1,price:0.01,targetInput:'8960415213',customFields:'{"player_id":"8960415213"}'},
   {id:'cart-2',serviceId:manual.id,quantity:2,price:0.01,targetInput:'8969414214',customFields:'{"player_id":"8969414214"}'},
@@ -39,7 +58,8 @@ test('cart checkout creates pending manual orders, deducts once, stores target d
   transaction:{create:async({data})=>{transactions.push(data);}},
  };
  try {
-  prisma.$transaction = async(fn,options)=>{assert.equal(options.isolationLevel,'Serializable');return fn(tx);};
+  prisma.$transaction = async(fn,options)=>{assert.equal(options.isolationLevel,'Serializable');const result=await fn(tx);committed=true;return result;};
+  notifications.sendCartOrderNotifications = async(orders,customer)=>{assert.equal(committed,true);alerts.push(...orders);assert.equal(customer.balance,17);throw Error('synthetic Telegram outage');};
   prisma.user.findUnique = async()=>({balance});
   const res=response(); await handler('/checkout')({user:{id:user.id},body:{}},res);
   assert.equal(res.statusCode,200); assert.equal(res.body.success,true); assert.equal(balance,17);
@@ -47,6 +67,7 @@ test('cart checkout creates pending manual orders, deducts once, stores target d
   assert.equal(JSON.parse(orders[0].notes).customFields.player_id,'8960415213');
   assert.equal(transactions.length,1); assert.equal(transactions[0].amount,3);
   assert.deepEqual(removed,['cart-1','cart-2']); assert.equal(res.body.orderIds.length,2);
+  assert.equal(alerts.length,2,'Every committed order triggers an alert even when Telegram fails');
   // Unpriced imported packages must fail before any debit/order/removal.
   const oldMargin=manual.margin; manual.margin=0;
   const rejected=response(); await handler('/checkout')({user:{id:user.id},body:{}},rejected); manual.margin=oldMargin;
@@ -55,5 +76,6 @@ test('cart checkout creates pending manual orders, deducts once, stores target d
   tx.user.findUnique=async()=>({...user,balance:0});balance=0;
   const insufficient=response();await handler('/checkout')({user:{id:user.id},body:{}},insufficient);
   assert.equal(insufficient.statusCode,400);assert.match(insufficient.body.error,/غير كاف/);assert.equal(orders.length,2);
- } finally {prisma.$transaction=originalTransaction;prisma.user.findUnique=originalUser;}
+  assert.equal(alerts.length,2,'Rejected checkouts never send order notifications');
+ } finally {prisma.$transaction=originalTransaction;prisma.user.findUnique=originalUser;notifications.sendCartOrderNotifications=originalNotify;}
 });

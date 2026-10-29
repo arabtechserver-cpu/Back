@@ -15,6 +15,10 @@ test('real Prisma/PostgreSQL cart repairs missing storage and purchases two manu
  process.env.JWT_SECRET='cart-isolated-postgres-integration-secret-123456';
  const {prisma}=require('./dist/utils/prisma');
  const {ensureCartSchema}=require('./dist/utils/cart-schema');
+ const notifications=require('./dist/utils/cart-order-notifications');
+ const originalNotify=notifications.sendCartOrderNotifications;
+ const alerts=[];
+ notifications.sendCartOrderNotifications=async orders=>{for(const order of orders){assert.ok(await db.order.findUnique({where:{id:order.id}}),'Notify only committed orders');alerts.push(order.id);}};
  const originals={};
  try{
   // Prisma initializes the isolated schema; no existing schema is modified.
@@ -35,7 +39,7 @@ test('real Prisma/PostgreSQL cart repairs missing storage and purchases two manu
   const router=require('./dist/routes/cart').default;
   const call=async(method,route,body={})=>{
    const handler=router.stack.find(l=>l.route?.path===route&&l.route.methods[method]).route.stack.at(-1).handle;
-   const response={statusCode:200,status(n){this.statusCode=n;return this;},json(data){this.body=data;return this;}};
+   const response={statusCode:200,setHeader(){},status(n){this.statusCode=n;return this;},json(data){this.body=data;return this;}};
    await handler({user,body,params:{}},response);return response;
   };
   assert.equal((await call('get','/')).body.items.length,0);
@@ -50,7 +54,22 @@ test('real Prisma/PostgreSQL cart repairs missing storage and purchases two manu
   const orders=await db.order.findMany({orderBy:{targetInput:'asc'}});
   assert.deepEqual(orders.map(o=>[o.targetInput,o.quantity,o.price,o.status]),[['123456789',1,1,'pending'],['987654321',2,2,'pending']]);
   assert.equal(JSON.parse(orders[0].notes).customFields.player_id,'123456789');
+  assert.equal(alerts.length,2);
+  // Reproduce the reported $2 wallet / $1 package case against real PostgreSQL.
+  await db.user.update({where:{id:user.id},data:{balance:2}});
+  await call('post','/',{serviceId:service.id,serviceName:service.name,quantity:1,targetInput:'222855265'});
+  const fresh=await call('get','/');assert.equal(fresh.body.balance,2);assert.equal(fresh.body.total,1);
+  const paid=await call('post','/checkout',{itemIds:fresh.body.items.map(i=>i.id),expectedTotal:1});
+  assert.equal(paid.statusCode,200);assert.equal(paid.body.newBalance,1);assert.equal(alerts.length,3);
+  await call('post','/',{serviceId:service.id,serviceName:service.name,quantity:1,targetInput:'222855265'});
+  await db.dhruService.update({where:{id:service.id},data:{margin:3}});
+  const changed=await call('get','/');assert.equal(changed.body.total,3);assert.equal(changed.body.balance,1);
+  const stale=await call('post','/checkout',{expectedTotal:1});assert.equal(stale.statusCode,409);assert.equal(stale.body.code,'CART_PRICE_CHANGED');
+  const insufficient=await call('post','/checkout',{expectedTotal:3});assert.equal(insufficient.statusCode,400);assert.equal(insufficient.body.balance,1);assert.equal(insufficient.body.requiredTotal,3);
+  assert.equal(await db.order.count(),3);assert.equal(await db.transaction.count(),2);assert.equal(await db.cartItem.count(),1);assert.equal(alerts.length,3);
+  assert.equal((await db.user.findUnique({where:{id:user.id}})).balance,1,'Rejected quotes never debit the wallet');
  }finally{
+  notifications.sendCartOrderNotifications=originalNotify;
   for(const [key,original]of Object.entries(originals)){if(key==='$transaction')prisma.$transaction=original;else{const [model,method]=key.split('.');prisma[model][method]=original;}}
   await db.$executeRawUnsafe('DROP SCHEMA "'+schema+'" CASCADE');
   await db.$disconnect();await prisma.$disconnect();

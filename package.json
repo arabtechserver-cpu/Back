@@ -13,6 +13,7 @@
     "db:push": "npx prisma db push --skip-generate",
     "catalog:refresh": "node scripts/refresh-zoalna-catalog.cjs",
     "test:manual-catalog": "node --test manual-catalog.test.cjs manual-cart-checkout.test.cjs cart-schema.test.cjs",
+    "test:checkout": "node --test manual-cart-checkout.test.cjs cart-telegram-delivery.test.cjs google-auth-config.test.cjs cart-postgres-integration.test.cjs",
     "ip:status": "tsx src/scripts/resetIpRestriction.ts --status",
     "ip:disable": "tsx src/scripts/resetIpRestriction.ts --disable",
     "ip:enable": "tsx src/scripts/resetIpRestriction.ts --enable",

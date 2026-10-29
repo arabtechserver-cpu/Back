@@ -7,6 +7,7 @@ import { sendTelegramAlert, sendTelegramAdminOtp, sendTelegramAdminLoginSuccess,
 import { registrationLimiter, loginLimiter, otpSendLimiter } from '../middleware/abuseLimits';
 import { validPlainText, validEmail, validPassword } from '../utils/account-input';
 import { createAdminOtpChallenge, verifyAdminOtp, resendAdminOtp } from '../utils/adminOtp';
+import { googleAuthConfig } from '../utils/google-auth-config';
 
 import bcrypt from 'bcryptjs';
 
@@ -516,9 +517,17 @@ router.post('/admin/resend-otp', otpSendLimiter, handleAdminOtpResend);
 router.post('/resend-admin-otp', otpSendLimiter, handleAdminOtpResend);
 
 
+// Only a public client ID is exposed, never client secrets or provider tokens.
+router.get('/google/config', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  return res.json(googleAuthConfig());
+});
+
 // POST /api/auth/google - Google Sign-In & One-Tap Authentication
 router.post('/google', loginLimiter, async (req, res) => {
   try {
+    const { clientId: expectedClientId, enabled } = googleAuthConfig();
+    if (!enabled || !expectedClientId) return res.status(503).json({ success: false, error: 'الدخول بجوجل غير متاح حاليًا. استخدم البريد وكلمة المرور أو استعادة كلمة المرور.' });
     const { credential } = req.body;
     if (typeof credential !== 'string' || credential.length > 10000 || !credential) {
       return res.status(400).json({ success: false, error: 'Google credential token is required' });
@@ -534,10 +543,6 @@ router.post('/google', loginLimiter, async (req, res) => {
     const { email, name, sub: googleId, picture } = payload;
 
     // Validate audience to prevent token reuse across applications
-    const expectedClientId = process.env.GOOGLE_CLIENT_ID;
-    if (!expectedClientId) {
-      return res.status(500).json({ success: false, error: 'Google authentication service is not configured' });
-    }
     if (payload.aud !== expectedClientId) {
       return res.status(401).json({ success: false, error: 'Invalid token: audience mismatch' });
     }

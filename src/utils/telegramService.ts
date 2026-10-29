@@ -703,7 +703,7 @@ export async function sendTelegramMessage(chatId: string, text: string, replyMar
       text: sanitizedText,
       parse_mode: 'HTML',
       reply_markup: replyMarkup
-    });
+    }, { timeout: 10000 });
     console.log(`[Telegram Service] Message sent to Chat ID: ${chatId}`);
     return res.data;
   } catch (error: any) {
@@ -714,7 +714,7 @@ export async function sendTelegramMessage(chatId: string, text: string, replyMar
         chat_id: chatId,
         text: stripHtml(text),
         reply_markup: replyMarkup
-      });
+      }, { timeout: 10000 });
       return res2.data;
     } catch (err2: any) {
       console.error(`[Telegram Plain Text Fallback Error for ${chatId}]:`, err2?.response?.data?.description || err2?.message);
@@ -775,6 +775,7 @@ export async function sendTelegramPhotoNotification({
       ? sanitizeTelegramHtml(sanitizedCaption.slice(0, 1000)) + '...'
       : sanitizedCaption;
 
+    let deliveredCount = 0;
     for (const chatId of targetChatIds) {
       let delivered = false;
 
@@ -848,15 +849,19 @@ export async function sendTelegramPhotoNotification({
 
       // 3. Fallback to sendMessage (text-only) if photo wasn't delivered or no image attached
       if (!delivered) {
-        await sendTelegramMessage(
+        const result = await sendTelegramMessage(
           chatId,
           caption + (imageInfo ? '\n\n<i>(مرفق مع الطلب صورة إيصال التحويل)</i>' : ''),
           replyMarkup
         );
+        delivered = result?.ok === true;
       }
+      if (delivered) deliveredCount++;
     }
+    return deliveredCount > 0;
   } catch (error: any) {
     console.error('[Telegram Photo Delivery Error]:', error?.message);
+    return false;
   }
 }
 
